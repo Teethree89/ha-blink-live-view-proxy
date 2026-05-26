@@ -1,0 +1,11 @@
+{
+  "domain": "blink_liveview_proxy",
+  "name": "Blink Liveview Proxy",
+  "after_dependencies": ["blink", "camera", "stream"],
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://github.com/ivanpopov/blink-liveview-proxy",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "version": "0.1.0"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Blink Liveview Proxy",
+  "render_readme": true,
+  "domains": ["camera", "binary_sensor"],
+  "iot_class": "local_polling",
+  "homeassistant": "2024.6.0"
+}
