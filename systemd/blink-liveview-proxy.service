@@ -1,0 +1,16 @@
+[Unit]
+Description=Blink Live View Proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/blink-liveview-proxy
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/blink-liveview-proxy/blink-liveview-proxy.env
+ExecStart=/opt/blink-liveview-proxy/.venv/bin/python /opt/blink-liveview-proxy/blink_liveview_proxy.py --config /etc/blink-liveview-proxy/config.json serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

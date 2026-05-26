@@ -1,0 +1,8 @@
+# Blink live-view proxy package.
+#
+# Requires the Blink Liveview Proxy service to be running on the Home Assistant
+# host at 127.0.0.1:8088. Live camera entities are provided by the
+# blink_liveview_proxy custom integration. This package only enables HA stream
+# support; the integration provides its own proxy health binary sensor.
+
+stream:
