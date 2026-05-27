@@ -1,0 +1,38 @@
+name: "Blink Liveview Proxy"
+description: >-
+  Local MPEG-TS live-view proxy and clip archive for Blink cameras.
+  Install the matching integration via HACS (or from custom_components/ in this repo).
+version: "0.1.0"
+slug: "blink_liveview_proxy"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+startup: services
+boot: auto
+options:
+  blink_username: ""
+  blink_password: ""
+  blink_2fa_code: ""
+  port: 8088
+  cameras: []
+schema:
+  blink_username: str
+  blink_password: str
+  blink_2fa_code: str
+  port: int
+  cameras:
+    - slug: str
+      entity_id: str
+      name: str?
+      id: int?
+      serial: str?
+ports:
+  8088/tcp: null
+ports_description:
+  8088/tcp: "Blink Liveview Proxy HTTP API"
+map:
+  - data:rw
+url: "https://github.com/Teethree89/ha-blink-live-view-proxy"
