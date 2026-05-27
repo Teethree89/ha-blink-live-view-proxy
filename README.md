@@ -66,9 +66,11 @@ directly from the add-on store. No separate Linux host or Python setup required.
 1. In HA go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add
    this repo URL.
 2. Install **Blink Liveview Proxy** from the add-on store.
-3. Open the add-on **Configuration** tab, fill in your Blink credentials, 2FA
-   code, and camera list, then start the add-on.
-4. Install the HA integration (via HACS or manually — see below) and point it at
+3. Open the add-on **Configuration** tab, fill in `blink_username`, `blink_password`,
+   and your camera list. Leave `blink_2fa_code` empty for now and start the add-on.
+4. The add-on sends your credentials to Blink, which texts/emails you a PIN. Check the
+   add-on log for instructions, then paste the PIN into `blink_2fa_code` and restart.
+5. Install the HA integration (via HACS or manually — see below) and point it at
    `http://homeassistant.local:8088`.
 
 See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.

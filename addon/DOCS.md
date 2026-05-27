@@ -47,13 +47,26 @@ cameras:
     name: Back Door
 ```
 
-## First-Time Login
+## First-Time Login (Two-Start Flow)
 
-On first start with `blink_2fa_code` set, the add-on authenticates with Blink and saves an auth
-token to persistent storage (`/data/blink-auth.json`). The log will confirm success.
+Blink sends a 2FA PIN to your phone or email **in response to your credentials** — you
+cannot know the PIN before starting the add-on for the first time. The flow is:
 
-After that, clear `blink_2fa_code` from options — the saved token is reused automatically.
-If the token ever expires, set a fresh 2FA code and restart the add-on.
+1. **First start** — set `blink_username` and `blink_password`, leave `blink_2fa_code` empty.
+   The add-on sends your credentials to Blink, Blink texts/emails you a PIN, and the
+   add-on logs instructions then exits cleanly.
+
+2. **Check your phone/email** for the Blink 2FA PIN. It expires in a few minutes.
+
+3. **Update options** — paste the PIN into `blink_2fa_code`, save.
+
+4. **Restart the add-on** — it submits the PIN, completes authentication, and saves the
+   auth token to `/data/blink-auth.json`.
+
+From then on, the saved token is reused automatically. You can clear `blink_2fa_code`
+from options — it is no longer needed unless the token expires.
+
+If the token ever expires, repeat from step 1.
 
 ## Connecting the HA Integration
 

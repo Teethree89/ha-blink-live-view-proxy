@@ -13,15 +13,28 @@ export BLINK_USERNAME BLINK_PASSWORD
 
 if [ ! -f "$AUTH_FILE" ]; then
     if bashio::config.is_empty 'blink_2fa_code'; then
-        bashio::log.warning "No Blink auth file found and blink_2fa_code is not set."
-        bashio::log.warning "Set blink_2fa_code in add-on options and restart to authenticate."
+        # No pin yet — initiate login so Blink sends the 2FA SMS/email,
+        # then exit cleanly and tell the user what to do next.
+        bashio::log.info "No auth file found. Sending credentials to Blink to trigger 2FA..."
+        "$PYTHON" /opt/proxy/blink_liveview_proxy.py \
+            --config "$CONFIG_FILE" list 2>/dev/null || true
+        bashio::log.warning "---------------------------------------------------------------"
+        bashio::log.warning "Blink sent a 2FA PIN to your registered phone or email."
+        bashio::log.warning "1. Copy the PIN from your phone/email."
+        bashio::log.warning "2. Open the add-on Configuration tab."
+        bashio::log.warning "3. Paste the PIN into blink_2fa_code and save."
+        bashio::log.warning "4. Restart the add-on."
+        bashio::log.warning "The PIN expires in a few minutes — restart promptly."
+        bashio::log.warning "---------------------------------------------------------------"
+        exit 0
     else
-        bashio::log.info "No auth file — running first-time Blink login..."
+        bashio::log.info "No auth file — completing Blink 2FA login..."
         PIN="$(bashio::config 'blink_2fa_code')"
         export BLINK_2FA_CODE="$PIN"
         if "$PYTHON" /opt/proxy/blink_liveview_proxy.py \
             --config "$CONFIG_FILE" --pin "$PIN" list; then
-            bashio::log.info "Authentication succeeded. You may clear blink_2fa_code from options."
+            bashio::log.info "Authentication succeeded."
+            bashio::log.info "You may clear blink_2fa_code from the add-on options."
         else
             bashio::log.fatal "Authentication failed. Check blink_username, blink_password, and blink_2fa_code."
         fi
