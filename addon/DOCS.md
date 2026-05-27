@@ -11,7 +11,9 @@ Runs the Blink Liveview Proxy as a Home Assistant add-on. No separate Linux host
 
 1. Add this repository as a custom add-on repository:
    `Settings → Add-ons → Add-on Store → ⋮ → Repositories`
-   Paste the URL of this GitHub repository.
+   ```
+   https://github.com/Teethree89/ha-blink-live-view-proxy
+   ```
 
 2. Install **Blink Liveview Proxy** from the add-on store and open its **Configuration** tab.
 
