@@ -13,6 +13,10 @@ read Blink's IMMI framing, and expose browser/HA-friendly endpoints on your LAN.
 It is an interoperability project for cameras you own. It is not affiliated
 with, endorsed by, or supported by Amazon or Blink.
 
+If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball/5). Add `Buy me a coffee` in the PayPal note so I know what it was for.
+
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-$5%20PayPal-00457C?logo=paypal)](https://paypal.me/ABPaintball/5)
+
 ## What Works
 
 - Live view through a direct MSE player.
