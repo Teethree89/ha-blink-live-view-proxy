@@ -63,8 +63,10 @@ docs/                                    Setup, configuration, and notes
 If you run Home Assistant OS or Supervised, install the proxy as an add-on
 directly from the add-on store. No separate Linux host or Python setup required.
 
-1. In HA go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add
-   this repo URL.
+1. In HA go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
+   ```
+   https://github.com/Teethree89/ha-blink-live-view-proxy
+   ```
 2. Install **Blink Liveview Proxy** from the add-on store.
 3. Open the add-on **Configuration** tab, fill in `blink_username`, `blink_password`,
    and your camera list. Leave `blink_2fa_code` empty for now and start the add-on.
