@@ -1,5 +1,14 @@
 # Development
 
+## Add-on Proxy Sync
+
+The `addon/proxy/` directory is a copy of `proxy/` bundled for the Docker build
+context. If you change proxy source files, mirror the changes in both places:
+
+```bash
+rsync -av --delete proxy/ addon/proxy/
+```
+
 ## Validate
 
 From this folder:

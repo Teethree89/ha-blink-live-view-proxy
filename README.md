@@ -44,53 +44,43 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 ## Project Layout
 
 ```text
+addon/                                   Home Assistant add-on (HAOS one-click install)
+addon/proxy/                             Proxy source bundled for the add-on container
 custom_components/blink_liveview_proxy/  Home Assistant custom integration
 proxy/blink_liveview_proxy.py            Compatibility CLI entrypoint
 proxy/blink_proxy/                       Modular proxy implementation
 proxy/config.example.json                Generic proxy config template
-systemd/blink-liveview-proxy.service     Example Linux service
+systemd/blink-liveview-proxy.service     Example Linux service unit
+scripts/install-proxy.sh                 Linux install helper
 examples/                                HA package and Lovelace snippets
 docs/                                    Setup, configuration, and notes
 ```
 
-## Deployability Status
+## Install Options
 
-This folder is intended to be publishable as a standalone repo.
+### Option A — Home Assistant Add-on (HAOS / easiest)
 
-The package includes:
+If you run Home Assistant OS or Supervised, install the proxy as an add-on
+directly from the add-on store. No separate Linux host or Python setup required.
 
-- a Home Assistant custom integration under `custom_components/`;
-- bundled frontend assets for the dashboard dialog/player;
-- the standalone Python proxy under `proxy/`;
-- a systemd unit template;
-- example HA package and Lovelace snippets;
-- install, configuration, endpoint, development, and limitation docs.
+1. In HA go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add
+   this repo URL.
+2. Install **Blink Liveview Proxy** from the add-on store.
+3. Open the add-on **Configuration** tab, fill in your Blink credentials, 2FA
+   code, and camera list, then start the add-on.
+4. Install the HA integration (via HACS or manually — see below) and point it at
+   `http://homeassistant.local:8088`.
 
-Two deployment pieces are still intentionally separate:
+See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 
-- Home Assistant installs the custom integration.
-- A local Linux service runs the Blink proxy and owns Blink authentication.
-
-That split is deliberate. The HA integration should not store Blink account
-credentials or run the IMMI socket reader inside Home Assistant.
-
-## Prerequisites
-
-- Home Assistant with the official Blink integration already configured.
-- A host that can run Python 3.11+ and `ffmpeg`.
-- BlinkPy dependency from `proxy/requirements.txt`.
-- HTTPS or a trusted browser origin for microphone access.
-
-The recommended HA setup runs the proxy on the Home Assistant host and listens
-only on `127.0.0.1:8088`; HA reaches it locally.
-
-## Quick Install Shape
+### Option B — Linux Service (Container / Supervised / bare-metal)
 
 1. Copy `custom_components/blink_liveview_proxy` into Home Assistant's
    `custom_components/`.
-2. Install and start the proxy service from `proxy/` and `systemd/`.
+2. Install and start the proxy service from `proxy/` and `systemd/`
+   (or run `sudo scripts/install-proxy.sh` from this repo).
 3. Restart Home Assistant.
-4. Add `Blink Liveview Proxy` from Settings > Devices & services.
+4. Add `Blink Liveview Proxy` from `Settings → Devices & services`.
 5. Use `http://127.0.0.1:8088` as the proxy URL when the proxy runs on the HA
    host.
 6. Add the Lovelace helper resource:
@@ -99,25 +89,20 @@ only on `127.0.0.1:8088`; HA reaches it locally.
 /api/blink_liveview_proxy/static/blink-liveview-dialog.js
 ```
 
-Detailed setup lives in the
-[install guide](https://github.com/Teethree89/ha-blink-live-view-proxy/blob/main/docs/INSTALL.md).
+Full step-by-step in the [install guide](docs/INSTALL.md).
 
 ## HACS Custom Repository
 
-The Home Assistant integration half is ready to install through HACS as a custom
-repository:
+Install the Home Assistant integration half through HACS:
 
-1. In HACS, open the three-dot menu.
-2. Choose Custom repositories.
-3. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`.
-4. Select category `Integration`.
-5. Download it, restart Home Assistant, then add `Blink Liveview Proxy` from
-   Settings > Devices & services.
+1. In HACS open the three-dot menu → **Custom repositories**.
+2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
+3. Download it, restart Home Assistant, then add `Blink Liveview Proxy` from
+   `Settings → Devices & services`.
 
-HACS only installs files under `custom_components/blink_liveview_proxy`. The
-separate local proxy service still needs to be installed from `proxy/` and
-`systemd/`; see the
-[install guide](https://github.com/Teethree89/ha-blink-live-view-proxy/blob/main/docs/INSTALL.md).
+HACS installs only `custom_components/blink_liveview_proxy`. You still need
+either the add-on (Option A) or the Linux proxy service (Option B) running
+alongside it.
 
 Default HACS listing can wait until the project has wider testing, a release,
 brand assets, and passing validation history.
@@ -125,7 +110,7 @@ brand assets, and passing validation history.
 ## Proxy API Layout
 
 The local proxy routes are documented in the
-[proxy API guide](https://github.com/Teethree89/ha-blink-live-view-proxy/blob/main/docs/API.md).
+[proxy API guide](docs/API.md).
 Route handlers live in `proxy/blink_proxy/routes.py`; Blink IMMI and live-view
 behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 `proxy/blink_proxy/ptt.py`.
