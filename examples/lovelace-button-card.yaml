@@ -1,0 +1,76 @@
+type: custom:button-card
+entity: camera.front_door
+name: Front Door
+show_state: false
+show_label: false
+show_icon: false
+styles:
+  card:
+    - height: 180px
+    - padding: 0
+    - overflow: hidden
+    - background-size: cover
+    - background-position: center
+    - background-image: >
+        [[[
+          const token = states['camera.front_door']?.attributes?.access_token || '';
+          return `url("/api/camera_proxy/camera.front_door?token=${token}")`;
+        ]]]
+  custom_fields:
+    clips:
+      - position: absolute
+      - left: 12px
+      - bottom: 12px
+    snapshot:
+      - position: absolute
+      - right: 58px
+      - bottom: 12px
+    motion:
+      - position: absolute
+      - right: 12px
+      - bottom: 12px
+tap_action:
+  action: fire-dom-event
+  blink_liveview_proxy:
+    slug: front_door
+    entity_id: camera.blink_live_front_door
+    title: Blink Live Front Door
+custom_fields:
+  clips:
+    card:
+      type: custom:button-card
+      icon: mdi:filmstrip
+      name: Front Door
+      tap_action:
+        action: fire-dom-event
+        blink_liveview_proxy_clips:
+          slug: front_door
+          entity_id: camera.blink_live_front_door
+          title: Front Door Clips
+  snapshot:
+    card:
+      type: custom:button-card
+      icon: mdi:image-refresh
+      show_name: false
+      tap_action:
+        action: fire-dom-event
+        blink_snapshot_refresh:
+          slug: front_door
+          entity_id: camera.blink_live_front_door
+          source_entity_id: camera.front_door
+  motion:
+    card:
+      type: custom:button-card
+      entity: switch.front_door_camera_motion_detection
+      icon: >
+        [[[
+          return states['switch.front_door_camera_motion_detection']?.state === 'on'
+            ? 'mdi:motion-sensor'
+            : 'mdi:motion-sensor-off';
+        ]]]
+      show_name: false
+      tap_action:
+        action: call-service
+        service: switch.toggle
+        target:
+          entity_id: switch.front_door_camera_motion_detection
