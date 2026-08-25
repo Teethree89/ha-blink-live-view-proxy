@@ -61,6 +61,22 @@ route/proxy to keep each live view open. Valid range: `10-300` seconds.
 
 Blink can still end sessions early.
 
+### `send_liveview_token`
+
+Stock BlinkPy sends 64 null bytes in the auth-token field of the IMMI
+handshake (see `blinkpy/livestream.py`, `get_auth_header()` — the code comment
+literally says "64 null bytes for now"). `TokenAwareBlinkLiveStream` fixes
+this by populating that field with the real `liveview_token` from the
+liveview response.
+
+Informal testing on a Blink Outdoor 4 (2K+, Sync Module 2, IMMI liveview)
+found that individual segments consistently lasted longer with the real
+token (roughly 3-8s per segment across a 100+ second run) than with the
+stock zero-byte handshake (a very consistent ~2-2.5s cutoff across repeated
+runs). This isn't a rigorous benchmark and Blink can still end sessions
+early either way, but the pattern was consistent enough that `true` is now
+the default. Set it back to `false` if you hit issues and want to compare.
+
 ## Push-to-Talk
 
 Browser microphone capture requires HTTPS or a browser-trusted origin. The
