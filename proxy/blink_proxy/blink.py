@@ -267,13 +267,34 @@ class BlinkClient:
             try:
                 started = await blink.start()
             except BlinkTwoFARequiredError:
+                # Save the auth state BEFORE we go looking for a code.
+                #
+                # blinkpy generates a fresh hardware_id in Auth.__init__:
+                #     self.hardware_id = str(uuid.uuid4()).upper()
+                # and Blink ties the 2FA code to exactly that id. Previously
+                # this exception path exited without ever reaching
+                # save_auth_callback(), so a second run drew a new id and the
+                # code the user typed belonged to a device that no longer
+                # existed. The two-start login the README describes therefore
+                # could not work, however carefully it was followed.
+                #
+                # login_attributes carries hardware_id, and Auth.startup()
+                # picks it back up on the next run.
+                save_auth_callback()
                 code = self.pin or os.getenv(self.config["twofa_env"], "")
                 if not code and sys.stdin.isatty():
                     code = input("Blink 2FA code: ").strip()
                 if not code:
+                    # In a container there is no tty, so wait in this same
+                    # OAuth session instead of exiting. Exiting would start a
+                    # brand new session on the next run, which is the bug
+                    # above.
+                    code = await _wait_for_pin()
+                if not code:
                     raise RuntimeError(
-                        "Blink requires 2FA. Set BLINK_2FA_CODE for this run "
-                        "or run interactively once so the refresh token can be cached."
+                        "Blink requires 2FA and no code arrived in time. Put it "
+                        "in the add-on option blink_2fa_code, or in one of "
+                        + ", ".join(PIN_FILES)
                     ) from None
                 started = await blink.send_2fa_code(code)
 
@@ -460,3 +481,94 @@ class BlinkStreamBroker:
             camera.camera_id,
             camera_type=camera_type,
         )
+
+
+# ---------------------------------------------------------------------------
+# Waiting for the 2FA code, instead of exiting and starting over
+#
+# Blink sends the code only after a successful credential check, and it is tied
+# to the hardware_id of the session that asked for it. Exiting here and asking
+# the user to restart therefore cannot work: the restart opens a new session
+# with a new id.
+#
+# So the process stays in the open session and waits. Two sources, in order:
+#
+#   1. The add-on option blink_2fa_code, read from the Supervisor API. Reading
+#      /data/options.json does not work - the Supervisor writes that file only
+#      at start, so a value typed while we wait would never be seen.
+#   2. A file, for anyone not running this as a Home Assistant add-on.
+#
+# Requires `hassio_api: true` in config.yaml for (1) and `share:rw` for (2).
+
+PIN_FILES = (
+    "/share/blink_2fa_pin.txt",
+    "/data/blink_2fa_pin.txt",
+)
+PIN_WAIT_SECONDS = 900      # 15 minutes; the code itself expires sooner
+PIN_POLL_SECONDS = 5
+
+
+async def _pin_from_supervisor() -> str:
+    """Read blink_2fa_code from the add-on's current options.
+
+    A failure here is not an error - it just means we fall back to the file.
+    """
+    token = os.getenv("SUPERVISOR_TOKEN", "")
+    if not token:
+        return ""
+    try:
+        import aiohttp
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                "http://supervisor/addons/self/info",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as response:
+                if response.status != 200:
+                    return ""
+                data = await response.json()
+        return str(
+            (data.get("data") or {}).get("options", {}).get("blink_2fa_code") or ""
+        ).strip()
+    except Exception as error:          # never break the wait loop
+        LOGGER.debug("Supervisor lookup failed: %s", error)
+        return ""
+
+
+async def _wait_for_pin() -> str:
+    """Block until a 2FA code appears, or the wait runs out."""
+    LOGGER.warning("=" * 63)
+    LOGGER.warning("Blink sent a 2FA code.")
+    LOGGER.warning("Do NOT restart this add-on - it is waiting for the code.")
+    LOGGER.warning("Put it in the add-on option blink_2fa_code and save,")
+    LOGGER.warning("or write it to one of:")
+    for path in PIN_FILES:
+        LOGGER.warning("    %s", path)
+    LOGGER.warning("Waiting up to %d minutes.", PIN_WAIT_SECONDS // 60)
+    LOGGER.warning("=" * 63)
+
+    waited = 0
+    while waited < PIN_WAIT_SECONDS:
+        value = await _pin_from_supervisor()
+        if value:
+            LOGGER.info("Read 2FA code from the add-on options.")
+            return value
+        for path in PIN_FILES:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    value = handle.read().strip()
+            except OSError:
+                continue
+            if value:
+                LOGGER.info("Read 2FA code from %s.", path)
+                with contextlib.suppress(OSError):
+                    os.remove(path)          # do not leave it lying around
+                return value
+        await asyncio.sleep(PIN_POLL_SECONDS)
+        waited += PIN_POLL_SECONDS
+        if waited % 60 == 0:
+            LOGGER.info("still waiting for the 2FA code (%d s)", waited)
+
+    LOGGER.error("No 2FA code arrived within %d s.", PIN_WAIT_SECONDS)
+    return ""
