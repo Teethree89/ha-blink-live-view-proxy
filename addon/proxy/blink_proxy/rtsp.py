@@ -8,9 +8,27 @@ ten-camera account:
     garten_hinterm_haus    xt         rtsps://
 
 ``BlinkStreamBroker.start_liveview`` only accepted ``immis://`` and rejected
-everything else outright, so those cameras could never stream. The
-``blinkRTSP=true`` parameter in the URL suggests Blink is rolling RTSP out, so
-this is likely to affect more cameras over time, not fewer.
+everything else outright, so those cameras could never stream.
+
+Which cameras get RTSP
+----------------------
+This first read the ``blinkRTSP=true`` parameter as a sign of a rollout, so
+more cameras over time. That was guessed from a parameter name. Across two
+accounts the split by camera type looks like this:
+
+    xt        rtsps      both accounts
+    white     rtsps      reviewer's account
+    owl       immis      this account
+    lotus     immis      this account
+    xt2       immis      reviewer's account
+    superior  immis      reviewer's account
+    catalina  immis      reviewer's account (an Outdoor 3, added to check)
+
+Only the oldest generations get RTSP; everything newer gets ``immis://``,
+including the battery-powered outdoor ``catalina`` and ``xt2``. So RTSP reads
+as the legacy path rather than the incoming one, and the affected set is
+probably fixed rather than growing. That does not make this less useful:
+those cameras have no live view at all today.
 
 Why not just hand the URL to ffmpeg
 -----------------------------------
@@ -73,6 +91,10 @@ RTP_MIN_HEADER_BYTES = 12
 RTSP_HEADER_TERMINATOR = b"\r\n\r\n"
 INTERLEAVED_MARKER = b"$"
 VIDEO_CHANNEL = 0
+# Backlog at which a consumer is dropped. At Blink's bitrate four
+# megabytes is roughly two seconds of video: long enough to ride out a
+# hiccup, short enough that memory does not run away.
+MAX_CONSUMER_BACKLOG_BYTES = 4 * 1024 * 1024
 RTSP_TIMEOUT_SECONDS = 20
 USER_AGENT = "blink-liveview-proxy"
 
@@ -154,6 +176,25 @@ class BlinkRtspLiveStream:
         if self._packets == 1:
             LOGGER.info("RTSP: first video packet received")
         for writer in list(self._consumers):
+            if writer.is_closing():
+                continue
+            # Never await drain() here. This module has a single reader that
+            # carries control *and* data on one connection, so draining would
+            # stall the loop that also reads RTSP responses: Blink would keep
+            # sending and the backlog would simply move upstream. For live
+            # video the right answer is to drop the slow consumer.
+            transport = writer.transport
+            if transport is not None:
+                backlog = transport.get_write_buffer_size()
+                if backlog > MAX_CONSUMER_BACKLOG_BYTES:
+                    LOGGER.warning(
+                        "RTSP: consumer is %d bytes behind, dropping it",
+                        backlog)
+                    with contextlib.suppress(ValueError):
+                        self._consumers.remove(writer)
+                    with contextlib.suppress(Exception):
+                        writer.close()
+                    continue
             try:
                 writer.write(payload)
             except Exception:
