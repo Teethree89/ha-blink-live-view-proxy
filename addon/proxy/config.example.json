@@ -21,7 +21,7 @@
   "ptt_disabled_camera_types": ["mini"],
   "ptt_disabled_product_types": ["owl"],
   "prefer_v6_liveview": true,
-  "send_liveview_token": false,
+  "send_liveview_token": true,
   "cameras": {
     "front_door": {
       "entity_id": "camera.front_door",
