@@ -11,14 +11,36 @@
     const style = document.createElement("style");
     style.id = STYLE_ID;
     style.textContent = `
+      /* This is a real <dialog> opened with showModal(), NOT a fixed-position
+         div. As a plain div the overlay was inserted but never painted in the
+         Home Assistant iOS app's WKWebView: it opened invisibly "behind" the
+         app and only appeared once something forced a repaint, like switching
+         apps. Layer promotion alone fixed it in mobile Safari but not in the
+         app. showModal() puts the element in the browser's top layer, which
+         sidesteps that compositing path completely. */
       #${DIALOG_ID} {
         position: fixed;
         inset: 0;
+        width: 100vw;
+        height: 100vh;
+        max-width: 100vw;
+        max-height: 100vh;
+        margin: 0;
+        border: 0;
+        padding: 0;
         z-index: 2147483000;
         display: grid;
         place-items: center;
         background: rgba(0, 0, 0, 0.72);
         color: var(--primary-text-color, #f8fafc);
+        transform: translateZ(0);
+        -webkit-transform: translateZ(0);
+        will-change: transform, opacity;
+        -webkit-backface-visibility: hidden;
+        backface-visibility: hidden;
+      }
+      #${DIALOG_ID}::backdrop {
+        background: rgba(0, 0, 0, 0.72);
       }
       #${DIALOG_ID} .blink-liveview-shell {
         width: min(1120px, calc(100vw - 32px));
@@ -99,6 +121,7 @@
   function closeDialog() {
     const existing = document.getElementById(DIALOG_ID);
     if (!existing) return;
+    if (typeof existing.close === "function" && existing.open) existing.close();
     const iframe = existing.querySelector("iframe");
     if (iframe) iframe.removeAttribute("src");
     existing.remove();
@@ -117,7 +140,7 @@
     ensureStyle();
     closeDialog();
 
-    const root = document.createElement("div");
+    const root = document.createElement("dialog");
     root.id = DIALOG_ID;
 
     const shell = document.createElement("section");
@@ -164,6 +187,28 @@
       if (event.target === root) closeDialog();
     });
     document.body.append(root);
+
+    // showModal() promotes the element into the top layer, which is what
+    // actually gets it painted in the iOS app's WKWebView. Fall back to leaving
+    // it as a plain in-flow element if the browser has no <dialog> support.
+    if (typeof root.showModal === "function") {
+      try {
+        root.showModal();
+      } catch (err) {
+        /* already open, or not yet connected; the CSS still displays it */
+      }
+    }
+
+    // Belt and braces for the same iOS paint bug: flush layout, then nudge the
+    // overlay across two animation frames so the compositor is forced to draw
+    // the new layer instead of waiting for an unrelated repaint.
+    void root.offsetHeight;
+    root.style.opacity = "0.999";
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        root.style.opacity = "";
+      });
+    });
   }
 
   function openLiveDialog(config, hass) {
