@@ -54,3 +54,27 @@ Dashboards should load:
 
 That keeps the frontend helper inside the custom integration instead of
 requiring a separate `/config/www` copy.
+
+## Tests
+
+No Home Assistant, no Blink account, no network. From the repo root:
+
+```bash
+pip install pyyaml
+python tests/test_playlist.py    # HLS playlist rewriting
+python tests/test_assets.py      # shipped YAML/JSON, manifest, generator
+```
+
+CI runs both on every pull request, alongside a compile pass over every
+tracked Python file and a syntax check on the shell scripts.
+
+Every check in `test_assets.py` exists because something actually broke — a
+button-card style written as a list of lists and silently ignored, `hacs.json`
+carrying manifest keys that HACS rejects, manifest keys sorted by Home
+Assistant core's rule rather than hassfest's. Add to it when you fix a bug
+that a file could have caught.
+
+**Nothing in CI may contact Blink.** A login attempt on every run would be
+rate-limited within minutes and would text the account owner each time. The
+dashboard generator's `--demo` mode exists partly so its output can be tested
+without a proxy.

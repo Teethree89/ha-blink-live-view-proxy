@@ -1,7 +1,11 @@
 name: Validate
 
 on:
+  # Only main on push. Without the filter every push to a PR branch fires this
+  # twice — once as `push`, once as `pull_request` — and the two can disagree,
+  # because re-running one leaves the other holding a stale verdict.
   push:
+    branches: [main]
   pull_request:
   schedule:
     - cron: "0 0 * * *"
@@ -28,3 +32,36 @@ jobs:
         uses: actions/checkout@v4
       - name: Hassfest
         uses: home-assistant/actions/hassfest@master
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        # Deliberately minimal, and nothing here contacts Blink. A login
+        # attempt on every CI run would be rate-limited within minutes and
+        # would text the account owner each time.
+        run: pip install pyyaml
+
+      - name: Compile every tracked Python file
+        run: python -m compileall -q $(git ls-files '*.py')
+
+      - name: Check shell script syntax
+        run: |
+          for script in $(git ls-files '*.sh'); do
+            bash -n "$script"
+          done
+
+      - name: HLS playlist tests
+        run: python tests/test_playlist.py
+
+      - name: Asset and generator tests
+        run: python tests/test_assets.py
