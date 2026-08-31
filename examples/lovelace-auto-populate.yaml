@@ -1,0 +1,199 @@
+# Blink Liveview Proxy — self-populating camera wall
+#
+# Builds a tile for every camera the proxy discovered, with no per-camera YAML.
+# Add a camera in Blink, restart the proxy, and it appears here on its own.
+#
+# How it knows what to build
+# --------------------------
+# The integration puts everything a card needs onto each camera entity as
+# attributes, so a template can read them back instead of you typing them:
+#
+#   proxy_slug        the slug the proxy uses in its URLs
+#   blink_entity_id   the official Blink integration's camera, for thumbnails
+#   ptt_supported     whether push-to-talk is offered for this camera
+#   camera_type       e.g. default, doorbell, mini
+#   product_type      e.g. catalina, lotus, owl, xt
+#
+# Requirements (HACS → Frontend):
+#   - auto-entities        builds the card list
+#   - button-card          the tap targets; fire-dom-event needs it
+#
+# And, once, in Settings → Dashboards → Resources:
+#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js   (JavaScript module)
+#
+# If you would rather not install auto-entities, run
+# `python3 scripts/generate-dashboard.py` instead — it queries the proxy and
+# prints the same dashboard as plain YAML you can paste.
+
+views:
+  - title: Cameras
+    path: cameras
+    cards:
+      - type: entities
+        title: Blink Liveview Proxy
+        entities:
+          - entity: binary_sensor.blink_liveview_proxy
+            name: Proxy
+
+      - type: custom:auto-entities
+        card:
+          type: grid
+          columns: 2
+          square: false
+        card_param: cards
+        filter:
+          template: |
+            {%- for s in states.camera
+                  if s.entity_id.startswith('camera.blink_live_')
+                  and state_attr(s.entity_id, 'proxy_slug') -%}
+              {%- set slug = state_attr(s.entity_id, 'proxy_slug') -%}
+              {%- set live = s.entity_id -%}
+              {%- set src  = state_attr(s.entity_id, 'blink_entity_id')
+                             or 'camera.' ~ slug -%}
+              {%- set title = s.name | replace('Blink Live ', '') -%}
+              {%- set motion = 'switch.' ~ slug ~ '_camera_motion_detection' -%}
+              {{
+                {
+                  'type': 'picture-elements',
+                  'camera_image': src,
+                  'camera_view': 'auto',
+                  'aspect_ratio': '16x9',
+                  'elements': [
+                    {
+                      'type': 'custom:button-card',
+                      'entity': live,
+                      'show_icon': false,
+                      'show_name': false,
+                      'show_state': false,
+                      'tap_action': {
+                        'action': 'fire-dom-event',
+                        'blink_liveview_proxy': {
+                          'slug': slug,
+                          'entity_id': live,
+                          'title': title
+                        }
+                      },
+                      'styles': {
+                        'card': [
+                          {'height': '100%'},
+                          {'padding': 0},
+                          {'border': 0},
+                          {'box-shadow': 'none'},
+                          {'background': 'rgba(0,0,0,0)'}
+                        ]
+                      },
+                      'style': {
+                        'top': 0, 'left': 0,
+                        'width': '100%', 'height': '100%',
+                        'transform': 'none', 'z-index': 1
+                      }
+                    },
+                    {
+                      'type': 'custom:button-card',
+                      'show_icon': false,
+                      'show_state': false,
+                      'name': title,
+                      'styles': {
+                        'card': [
+                          {'background': 'rgba(0,0,0,0)'},
+                          {'border': 0},
+                          {'box-shadow': 'none'},
+                          {'padding': 0}
+                        ],
+                        'name': [
+                          {'color': 'white'},
+                          {'font-size': '14px'},
+                          {'font-weight': 600},
+                          {'text-shadow': '0 1px 4px rgba(0,0,0,0.8)'}
+                        ]
+                      },
+                      'style': {
+                        'bottom': '8px', 'left': '12px',
+                        'transform': 'none', 'z-index': 2
+                      }
+                    },
+                    {
+                      'type': 'custom:button-card',
+                      'icon': 'mdi:filmstrip',
+                      'show_name': false,
+                      'tap_action': {
+                        'action': 'fire-dom-event',
+                        'blink_liveview_proxy_clips': {
+                          'slug': slug,
+                          'title': title ~ ' Clips'
+                        }
+                      },
+                      'styles': {
+                        'card': [
+                          {'background': 'rgba(2,6,23,0.55)'},
+                          {'border-radius': '999px'},
+                          {'border': 0},
+                          {'width': '36px'},
+                          {'height': '36px'},
+                          {'padding': 0}
+                        ],
+                        'icon': [{'color': 'white'}, {'width': '20px'}]
+                      },
+                      'style': {
+                        'bottom': '8px', 'right': '100px',
+                        'transform': 'none', 'z-index': 2
+                      }
+                    },
+                    {
+                      'type': 'custom:button-card',
+                      'icon': 'mdi:image-refresh',
+                      'show_name': false,
+                      'tap_action': {
+                        'action': 'fire-dom-event',
+                        'blink_snapshot_refresh': {
+                          'slug': slug,
+                          'source_entity_id': src
+                        }
+                      },
+                      'styles': {
+                        'card': [
+                          {'background': 'rgba(2,6,23,0.55)'},
+                          {'border-radius': '999px'},
+                          {'border': 0},
+                          {'width': '36px'},
+                          {'height': '36px'},
+                          {'padding': 0}
+                        ],
+                        'icon': [{'color': 'white'}, {'width': '20px'}]
+                      },
+                      'style': {
+                        'bottom': '8px', 'right': '54px',
+                        'transform': 'none', 'z-index': 2
+                      }
+                    },
+                    {
+                      'type': 'custom:button-card',
+                      'entity': motion,
+                      'show_name': false,
+                      'icon': "[[[ return entity && entity.state === 'on' ? 'mdi:motion-sensor' : 'mdi:motion-sensor-off'; ]]]",
+                      'tap_action': {'action': 'toggle'},
+                      'styles': {
+                        'card': [
+                          {'background': 'rgba(2,6,23,0.55)'},
+                          {'border-radius': '999px'},
+                          {'border': 0},
+                          {'width': '36px'},
+                          {'height': '36px'},
+                          {'padding': 0}
+                        ],
+                        'icon': [
+                          {'width': '20px'},
+                          {'color': "[[[ return entity && entity.state === 'on' ? '#38bdf8' : '#94a3b8'; ]]]"}
+                        ]
+                      },
+                      'style': {
+                        'bottom': '8px', 'right': '8px',
+                        'transform': 'none', 'z-index': 2
+                      }
+                    }
+                  ]
+                }
+              }},
+            {%- endfor -%}
+        sort:
+          method: name

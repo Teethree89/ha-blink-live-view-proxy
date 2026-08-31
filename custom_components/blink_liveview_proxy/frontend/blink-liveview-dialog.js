@@ -205,7 +205,10 @@
 
   function openLiveDialog(config, hass) {
     const slug = config.slug;
-    const entityId = config.entity_id;
+    // Same fallback the clips and snapshot handlers use, so a card only has to
+    // supply the slug. Generated dashboards rely on this.
+    const entityId =
+      config.entity_id || (slug ? `camera.blink_live_${slug}` : "");
     const state = hass && entityId ? hass.states[entityId] : null;
     const token = state && state.attributes ? state.attributes.access_token : "";
     const title =
