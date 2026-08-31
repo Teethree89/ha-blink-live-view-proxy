@@ -65,3 +65,6 @@ jobs:
 
       - name: Asset and generator tests
         run: python tests/test_assets.py
+
+      - name: Login decision tests
+        run: python tests/test_login_decisions.py
