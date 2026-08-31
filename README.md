@@ -131,7 +131,8 @@ Three ready-made options, from hand-edited to self-populating, are in the
 - [`examples/lovelace-dashboard.yaml`](examples/lovelace-dashboard.yaml) — one
   commented camera with every action; copy it per camera.
 - [`scripts/generate-dashboard.py`](scripts/generate-dashboard.py) — asks the
-  running proxy what exists and prints a finished dashboard for all of them.
+  running proxy what exists and prints a finished dashboard, a single view, or
+  one card, whichever you need (`--format dashboard|view|card`).
 - [`examples/lovelace-auto-populate.yaml`](examples/lovelace-auto-populate.yaml)
   — builds a tile for every camera automatically as it appears.
 

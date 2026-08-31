@@ -266,47 +266,166 @@ def card_for(camera: dict) -> str:
     return header + tile
 
 
+def reindent(block: str, shift: int) -> str:
+    """Shift a YAML block left or right, leaving blank lines alone.
+
+    The blocks above are authored at the indentation a dashboard needs. A card
+    pasted into the manual-card editor starts at column zero instead, so they
+    get moved rather than rewritten.
+    """
+    if shift == 0:
+        return block
+    lines = []
+    for line in block.splitlines():
+        if not line.strip():
+            lines.append("")
+        elif shift > 0:
+            lines.append(" " * shift + line)
+        else:
+            strippable = len(line) - len(line.lstrip(" "))
+            lines.append(line[min(-shift, strippable):])
+    return "\n".join(lines) + "\n"
+
+
+HEADER_COMMON = """\
+# Needs button-card, and this dashboard resource registered under
+# Settings -> Dashboards -> Resources, as a JavaScript module:
+#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js
+#
+# The motion-detection button assumes the official Blink integration named its
+# switch after the slug. Fix or delete any that show as unavailable.
+"""
+
+HEADER_DASHBOARD = """\
+# This is a WHOLE DASHBOARD. The top-level `views:` key is the complete config
+# for one dashboard, so pasting all of it replaces every view on whichever
+# dashboard you paste it into.
+#
+#   Settings -> Dashboards -> + Add dashboard -> New dashboard from scratch,
+#   open it, pencil -> ... -> Raw configuration editor, select all, paste, Save.
+#
+# To add it to a dashboard you already have, re-run with --format view.
+"""
+
+HEADER_VIEW = """\
+# This is ONE VIEW, to add to a dashboard you already have.
+#
+#   Open the dashboard, pencil -> ... -> Raw configuration editor, then paste
+#   this as another item under the `views:` key that is already there. Keep the
+#   two-space indent on `- title:`.
+"""
+
+HEADER_CARD = """\
+# This is a SINGLE CARD. It drops into any existing view without touching the
+# rest of the dashboard.
+#
+#   Open the dashboard, pencil -> + Add card -> scroll down -> Manual,
+#   replace what is in the box with this, Save.
+"""
+
+
+def emit_dashboard(cameras: list[dict]) -> str:
+    return "views:\n" + emit_view(cameras)
+
+
+def emit_view(cameras: list[dict]) -> str:
+    out = "  - title: Cameras\n    path: cameras\n    cards:\n"
+    out += STATUS_PILLS
+    for camera in cameras:
+        out += card_for(camera)
+    return out
+
+
+def unlist(block: str) -> str:
+    """Turn a one-item YAML list block into a bare mapping.
+
+    Tiles are authored as list items because that is what a view's `cards:`
+    wants. The manual-card editor wants a mapping, so the first `- ` is
+    dropped and the whole block pulled back two columns.
+    """
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith("- "):
+            indent = len(line) - len(line.lstrip(" "))
+            lines[index] = " " * (indent + 2) + line.lstrip(" ")[2:]
+            break
+    return reindent("\n".join(lines) + "\n", -2)
+
+
+def emit_card(cameras: list[dict]) -> str:
+    """One vertical-stack holding the pills and a grid of camera tiles."""
+    if len(cameras) == 1:
+        # A single camera needs no wrapper; the tile is already one card.
+        return unlist(reindent(card_for(cameras[0]), -6))
+
+    out = "type: vertical-stack\ncards:\n"
+    out += reindent(STATUS_PILLS, -4)
+    out += "  - type: grid\n    columns: 2\n    square: false\n    cards:\n"
+    for camera in cameras:
+        out += card_for(camera)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate a Lovelace dashboard from the proxy's cameras."
+        description="Generate a Lovelace dashboard, view, or card from the "
+        "proxy's cameras.",
+        epilog="Examples:\n"
+        "  generate-dashboard.py > cameras.yaml\n"
+        "  generate-dashboard.py --format card > card.yaml\n"
+        "  generate-dashboard.py --format card --camera front_door\n",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--proxy-url", default=DEFAULT_PROXY)
     parser.add_argument(
         "--token", default="", help="BLINK_PROXY_TOKEN, if the proxy requires one"
     )
+    parser.add_argument(
+        "--format",
+        choices=("dashboard", "view", "card"),
+        default="dashboard",
+        help="dashboard: a whole dashboard (default). view: one view to add to "
+        "an existing dashboard. card: a single card for the manual-card editor.",
+    )
+    parser.add_argument(
+        "--camera",
+        default="",
+        metavar="SLUG",
+        help="only this camera. With --format card that emits the bare tile.",
+    )
     args = parser.parse_args()
 
     cameras = fetch_cameras(args.proxy_url, args.token)
+
+    if args.camera:
+        matched = [c for c in cameras if c["slug"] == args.camera]
+        if not matched:
+            known = ", ".join(sorted(c["slug"] for c in cameras))
+            raise SystemExit(
+                f"No camera with slug {args.camera!r}.\nKnown slugs: {known}"
+            )
+        cameras = matched
+
     cameras.sort(key=lambda item: item.get("name") or item["slug"])
+
+    header = {
+        "dashboard": HEADER_DASHBOARD,
+        "view": HEADER_VIEW,
+        "card": HEADER_CARD,
+    }[args.format]
+    body = {
+        "dashboard": emit_dashboard,
+        "view": emit_view,
+        "card": emit_card,
+    }[args.format](cameras)
 
     print("# Generated by scripts/generate-dashboard.py")
     print(f"# {len(cameras)} camera(s) from {args.proxy_url}")
     print("#")
-    print("# Needs button-card, and this dashboard resource:")
-    print("#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js")
+    print(header, end="")
     print("#")
-    print("# This is a WHOLE DASHBOARD. The top-level `views:` key is the")
-    print("# complete config for one dashboard, so pasting all of it replaces")
-    print("# every view on the dashboard you paste it into.")
-    print("#")
-    print("#   New dashboard:  Settings -> Dashboards -> + Add dashboard ->")
-    print("#                   New dashboard from scratch, then open it,")
-    print("#                   pencil -> ... -> Raw configuration editor,")
-    print("#                   select all, paste this, Save.")
-    print("#   Existing one:   paste only from `- title: Cameras` down, as")
-    print("#                   another item under the `views:` already there.")
-    print("#")
-    print("# The motion-detection button assumes the official Blink")
-    print("# integration named its switch after the slug. Fix or delete any")
-    print("# that show as unavailable.")
-    print("views:")
-    print("  - title: Cameras")
-    print("    path: cameras")
-    print("    cards:")
-    print(STATUS_PILLS, end="")
-
-    for camera in cameras:
-        print(card_for(camera), end="")
+    print(HEADER_COMMON, end="")
+    print(body, end="")
 
     missing = [c["slug"] for c in cameras if not c.get("entity_id")]
     if missing:
