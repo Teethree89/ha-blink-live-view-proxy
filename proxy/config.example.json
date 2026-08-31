@@ -18,6 +18,7 @@
   "ptt_aac_bitrate": "40k",
   "ptt_strip_adts": false,
   "ptt_send_audio_config": false,
+  "ptt_force_enabled_slugs": [],
   "ptt_disabled_camera_types": ["mini"],
   "ptt_disabled_product_types": ["owl"],
   "prefer_v6_liveview": true,

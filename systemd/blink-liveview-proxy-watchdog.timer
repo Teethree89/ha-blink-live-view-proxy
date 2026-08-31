@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically check Blink Live View Proxy for a stuck token-refresh loop
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

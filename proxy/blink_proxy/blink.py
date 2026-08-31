@@ -36,8 +36,17 @@ from .util import normalize_slug, redact_liveview_response
 
 LOGGER = logging.getLogger(LOGGER_NAME)
 
-def camera_ptt_supported(camera: Any, config: dict[str, Any]) -> bool:
+def camera_ptt_supported(
+    camera: Any, config: dict[str, Any], slug: str | None = None
+) -> bool:
     """Return whether experimental push-to-talk should be offered."""
+    force_enabled_slugs = {
+        normalize_slug(str(item))
+        for item in config.get("ptt_force_enabled_slugs", [])
+    }
+    if slug and normalize_slug(slug) in force_enabled_slugs:
+        return True
+
     camera_type = str(getattr(camera, "camera_type", "") or "").casefold()
     product_type = str(getattr(camera, "product_type", "") or "").casefold()
     disabled_camera_types = {
@@ -279,6 +288,14 @@ class BlinkClient:
 
             if not started:
                 raise RuntimeError("Blink login/setup failed")
+
+            configured_count = len(self.configured_cameras())
+            if configured_count and not blink.cameras:
+                raise RuntimeError(
+                    "Blink camera discovery returned zero cameras while "
+                    f"{configured_count} cameras are configured"
+                )
+
             save_auth_callback()
             LOGGER.info("Blink login ready; discovered %d cameras", len(blink.cameras))
         except Exception:
@@ -293,6 +310,21 @@ class BlinkClient:
 
     def configured_cameras(self) -> dict[str, dict[str, Any]]:
         return self.config.get("cameras", {})
+
+    def status(self) -> dict[str, Any]:
+        blink = self.blink
+        expiration: float | None = None
+        if blink is not None and blink.auth is not None:
+            try:
+                expiration = float(blink.auth.login_attributes.get("expiration_date"))
+            except (TypeError, ValueError):
+                expiration = None
+        return {
+            "ready": blink is not None,
+            "cameras_discovered": len(blink.cameras) if blink is not None else 0,
+            "cameras_configured": len(self.configured_cameras()),
+            "token_expiration": expiration,
+        }
 
     def _require_blink(self) -> Blink:
         if self.blink is None:
@@ -342,7 +374,9 @@ class BlinkClient:
                     "network_id": str(camera.network_id),
                     "camera_type": camera.camera_type or "default",
                     "product_type": camera.product_type,
-                    "ptt_supported": camera_ptt_supported(camera, self.config),
+                    "ptt_supported": camera_ptt_supported(
+                        camera, self.config, slug=slug
+                    ),
                     "entity_id": self.configured_cameras()
                     .get(slug, {})
                     .get("entity_id"),

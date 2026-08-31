@@ -1,0 +1,318 @@
+# Blink Liveview Proxy — full example dashboard
+#
+# Every feature the integration exposes, on one camera. Copy the camera block
+# once per camera and change `front_door` to that camera's proxy slug, or use
+# examples/lovelace-auto-populate.yaml to build the same thing for every camera
+# automatically.
+#
+# Find your slugs with:  curl http://127.0.0.1:8088/cameras
+#
+# Required custom cards (HACS → Frontend):
+#   - button-card          the tap targets; fire-dom-event needs it
+# Optional:
+#   - card-mod             rounded corners on the tiles below
+#
+# Required once, in Settings → Dashboards → Resources:
+#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js   (JavaScript module)
+# Nothing works without that resource and it fails silently, so check it first.
+#
+# ---------------------------------------------------------------------------
+# Where this goes
+#
+# This is a WHOLE DASHBOARD, not a single card. The top-level `views:` key
+# below is the complete configuration for one dashboard, so pasting all of it
+# REPLACES every view on whichever dashboard you paste it into.
+#
+# On a new dashboard (recommended):
+#   1. Settings → Dashboards → + Add dashboard → New dashboard from scratch
+#   2. Open it, click the pencil, then ⋮ → Raw configuration editor
+#   3. Select all, delete, paste this file, Save
+#
+# Adding it to a dashboard you already have:
+#   Paste only from the `- title: Cameras` line down, as another item under
+#   the `views:` key that is already there. Do not paste the `views:` line
+#   itself, and keep the two-space indent on `- title:`.
+#
+# If ⋮ shows "Take control" instead of a raw editor, the dashboard is still
+# auto-generated — take control first, which is a one-way change.
+# ---------------------------------------------------------------------------
+
+views:
+  - title: Cameras
+    path: cameras
+    type: sections
+    sections:
+      # ------------------------------------------------------------------
+      # Status pills. If the proxy pill is red, every tile below is a dead
+      # tap — check it before debugging anything else.
+      #
+      # The "N of M" and "attention" pills come from the REST sensor in
+      # examples/homeassistant-package.yaml. Drop those two if you did not
+      # install that package; the proxy pill works on its own.
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: binary_sensor.blink_liveview_proxy
+                name: Proxy
+                show_state: true
+                state:
+                  - value: "on"
+                    color: "#22c55e"
+                    icon: mdi:cctv
+                  - value: "off"
+                    color: "#ef4444"
+                    icon: mdi:cctv-off
+                styles:
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
+
+              # "5 of 6" is the number that tells you something is wrong.
+              - type: custom:button-card
+                entity: sensor.blink_cameras_discovered
+                name: Cameras
+                icon: mdi:camera-outline
+                show_state: false
+                label: >
+                  [[[
+                    if (!entity) return String.fromCharCode(8212);
+                    const want = entity.attributes.configured;
+                    return want === undefined
+                      ? entity.state
+                      : `${entity.state} of ${want}`;
+                  ]]]
+                show_label: true
+                styles:
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
+                  label:
+                    - font-size: 15px
+                    - font-weight: 600
+
+              - type: custom:button-card
+                entity: binary_sensor.blink_needs_attention
+                name: Health
+                show_state: true
+                icon: mdi:help-circle-outline
+                state:
+                  - value: "off"
+                    color: "#22c55e"
+                    icon: mdi:check-circle-outline
+                  - value: "on"
+                    color: "#f59e0b"
+                    icon: mdi:alert-decagram-outline
+                styles:
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
+
+              # Guarded reload. It refuses when a reload cannot help, which
+              # matters — every reload is a login attempt, and repeated
+              # attempts get the account texted and then rate-limited.
+              # See the package for the four guards.
+              - type: custom:button-card
+                name: Reload
+                icon: mdi:refresh
+                tap_action:
+                  action: call-service
+                  service: script.blink_reload_guarded
+                hold_action:
+                  action: call-service
+                  service: script.blink_reload_force
+                styles:
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
+
+      # ------------------------------------------------------------------
+      # Arming and per-camera detail, from the official Blink integration.
+      # Entity names vary by account — delete the rows you do not have.
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: entities
+            title: Blink
+            entities:
+              - entity: alarm_control_panel.blink_home
+                name: Arming
+              - entity: sensor.blink_proxy_uptime
+                name: Proxy uptime
+              - type: section
+                label: Front Door
+              - entity: sensor.front_door_temperature
+                name: Temperature
+              - entity: sensor.front_door_battery
+                name: Battery
+              - entity: switch.front_door_camera_motion_detection
+                name: Motion detection
+
+      # ------------------------------------------------------------------
+      # One camera, all four actions.
+      #
+      #   tap the tile ....... live view (MSE, or native HLS on iOS)
+      #   filmstrip .......... local Sync Module clips
+      #   image-refresh ...... pull a fresh snapshot from Blink
+      #   motion-sensor ...... toggle motion detection
+      #
+      # Push-to-talk, "End & Save" and "Save MP4" live inside the live-view
+      # dialog. PTT only appears for cameras the proxy reports as supporting
+      # it; Mini/owl cameras are hidden by default and can be opted back in
+      # with ptt_force_enabled_slugs in the proxy config.
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: picture-elements
+            camera_image: camera.front_door
+            camera_view: auto
+            aspect_ratio: 16x9
+            card_mod:
+              style: |
+                ha-card {
+                  border-radius: 14px;
+                  overflow: hidden;
+                }
+            elements:
+              # Whole-tile tap target for live view. Transparent, sits under
+              # the buttons below so it does not swallow their taps.
+              - type: custom:button-card
+                entity: camera.blink_live_front_door
+                show_icon: false
+                show_name: false
+                show_state: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy:
+                    slug: front_door
+                    entity_id: camera.blink_live_front_door
+                    title: Front Door
+                styles:
+                  card:
+                    - height: 100%
+                    - padding: 0
+                    - border: 0
+                    - box-shadow: none
+                    - background: rgba(0, 0, 0, 0)
+                style:
+                  top: 0
+                  left: 0
+                  width: 100%
+                  height: 100%
+                  transform: none
+                  z-index: 1
+
+              # Camera name, bottom left.
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Front Door
+                styles:
+                  card:
+                    - background: rgba(0, 0, 0, 0)
+                    - border: 0
+                    - box-shadow: none
+                    - padding: 0
+                  name:
+                    - color: white
+                    - font-size: 14px
+                    - font-weight: 600
+                    - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
+                style:
+                  bottom: 8px
+                  left: 12px
+                  transform: none
+                  z-index: 2
+
+              # Local clips. `slug` is enough — the dialog derives the rest.
+              - type: custom:button-card
+                icon: mdi:filmstrip
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy_clips:
+                    slug: front_door
+                    title: Front Door Clips
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 36px
+                    - height: 36px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 20px
+                style:
+                  bottom: 8px
+                  right: 100px
+                  transform: none
+                  z-index: 2
+
+              # Fresh snapshot. Dims the thumbnail while it fetches.
+              - type: custom:button-card
+                icon: mdi:image-refresh
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_snapshot_refresh:
+                    slug: front_door
+                    source_entity_id: camera.front_door
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 36px
+                    - height: 36px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 20px
+                style:
+                  bottom: 8px
+                  right: 54px
+                  transform: none
+                  z-index: 2
+
+              # Motion detection, from the official Blink integration.
+              # Drop this element if that integration is not set up.
+              - type: custom:button-card
+                entity: switch.front_door_camera_motion_detection
+                show_name: false
+                icon: >
+                  [[[
+                    return entity && entity.state === 'on'
+                      ? 'mdi:motion-sensor'
+                      : 'mdi:motion-sensor-off';
+                  ]]]
+                tap_action:
+                  action: toggle
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 36px
+                    - height: 36px
+                    - padding: 0
+                  icon:
+                    - width: 20px
+                    - color: >
+                        [[[
+                          return entity && entity.state === 'on'
+                            ? '#38bdf8'
+                            : '#94a3b8';
+                        ]]]
+                style:
+                  bottom: 8px
+                  right: 8px
+                  transform: none
+                  z-index: 2

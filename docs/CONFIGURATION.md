@@ -19,6 +19,7 @@ Important fields:
   "liveview_cache_dir": "/var/lib/blink-liveview-proxy/liveviews",
   "mpegts_session_seconds": 60,
   "mpegts_cooldown_seconds": 30,
+  "ptt_force_enabled_slugs": [],
   "ptt_disabled_camera_types": ["mini"],
   "ptt_disabled_product_types": ["owl"],
   "cameras": {}
@@ -86,9 +87,14 @@ uses ffmpeg to encode AAC and sends IMMI audio frames to Blink.
 PTT is hidden for camera families in:
 
 ```json
+"ptt_force_enabled_slugs": [],
 "ptt_disabled_camera_types": ["mini"],
 "ptt_disabled_product_types": ["owl"]
 ```
+
+Add a slug such as `"kitchen"` to `ptt_force_enabled_slugs` only for targeted
+testing of cameras that are disabled by family defaults. A Blink Mini/`owl`
+camera was confirmed audible this way on June 30, 2026.
 
 ## Local Clips
 

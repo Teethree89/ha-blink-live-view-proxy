@@ -23,8 +23,22 @@ fi
 install -m 0644 "$ROOT/systemd/blink-liveview-proxy.service" \
   /etc/systemd/system/blink-liveview-proxy.service
 
+# Optional watchdog: restarts the proxy if blinkpy's token refresh gets stuck
+# in a retry loop. Set INSTALL_WATCHDOG=0 to skip it.
+if [ "${INSTALL_WATCHDOG:-1}" = "1" ]; then
+  install -m 0755 "$ROOT/scripts/blink-liveview-proxy-watchdog.sh" \
+    /usr/local/sbin/blink-liveview-proxy-watchdog.sh
+  install -m 0644 "$ROOT/systemd/blink-liveview-proxy-watchdog.service" \
+    /etc/systemd/system/blink-liveview-proxy-watchdog.service
+  install -m 0644 "$ROOT/systemd/blink-liveview-proxy-watchdog.timer" \
+    /etc/systemd/system/blink-liveview-proxy-watchdog.timer
+fi
+
 systemctl daemon-reload
 systemctl enable blink-liveview-proxy.service
+if [ "${INSTALL_WATCHDOG:-1}" = "1" ]; then
+  systemctl enable --now blink-liveview-proxy-watchdog.timer
+fi
 
 cat <<MSG
 Installed Blink Liveview Proxy.

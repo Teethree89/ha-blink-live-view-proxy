@@ -25,6 +25,7 @@ class HlsSession:
         self.playlist = self.directory / "index.m3u8"
         self.liveview: LiveViewHandle | None = None
         self.process: asyncio.subprocess.Process | None = None
+        self.active_liveview_keys: set[str] = set()
         self.started_at = time.monotonic()
         self.last_touch = self.started_at
 
@@ -33,6 +34,13 @@ class HlsSession:
 
     def is_running(self) -> bool:
         return self.process is not None and self.process.returncode is None
+
+    def register_liveview_key(self, key: str) -> None:
+        """Expose this HLS live-view handle to browser-session scoped features."""
+        if self.liveview is None:
+            return
+        self.manager.active_liveviews[key] = self.liveview
+        self.active_liveview_keys.add(key)
 
     async def start(self) -> None:
         if self.directory.exists():
@@ -89,6 +97,10 @@ class HlsSession:
         raise TimeoutError(f"HLS playlist not ready after {timeout:g}s")
 
     async def stop(self) -> None:
+        for key in self.active_liveview_keys:
+            if self.manager.active_liveviews.get(key) is self.liveview:
+                self.manager.active_liveviews.pop(key, None)
+        self.active_liveview_keys.clear()
         if self.process:
             if self.process.returncode is None:
                 self.process.terminate()
@@ -108,10 +120,17 @@ class HlsSession:
 class HlsManager:
     """Keeps HLS sessions warm while HA is actively polling them."""
 
-    def __init__(self, broker: BlinkStreamBroker, config: dict[str, Any], base: Path):
+    def __init__(
+        self,
+        broker: BlinkStreamBroker,
+        config: dict[str, Any],
+        base: Path,
+        active_liveviews: dict[str, LiveViewHandle] | None = None,
+    ):
         self.broker = broker
         self.config = config
         self.root_dir = resolve_path(config["hls_dir"], base)
+        self.active_liveviews = active_liveviews if active_liveviews is not None else {}
         self.sessions: dict[str, HlsSession] = {}
         self.lock = asyncio.Lock()
 

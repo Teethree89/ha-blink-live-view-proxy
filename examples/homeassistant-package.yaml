@@ -1,8 +1,247 @@
-# Blink live-view proxy package.
+# Blink live-view proxy — Home Assistant package
 #
-# Requires the Blink Liveview Proxy service to be running on the Home Assistant
-# host at 127.0.0.1:8088. Live camera entities are provided by the
-# blink_liveview_proxy custom integration. This package only enables HA stream
-# support; the integration provides its own proxy health binary sensor.
+# Drop into config/packages/ and reference it from configuration.yaml:
+#
+#   homeassistant:
+#     packages: !include_dir_named packages
+#
+# Everything here is optional. The integration already provides
+# binary_sensor.blink_liveview_proxy on its own; this package adds the proxy's
+# richer /status detail, the status pills the dashboards use, and a *guarded*
+# reload button.
+#
+# Read "Reloading safely" below before wiring any of it to an automation. A
+# naive reload loop will get your account rate-limited and text you repeatedly.
+# That is not hypothetical — see the dated note on the script.
 
+# HA's stream component, for the camera entities' HLS rendition.
 stream:
+
+# ---------------------------------------------------------------------------
+# Proxy status
+#
+# The proxy serves /status unauthenticated on loopback, the same as /health,
+# and it exposes no camera names, serials or tokens. If you bound the proxy to
+# the LAN and set BLINK_PROXY_TOKEN, add the matching header:
+#
+#   headers:
+#     Authorization: !secret blink_proxy_token
+# ---------------------------------------------------------------------------
+rest:
+  - resource: "http://127.0.0.1:8088/status"
+    scan_interval: 60
+    timeout: 10
+    sensor:
+      - name: Blink Proxy
+        unique_id: blink_proxy_status
+        icon: mdi:cctv
+        value_template: "{{ 'online' if value_json.ready else 'offline' }}"
+        json_attributes:
+          - ready
+          - cameras_discovered
+          - cameras_configured
+          - token_seconds_remaining
+          - process_uptime_seconds
+          - watchdog_attempts
+          - watchdog_last_restart
+
+template:
+  - sensor:
+      # "5 of 6" — the number that actually tells you something is wrong.
+      - name: Blink Cameras Discovered
+        unique_id: blink_cameras_discovered
+        icon: mdi:camera-outline
+        state: >-
+          {{ state_attr('sensor.blink_proxy', 'cameras_discovered') | int(0) }}
+        attributes:
+          configured: >-
+            {{ state_attr('sensor.blink_proxy', 'cameras_configured') | int(0) }}
+
+      - name: Blink Proxy Uptime
+        unique_id: blink_proxy_uptime
+        icon: mdi:timer-outline
+        unit_of_measurement: min
+        state: >-
+          {{ (state_attr('sensor.blink_proxy', 'process_uptime_seconds')
+              | float(0) / 60) | round(0) }}
+
+  - binary_sensor:
+      # Cameras are configured but the proxy did not find all of them. This is
+      # the condition a reload might fix.
+      - name: Blink Cameras Missing
+        unique_id: blink_cameras_missing
+        device_class: problem
+        icon: mdi:camera-off-outline
+        state: >-
+          {% set found = state_attr('sensor.blink_proxy', 'cameras_discovered') | int(-1) %}
+          {% set want  = state_attr('sensor.blink_proxy', 'cameras_configured') | int(0) %}
+          {{ found >= 0 and want > 0 and found < want }}
+
+      # The watchdog restarted the proxy and it did not recover. After three
+      # tries it gives up on purpose: more restarts mean more login attempts,
+      # and that is what triggers a burst of 2FA texts.
+      - name: Blink Needs Attention
+        unique_id: blink_needs_attention
+        device_class: problem
+        icon: mdi:alert-decagram-outline
+        state: >-
+          {{ state_attr('sensor.blink_proxy', 'watchdog_attempts') | int(0) >= 3
+             or is_state('binary_sensor.blink_liveview_proxy', 'off') }}
+
+# ---------------------------------------------------------------------------
+# Reloading safely
+#
+# A reload only fixes a *stuck* integration — entry loaded, entities gone
+# stale. It cannot fix expired credentials. Each reload re-runs the full
+# blinkpy login, and under OAuth v2 with SMS 2FA that texts a fresh code every
+# single time.
+#
+# This is what happens without guards. On 2026-08-18 a stale token dropped the
+# Blink entry into setup_retry, a watchdog reloaded it every five minutes, and
+# every reload sent another text until Blink rate-limited the account with
+# HTTP 406.
+#
+# So the script below refuses to reload unless all of these hold:
+#
+#   1. something is actually wrong          (cameras missing)
+#   2. the last reload was over 5 min ago   (cooldown)
+#   3. the integration is not already down  (HA is retrying on its own backoff)
+#   4. fewer than 3 reloads failed in a row (circuit breaker)
+#
+# Bad credentials need a re-auth, not a reload.
+# ---------------------------------------------------------------------------
+input_datetime:
+  blink_last_reload:
+    name: Blink last reload
+    has_date: true
+    has_time: true
+
+counter:
+  blink_consecutive_reloads:
+    name: Blink consecutive reloads
+    initial: 0
+    step: 1
+
+script:
+  blink_reload_guarded:
+    alias: Reload Blink integration (guarded)
+    icon: mdi:refresh
+    mode: single
+    sequence:
+      # 1. Only when something is actually wrong.
+      - condition: state
+        entity_id: binary_sensor.blink_cameras_missing
+        state: "on"
+
+      # 2. Cooldown.
+      - condition: template
+        value_template: >-
+          {% set last = states('input_datetime.blink_last_reload') %}
+          {{ last in ['unknown', 'unavailable', '']
+             or (now() - (last | as_datetime | as_local)).total_seconds() > 300 }}
+
+      # 3. If every Blink camera is unavailable then the integration itself is
+      #    down and HA is already retrying on its own backoff. Piling reloads
+      #    on top of that just multiplies SMS-sending login attempts.
+      #
+      #    Config entry state is not exposed to templates, so this
+      #    approximates it: some cameras alive means the entry is loaded and a
+      #    reload is worth trying; all dead means leave it alone.
+      - condition: template
+        value_template: >-
+          {% set cams = states.camera
+             | selectattr('entity_id', 'search', '^camera\\.blink_live_')
+             | list %}
+          {{ cams | rejectattr('state', 'in', ['unavailable', 'unknown'])
+                  | list | count > 0 }}
+
+      # 4. Circuit breaker.
+      - condition: numeric_state
+        entity_id: counter.blink_consecutive_reloads
+        below: 3
+
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.blink_last_reload
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+      - action: counter.increment
+        target:
+          entity_id: counter.blink_consecutive_reloads
+
+      # Any entity belonging to the official Blink config entry.
+      - action: homeassistant.reload_config_entry
+        target:
+          entity_id: camera.front_door
+
+      - delay: "00:00:20"
+
+      # Recovered? Clear the breaker so the next real fault gets its full
+      # three attempts.
+      - if:
+          - condition: state
+            entity_id: binary_sensor.blink_cameras_missing
+            state: "off"
+        then:
+          - action: counter.reset
+            target:
+              entity_id: counter.blink_consecutive_reloads
+
+  # Manual override for when you know the integration is merely stuck and want
+  # to skip the guards. Every press is a login attempt.
+  blink_reload_force:
+    alias: Reload Blink integration (force)
+    icon: mdi:refresh-auto
+    mode: single
+    sequence:
+      - action: counter.reset
+        target:
+          entity_id: counter.blink_consecutive_reloads
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.blink_last_reload
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+      - action: homeassistant.reload_config_entry
+        target:
+          entity_id: camera.front_door
+
+# Tell someone once, rather than letting them discover it.
+automation:
+  - alias: Blink needs attention
+    id: blink_needs_attention_notify
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.blink_needs_attention
+        to: "on"
+        for: "00:05:00"
+    actions:
+      - action: persistent_notification.create
+        data:
+          title: Blink live view needs attention
+          notification_id: blink_needs_attention
+          message: >-
+            The proxy has not recovered on its own.
+            {% set n = state_attr('sensor.blink_proxy', 'watchdog_attempts') | int(0) %}
+            {% if n >= 3 %}The watchdog restarted it {{ n }} times and stopped,
+            which usually means the Blink session needs a manual re-auth.
+            {% else %}The proxy is not answering.{% endif %}
+            Reloading will not fix expired credentials.
+
+# ---------------------------------------------------------------------------
+# Restarting the proxy
+#
+# Host-specific, so it is left commented out. Pick what matches your setup.
+#
+#   Add-on (Supervisor)   use the add-on's own restart button, or a
+#                         hassio.addon_restart action.
+#
+#   systemd on the host,  HA in a container cannot reach the host's systemd.
+#   HA in Docker          Have a root-owned systemd path unit watch a spool
+#                         file that HA is able to write, and restart the
+#                         service when it appears.
+# ---------------------------------------------------------------------------
+# shell_command:
+#   blink_proxy_restart: "touch /config/spool/blink-liveview-proxy-restart"
