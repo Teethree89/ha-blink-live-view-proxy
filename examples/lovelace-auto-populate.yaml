@@ -68,8 +68,10 @@ views:
                 color: "#ef4444"
                 icon: mdi:cctv-off
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
 
           - type: custom:button-card
             entity: sensor.blink_cameras_discovered
@@ -86,9 +88,13 @@ views:
                   : `${entity.state} of ${want}`;
               ]]]
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
-              label: [[font-size, 15px], [font-weight, 600]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
+              label:
+                - font-size: 15px
+                - font-weight: 600
 
           - type: custom:button-card
             entity: binary_sensor.blink_needs_attention
@@ -103,8 +109,10 @@ views:
                 color: "#f59e0b"
                 icon: mdi:alert-decagram-outline
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
 
           - type: custom:button-card
             name: Reload
@@ -116,8 +124,10 @@ views:
               action: call-service
               service: script.blink_reload_force
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
 
       - type: custom:auto-entities
         card:

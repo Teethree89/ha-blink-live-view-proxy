@@ -35,8 +35,10 @@ views:
                 color: "#ef4444"
                 icon: mdi:cctv-off
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
       # Back Door — catalina (push-to-talk available)
       - type: picture-elements
         camera_image: camera.back_door
