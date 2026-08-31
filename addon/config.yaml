@@ -33,6 +33,30 @@ ports:
   8088/tcp: null
 ports_description:
   8088/tcp: "Blink Liveview Proxy HTTP API"
+# Permissions, and why each one is here.
+#
+# hassio_api is REQUIRED. While the proxy waits for a 2FA code it has to read
+# the add-on option you just typed, and /data/options.json is only written at
+# add-on start — a value entered while we wait never reaches it. The
+# Supervisor API is the only way to see it. One endpoint is used,
+# /addons/self/info, and only blink_2fa_code is read from it. No hassio_role
+# is set, so this stays on the default read-mostly tier.
+#
+# share:rw is NOT required. It is a redundancy, kept deliberately. The
+# Supervisor option above is the primary path and always works, because an
+# add-on only exists under Supervisor in the first place, and
+# /data/blink_2fa_pin.txt already covers the file case under the existing
+# data:rw. What /share buys is reach: it is visible to the Samba and file
+# editor add-ons, so the PIN can be dropped in from anything on the network
+# when the options route is awkward.
+#
+# Know what that costs. /share is shared with every other add-on that maps
+# it, so a PIN written there is briefly readable by them; the proxy deletes
+# the file as soon as it reads it. To drop the redundancy, remove share:rw
+# below and the /share entry from PIN_FILES in blink_proxy/blink.py. Nothing
+# else depends on it.
+hassio_api: true
 map:
   - data:rw
+  - share:rw
 url: "https://github.com/Teethree89/ha-blink-live-view-proxy"
