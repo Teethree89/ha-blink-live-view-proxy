@@ -30,10 +30,18 @@ if [ ! -f "$AUTH_FILE" ]; then
     bashio::log.info "asks for a 2FA code, wait for it in the same session."
 fi
 
-PIN="$(bashio::config 'blink_2fa_code')"
-if [ -n "$PIN" ]; then
-    export BLINK_2FA_CODE="$PIN"
-fi
+# blink_2fa_code is deliberately NOT exported.
+#
+# A code sitting in the option at start time is always from a previous
+# challenge: Blink only issues one after a sign-in has begun, and nothing
+# clears the option once a code has been used. Exporting it makes `code`
+# truthy in BlinkClient.start(), which skips _wait_for_pin() entirely, hands
+# the stale code to send_2fa_code() and fails the login. The user is then
+# stuck until they empty the field by hand, because the new code they were
+# just texted never gets asked for.
+#
+# The proxy reads the option live from the Supervisor while it waits, so a
+# code typed during the wait is picked up without this.
 
 PORT="$(bashio::config 'port')"
 bashio::log.info "Starting Blink Liveview Proxy on port ${PORT}..."
