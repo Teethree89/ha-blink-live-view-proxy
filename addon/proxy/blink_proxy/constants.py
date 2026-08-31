@@ -50,9 +50,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ptt_aac_bitrate": "40k",
     "ptt_strip_adts": False,
     "ptt_send_audio_config": False,
+    "ptt_force_enabled_slugs": [],
     "ptt_disabled_camera_types": ["mini"],
     "ptt_disabled_product_types": ["owl"],
     "prefer_v6_liveview": True,
-    "send_liveview_token": False,
+    "send_liveview_token": True,
     "cameras": {},
 }
