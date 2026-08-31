@@ -104,10 +104,30 @@ silent again.
 
 ### If it keeps failing immediately
 
-Check that `hardware_id` in the auth file is a real UUID. Blink rejects a
-malformed one with a bare **HTTP 406** before the request reaches the login
-flow, which reads as "wrong password" and is not. Deleting the auth file and
-logging in again mints a fresh one.
+Blink fronts `/oauth/v2/authorize` with Cloudflare, which answers a non-UUID
+`hardware_id` with a bare **HTTP 406** before the request ever reaches the
+application. A stored value like `Home Assistant` therefore fails every login
+with nothing in the response to say why, and it reads as a wrong password.
+Verified 2026-08-19: that value 406s while fresh UUIDs get 302.
+
+The proxy now checks this at startup and discards a malformed `hardware_id` so
+blinkpy mints a fresh one, logging a warning when it does. That costs one extra
+2FA prompt, against a login that could not have succeeded at all.
+
+### Add-on permissions
+
+The add-on asks for two grants beyond its own `/data` directory:
+
+| Grant | Needed? | Why |
+|---|---|---|
+| `hassio_api: true` | **Yes** | Reads `blink_2fa_code` from `/addons/self/info` while waiting for a PIN. `/data/options.json` is only written at start, so a value typed while waiting never reaches it. Default role, one endpoint, one field. |
+| `share:rw` | No — redundancy | A second way to hand over the PIN, via `/share/blink_2fa_pin.txt`. Reachable from the Samba and file editor add-ons. |
+
+`/share` is shared with every other add-on that maps it, so a PIN written there
+is briefly readable by them; the proxy deletes the file as soon as it reads it.
+To drop the redundancy, remove `share:rw` from `addon/config.yaml` and the
+`/share` entry from `PIN_FILES` in `blink_proxy/blink.py`. The Supervisor option
+and `/data/blink_2fa_pin.txt` both keep working without it.
 
 ### If you get texts you did not ask for
 
