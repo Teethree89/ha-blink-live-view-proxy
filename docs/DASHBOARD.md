@@ -116,6 +116,11 @@ script that does not exist, so it looks fine and silently does nothing.
 Other options: `--proxy-url http://homeassistant.local:8088` and
 `--token "$BLINK_PROXY_TOKEN"` if the proxy requires one.
 
+`--demo` builds from a made-up four-camera inventory and contacts nothing, so
+you can see the output shapes without a proxy running. The checked-in
+`examples/generated-*.yaml` files are produced that way, which is why they show
+`front_door` and `kitchen` rather than anyone's real cameras.
+
 Every shape carries its own paste instructions in the printed header. Needs
 **button-card** only, and nothing renders at view time.
 

@@ -92,9 +92,9 @@ PTT is hidden for camera families in:
 "ptt_disabled_product_types": ["owl"]
 ```
 
-Add a slug such as `"oven_cam"` to `ptt_force_enabled_slugs` only for targeted
-testing of cameras that are disabled by family defaults. `oven_cam`, a Blink
-Mini/`owl` camera, was confirmed audible on June 30, 2026.
+Add a slug such as `"kitchen"` to `ptt_force_enabled_slugs` only for targeted
+testing of cameras that are disabled by family defaults. A Blink Mini/`owl`
+camera was confirmed audible this way on June 30, 2026.
 
 ## Local Clips
 

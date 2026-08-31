@@ -15,8 +15,8 @@
   implemented.
 - Push-to-talk is experimental. Tested regular Blink cameras can receive audio.
   Blink Mini/`owl` cameras remain disabled by default, but specific slugs can be
-  force-enabled with `ptt_force_enabled_slugs`; `oven_cam` was confirmed audible
-  on June 30, 2026.
+  force-enabled with `ptt_force_enabled_slugs`; one was confirmed audible that
+  way on June 30, 2026.
 - On low-power Android wall panels, tap-to-toggle talk is more reliable than
   press-and-hold because WebView is decoding video and capturing microphone
   audio at the same time.
