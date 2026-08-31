@@ -24,6 +24,70 @@ import urllib.request
 
 DEFAULT_PROXY = "http://127.0.0.1:8088"
 
+# The "N of M" and "Health" pills read the REST sensor from
+# examples/homeassistant-package.yaml. Without that package they show as
+# unavailable; the proxy pill works on its own.
+STATUS_PILLS = """\
+      - type: horizontal-stack
+        cards:
+          - type: custom:button-card
+            entity: binary_sensor.blink_liveview_proxy
+            name: Proxy
+            show_state: true
+            state:
+              - value: "on"
+                color: "#22c55e"
+                icon: mdi:cctv
+              - value: "off"
+                color: "#ef4444"
+                icon: mdi:cctv-off
+            styles:
+              card: [[height, 74px]]
+              name: [[font-size, 12px]]
+          - type: custom:button-card
+            entity: sensor.blink_cameras_discovered
+            name: Cameras
+            icon: mdi:camera-outline
+            show_state: false
+            show_label: true
+            label: >
+              [[[
+                const found = entity ? entity.state : '?';
+                const want = entity ? entity.attributes.configured : '?';
+                return `${found} of ${want}`;
+              ]]]
+            styles:
+              card: [[height, 74px]]
+              name: [[font-size, 12px]]
+              label: [[font-size, 15px], [font-weight, 600]]
+          - type: custom:button-card
+            entity: binary_sensor.blink_needs_attention
+            name: Health
+            show_state: true
+            state:
+              - value: "off"
+                color: "#22c55e"
+                icon: mdi:check-circle-outline
+              - value: "on"
+                color: "#f59e0b"
+                icon: mdi:alert-decagram-outline
+            styles:
+              card: [[height, 74px]]
+              name: [[font-size, 12px]]
+          - type: custom:button-card
+            name: Reload
+            icon: mdi:refresh
+            tap_action:
+              action: call-service
+              service: script.blink_reload_guarded
+            hold_action:
+              action: call-service
+              service: script.blink_reload_force
+            styles:
+              card: [[height, 74px]]
+              name: [[font-size, 12px]]
+"""
+
 
 def fetch_cameras(proxy_url: str, token: str) -> list[dict]:
     """Ask the proxy for its camera inventory."""
@@ -228,11 +292,7 @@ def main() -> int:
     print("  - title: Cameras")
     print("    path: cameras")
     print("    cards:")
-    print("      - type: entities")
-    print("        title: Blink Liveview Proxy")
-    print("        entities:")
-    print("          - entity: binary_sensor.blink_liveview_proxy")
-    print("            name: Proxy")
+    print(STATUS_PILLS, end="")
 
     for camera in cameras:
         print(card_for(camera), end="")

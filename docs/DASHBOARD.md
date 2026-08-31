@@ -106,6 +106,22 @@ guess `switch.<slug>_camera_motion_detection`. When a camera was renamed on one
 side only, that guess is wrong and the button shows as unavailable — fix the
 entity id or delete that element.
 
+## Status pills and the reload button
+
+All three options open with a pill row: proxy up/down, `N of M` cameras
+discovered, an overall health pill, and a reload button.
+
+The middle two read a REST sensor that polls the proxy's `/status`, defined in
+[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml).
+Install that package to light them up; without it they show as unavailable and
+the proxy pill still works on its own.
+
+The reload button calls `script.blink_reload_guarded`, which **refuses to run**
+unless a reload could actually help. Hold it to force. That is not
+over-engineering — a reload re-runs the full Blink login, and an unguarded
+reload loop will text you until the account is rate-limited. The reasoning and
+the incident behind it are in [OPERATIONS.md](OPERATIONS.md).
+
 ## Wall panels
 
 On low-power Android panels, tap-to-toggle talk is more reliable than

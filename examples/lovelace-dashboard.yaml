@@ -22,21 +22,105 @@ views:
     type: sections
     sections:
       # ------------------------------------------------------------------
-      # Proxy health. If this is off, every tile below is a dead tap.
+      # Status pills. If the proxy pill is red, every tile below is a dead
+      # tap — check it before debugging anything else.
+      #
+      # The "N of M" and "attention" pills come from the REST sensor in
+      # examples/homeassistant-package.yaml. Drop those two if you did not
+      # install that package; the proxy pill works on its own.
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: binary_sensor.blink_liveview_proxy
+                name: Proxy
+                show_state: true
+                state:
+                  - value: "on"
+                    color: "#22c55e"
+                    icon: mdi:cctv
+                  - value: "off"
+                    color: "#ef4444"
+                    icon: mdi:cctv-off
+                styles:
+                  card: [[height, 74px]]
+                  name: [[font-size, 12px]]
+
+              # "5 of 6" is the number that tells you something is wrong.
+              - type: custom:button-card
+                entity: sensor.blink_cameras_discovered
+                name: Cameras
+                icon: mdi:camera-outline
+                show_state: false
+                label: >
+                  [[[
+                    const found = entity ? entity.state : '?';
+                    const want = entity
+                      ? entity.attributes.configured
+                      : '?';
+                    return `${found} of ${want}`;
+                  ]]]
+                show_label: true
+                styles:
+                  card: [[height, 74px]]
+                  name: [[font-size, 12px]]
+                  label: [[font-size, 15px], [font-weight, 600]]
+
+              - type: custom:button-card
+                entity: binary_sensor.blink_needs_attention
+                name: Health
+                show_state: true
+                state:
+                  - value: "off"
+                    color: "#22c55e"
+                    icon: mdi:check-circle-outline
+                  - value: "on"
+                    color: "#f59e0b"
+                    icon: mdi:alert-decagram-outline
+                styles:
+                  card: [[height, 74px]]
+                  name: [[font-size, 12px]]
+
+              # Guarded reload. It refuses when a reload cannot help, which
+              # matters — every reload is a login attempt, and repeated
+              # attempts get the account texted and then rate-limited.
+              # See the package for the four guards.
+              - type: custom:button-card
+                name: Reload
+                icon: mdi:refresh
+                tap_action:
+                  action: call-service
+                  service: script.blink_reload_guarded
+                hold_action:
+                  action: call-service
+                  service: script.blink_reload_force
+                styles:
+                  card: [[height, 74px]]
+                  name: [[font-size, 12px]]
+
+      # ------------------------------------------------------------------
+      # Arming and per-camera detail, from the official Blink integration.
+      # Entity names vary by account — delete the rows you do not have.
       # ------------------------------------------------------------------
       - type: grid
         cards:
           - type: entities
-            title: Blink Liveview Proxy
+            title: Blink
             entities:
-              - entity: binary_sensor.blink_liveview_proxy
-                name: Proxy
-              # The official Blink integration supplies these. Names vary by
-              # camera; delete the rows you do not have.
+              - entity: alarm_control_panel.blink_home
+                name: Arming
+              - entity: sensor.blink_proxy_uptime
+                name: Proxy uptime
+              - type: section
+                label: Front Door
               - entity: sensor.front_door_temperature
-                name: Front Door temperature
+                name: Temperature
               - entity: sensor.front_door_battery
-                name: Front Door battery
+                name: Battery
+              - entity: switch.front_door_camera_motion_detection
+                name: Motion detection
 
       # ------------------------------------------------------------------
       # One camera, all four actions.

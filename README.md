@@ -96,7 +96,8 @@ See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 /api/blink_liveview_proxy/static/blink-liveview-dialog.js
 ```
 
-Full step-by-step in the [install guide](docs/INSTALL.md).
+Full step-by-step in the [install guide](docs/INSTALL.md), and what to do when
+it misbehaves in the [operations guide](docs/OPERATIONS.md).
 
 ## HACS Custom Repository
 
