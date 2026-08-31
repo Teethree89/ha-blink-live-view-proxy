@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import KEY_AUTHENTICATED
 
 from .api import BlinkLiveviewProxyClient
+from .playlist import tokenise_playlist
 from .const import DEFAULT_STREAM_SECONDS, DOMAIN
 
 LOGGER = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyStaticView(hass))
     hass.http.register_view(BlinkLiveviewProxyPlayerView(hass))
     hass.http.register_view(BlinkLiveviewProxyMpegtsView(hass))
+    # Order matters: index.m3u8 must be registered before the {filename}
+    # catch-all or the playlist would be served as a segment.
     hass.http.register_view(BlinkLiveviewProxyHlsPlaylistView(hass))
     hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
@@ -518,6 +521,13 @@ function streamUrl() {{
   return new URL(path, window.location.origin).href;
 }}
 
+function hlsUrl() {{
+  const token = encodeURIComponent(accessToken || "");
+  const session = encodeURIComponent(sessionId);
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/hls/index.m3u8?token=${{token}}&seconds=${{seconds}}&force=1&session=${{session}}&cache=${{Date.now()}}`;
+  return new URL(path, window.location.origin).href;
+}}
+
 function pttUrl() {{
   const token = encodeURIComponent(accessToken || "");
   const session = encodeURIComponent(sessionId);
@@ -863,7 +873,45 @@ async function startPlayer() {{
   stopPlayer();
   setLoading("Waking camera and waiting for video");
 
-  if (!window.mpegts || !mpegts.getFeatureList().mseLivePlayback) {{
+  const canMse = !!(window.mpegts && mpegts.getFeatureList().mseLivePlayback);
+  const canNativeHls = video.canPlayType("application/vnd.apple.mpegurl") !== "";
+
+  if (!canMse && canNativeHls) {{
+    // iOS Safari and the Home Assistant companion app's WKWebView have no
+    // Media Source Extensions, so mpegts.js can never run there and the direct
+    // MPEG-TS player always dies with E-001b. They do play HLS natively, and
+    // the proxy already produces an HLS rendition, so use it.
+    video.onplaying = () => {{
+      video.classList.add("ready");
+      overlay.classList.add("hidden");
+      actions.hidden = true;
+      liveActions.hidden = false;
+      talk.hidden = !pttSupported;
+      talk.disabled = !pttSupported;
+    }};
+    video.onended = () => {{
+      stopPlayer();
+      setEnded("Live view ended.");
+    }};
+    video.onerror = () => {{
+      stopPlayer();
+      setEnded("Live view ended or the camera stopped sending video.");
+    }};
+    video.src = hlsUrl();
+    video.load();
+    try {{
+      await video.play();
+    }} catch (err) {{
+      statusText.textContent = "Tap play to start live view";
+    }}
+    endTimer = setTimeout(() => {{
+      stopPlayer();
+      setEnded(`${{seconds}} second live view finished.`);
+    }}, (seconds + 5) * 1000);
+    return;
+  }}
+
+  if (!canMse) {{
     setEnded("This browser cannot play the direct MPEG-TS stream. E-001b");
     return;
   }}
@@ -988,10 +1036,12 @@ class BlinkLiveviewProxyMpegtsView(HomeAssistantView):
 
 
 class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
-    """Proxy the HLS playlist so browsers without MSE (iOS) can play live.
+    """Serve the proxy's HLS playlist, rewritten so segments carry the token.
 
-    Segment lines are rewritten so the player fetches them back through this
-    integration carrying the same camera token.
+    iOS has no Media Source Extensions, so mpegts.js cannot run there at all.
+    Native HLS is the only way an iPhone can play this stream. Segment URIs in
+    the playlist are relative and players do not inherit the playlist's query
+    string, so each one needs the browser token appended.
     """
 
     requires_auth = False
@@ -1002,11 +1052,14 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request, slug: str) -> web.Response:
-        """Return the rewritten HLS playlist."""
+        """Return the playlist with tokenised segment URIs."""
         _camera(self.hass, slug)
-        token = _authorize_browser_request(self.hass, request, slug)
-        browser_session = request.query.get("session", "")
-        query = {"session": browser_session} if browser_session else None
+        _authorize_browser_request(self.hass, request, slug)
+        query = {
+            "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
+            "force": request.query.get("force", "1"),
+            "session": request.query.get("session", ""),
+        }
         upstream = await _open_proxy_response(
             _client(self.hass), f"/cameras/{slug}/hls/index.m3u8", query
         )
@@ -1015,23 +1068,15 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
         finally:
             upstream.release()
 
-        suffix = f"?token={quote(token, safe='')}" if token else ""
-        lines = []
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                lines.append(stripped.split("?", 1)[0] + suffix)
-            else:
-                lines.append(line)
         return web.Response(
-            text="\n".join(lines) + "\n",
+            text=tokenise_playlist(text, request.query.get("token", "")),
             content_type="application/vnd.apple.mpegurl",
             headers={"Cache-Control": "no-store"},
         )
 
 
 class BlinkLiveviewProxyHlsSegmentView(HomeAssistantView):
-    """Proxy a single HLS media segment for native playback."""
+    """Proxy a single HLS segment from the local proxy."""
 
     requires_auth = False
     url = "/api/blink_liveview_proxy/cameras/{slug}/hls/{filename}"
@@ -1043,7 +1088,10 @@ class BlinkLiveviewProxyHlsSegmentView(HomeAssistantView):
     async def get(
         self, request: web.Request, slug: str, filename: str
     ) -> web.StreamResponse:
-        """Stream one .ts segment to the browser."""
+        """Stream one segment to the browser."""
+        # The filename goes straight into the upstream path, so it is pinned to
+        # a bare .ts name. Without this a crafted segment URI could walk out of
+        # the HLS directory.
         if "/" in filename or not filename.endswith(".ts"):
             raise web.HTTPNotFound()
         _camera(self.hass, slug)
