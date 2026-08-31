@@ -79,9 +79,11 @@ views:
             show_label: true
             label: >
               [[[
-                const found = entity ? entity.state : '?';
-                const want = entity ? entity.attributes.configured : '?';
-                return `${found} of ${want}`;
+                if (!entity) return String.fromCharCode(8212);
+                const want = entity.attributes.configured;
+                return want === undefined
+                  ? entity.state
+                  : `${entity.state} of ${want}`;
               ]]]
             styles:
               card: [[height, 74px]]
@@ -92,6 +94,7 @@ views:
             entity: binary_sensor.blink_needs_attention
             name: Health
             show_state: true
+            icon: mdi:help-circle-outline
             state:
               - value: "off"
                 color: "#22c55e"
