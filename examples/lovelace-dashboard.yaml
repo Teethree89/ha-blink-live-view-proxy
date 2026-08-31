@@ -66,8 +66,10 @@ views:
                     color: "#ef4444"
                     icon: mdi:cctv-off
                 styles:
-                  card: [[height, 74px]]
-                  name: [[font-size, 12px]]
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
 
               # "5 of 6" is the number that tells you something is wrong.
               - type: custom:button-card
@@ -85,9 +87,13 @@ views:
                   ]]]
                 show_label: true
                 styles:
-                  card: [[height, 74px]]
-                  name: [[font-size, 12px]]
-                  label: [[font-size, 15px], [font-weight, 600]]
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
+                  label:
+                    - font-size: 15px
+                    - font-weight: 600
 
               - type: custom:button-card
                 entity: binary_sensor.blink_needs_attention
@@ -102,8 +108,10 @@ views:
                     color: "#f59e0b"
                     icon: mdi:alert-decagram-outline
                 styles:
-                  card: [[height, 74px]]
-                  name: [[font-size, 12px]]
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
 
               # Guarded reload. It refuses when a reload cannot help, which
               # matters — every reload is a login attempt, and repeated
@@ -119,8 +127,10 @@ views:
                   action: call-service
                   service: script.blink_reload_force
                 styles:
-                  card: [[height, 74px]]
-                  name: [[font-size, 12px]]
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
 
       # ------------------------------------------------------------------
       # Arming and per-camera detail, from the official Blink integration.

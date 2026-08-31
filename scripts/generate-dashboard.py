@@ -46,8 +46,10 @@ PILL_PROXY = """\
                 color: "#ef4444"
                 icon: mdi:cctv-off
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
 """
 
 PILL_CAMERAS = """\
@@ -66,9 +68,13 @@ PILL_CAMERAS = """\
                   : `${entity.state} of ${want}`;
               ]]]
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
-              label: [[font-size, 15px], [font-weight, 600]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
+              label:
+                - font-size: 15px
+                - font-weight: 600
 """
 
 PILL_HEALTH = """\
@@ -85,8 +91,10 @@ PILL_HEALTH = """\
                 color: "#f59e0b"
                 icon: mdi:alert-decagram-outline
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
 """
 
 PILL_RELOAD = """\
@@ -100,8 +108,10 @@ PILL_RELOAD = """\
               action: call-service
               service: script.blink_reload_force
             styles:
-              card: [[height, 74px]]
-              name: [[font-size, 12px]]
+              card:
+                - height: 74px
+              name:
+                - font-size: 12px
 """
 
 
