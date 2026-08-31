@@ -54,7 +54,8 @@ systemd/blink-liveview-proxy.service     Example Linux service unit
 systemd/blink-liveview-proxy-watchdog.*  Optional stuck-token-refresh watchdog
 scripts/install-proxy.sh                 Linux install helper
 scripts/blink-liveview-proxy-watchdog.sh Watchdog script installed by the helper
-examples/                                HA package and Lovelace snippets
+examples/                                HA package and Lovelace dashboards
+scripts/generate-dashboard.py            Builds a dashboard from live cameras
 docs/                                    Setup, configuration, and notes
 ```
 
@@ -120,6 +121,24 @@ The local proxy routes are documented in the
 Route handlers live in `proxy/blink_proxy/routes.py`; Blink IMMI and live-view
 behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 `proxy/blink_proxy/ptt.py`.
+
+## Dashboards
+
+Three ready-made options, from hand-edited to self-populating, are in the
+[dashboard guide](docs/DASHBOARD.md):
+
+- [`examples/lovelace-dashboard.yaml`](examples/lovelace-dashboard.yaml) — one
+  commented camera with every action; copy it per camera.
+- [`scripts/generate-dashboard.py`](scripts/generate-dashboard.py) — asks the
+  running proxy what exists and prints a finished dashboard for all of them.
+- [`examples/lovelace-auto-populate.yaml`](examples/lovelace-auto-populate.yaml)
+  — builds a tile for every camera automatically as it appears.
+
+Register this dashboard resource first or every tap silently does nothing:
+
+```text
+/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+```
 
 ## Dashboard Helper
 

@@ -1,0 +1,202 @@
+# Blink Liveview Proxy — full example dashboard
+#
+# Every feature the integration exposes, on one camera. Copy the camera block
+# once per camera and change `front_door` to that camera's proxy slug, or use
+# examples/lovelace-auto-populate.yaml to build the same thing for every camera
+# automatically.
+#
+# Find your slugs with:  curl http://127.0.0.1:8088/cameras
+#
+# Required custom cards (HACS → Frontend):
+#   - button-card          the tap targets; fire-dom-event needs it
+# Optional:
+#   - card-mod             rounded corners on the tiles below
+#
+# Required once, in Settings → Dashboards → Resources:
+#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js   (JavaScript module)
+# Nothing works without that resource and it fails silently, so check it first.
+
+views:
+  - title: Cameras
+    path: cameras
+    type: sections
+    sections:
+      # ------------------------------------------------------------------
+      # Proxy health. If this is off, every tile below is a dead tap.
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: entities
+            title: Blink Liveview Proxy
+            entities:
+              - entity: binary_sensor.blink_liveview_proxy
+                name: Proxy
+              # The official Blink integration supplies these. Names vary by
+              # camera; delete the rows you do not have.
+              - entity: sensor.front_door_temperature
+                name: Front Door temperature
+              - entity: sensor.front_door_battery
+                name: Front Door battery
+
+      # ------------------------------------------------------------------
+      # One camera, all four actions.
+      #
+      #   tap the tile ....... live view (MSE, or native HLS on iOS)
+      #   filmstrip .......... local Sync Module clips
+      #   image-refresh ...... pull a fresh snapshot from Blink
+      #   motion-sensor ...... toggle motion detection
+      #
+      # Push-to-talk, "End & Save" and "Save MP4" live inside the live-view
+      # dialog. PTT only appears for cameras the proxy reports as supporting
+      # it; Mini/owl cameras are hidden by default and can be opted back in
+      # with ptt_force_enabled_slugs in the proxy config.
+      # ------------------------------------------------------------------
+      - type: grid
+        cards:
+          - type: picture-elements
+            camera_image: camera.front_door
+            camera_view: auto
+            aspect_ratio: 16x9
+            card_mod:
+              style: |
+                ha-card {
+                  border-radius: 14px;
+                  overflow: hidden;
+                }
+            elements:
+              # Whole-tile tap target for live view. Transparent, sits under
+              # the buttons below so it does not swallow their taps.
+              - type: custom:button-card
+                entity: camera.blink_live_front_door
+                show_icon: false
+                show_name: false
+                show_state: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy:
+                    slug: front_door
+                    entity_id: camera.blink_live_front_door
+                    title: Front Door
+                styles:
+                  card:
+                    - height: 100%
+                    - padding: 0
+                    - border: 0
+                    - box-shadow: none
+                    - background: rgba(0, 0, 0, 0)
+                style:
+                  top: 0
+                  left: 0
+                  width: 100%
+                  height: 100%
+                  transform: none
+                  z-index: 1
+
+              # Camera name, bottom left.
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Front Door
+                styles:
+                  card:
+                    - background: rgba(0, 0, 0, 0)
+                    - border: 0
+                    - box-shadow: none
+                    - padding: 0
+                  name:
+                    - color: white
+                    - font-size: 14px
+                    - font-weight: 600
+                    - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
+                style:
+                  bottom: 8px
+                  left: 12px
+                  transform: none
+                  z-index: 2
+
+              # Local clips. `slug` is enough — the dialog derives the rest.
+              - type: custom:button-card
+                icon: mdi:filmstrip
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy_clips:
+                    slug: front_door
+                    title: Front Door Clips
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 36px
+                    - height: 36px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 20px
+                style:
+                  bottom: 8px
+                  right: 100px
+                  transform: none
+                  z-index: 2
+
+              # Fresh snapshot. Dims the thumbnail while it fetches.
+              - type: custom:button-card
+                icon: mdi:image-refresh
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_snapshot_refresh:
+                    slug: front_door
+                    source_entity_id: camera.front_door
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 36px
+                    - height: 36px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 20px
+                style:
+                  bottom: 8px
+                  right: 54px
+                  transform: none
+                  z-index: 2
+
+              # Motion detection, from the official Blink integration.
+              # Drop this element if that integration is not set up.
+              - type: custom:button-card
+                entity: switch.front_door_camera_motion_detection
+                show_name: false
+                icon: >
+                  [[[
+                    return entity && entity.state === 'on'
+                      ? 'mdi:motion-sensor'
+                      : 'mdi:motion-sensor-off';
+                  ]]]
+                tap_action:
+                  action: toggle
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 36px
+                    - height: 36px
+                    - padding: 0
+                  icon:
+                    - width: 20px
+                    - color: >
+                        [[[
+                          return entity && entity.state === 'on'
+                            ? '#38bdf8'
+                            : '#94a3b8';
+                        ]]]
+                style:
+                  bottom: 8px
+                  right: 8px
+                  transform: none
+                  z-index: 2
