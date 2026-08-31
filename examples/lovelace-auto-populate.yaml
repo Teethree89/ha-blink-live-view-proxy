@@ -24,6 +24,27 @@
 # If you would rather not install auto-entities, run
 # `python3 scripts/generate-dashboard.py` instead — it queries the proxy and
 # prints the same dashboard as plain YAML you can paste.
+#
+# ---------------------------------------------------------------------------
+# Where this goes
+#
+# This is a WHOLE DASHBOARD, not a single card. The top-level `views:` key
+# below is the complete configuration for one dashboard, so pasting all of it
+# REPLACES every view on whichever dashboard you paste it into.
+#
+# On a new dashboard (recommended):
+#   1. Settings → Dashboards → + Add dashboard → New dashboard from scratch
+#   2. Open it, click the pencil, then ⋮ → Raw configuration editor
+#   3. Select all, delete, paste this file, Save
+#
+# Adding it to a dashboard you already have:
+#   Paste only from the `- title: Cameras` line down, as another item under
+#   the `views:` key that is already there. Do not paste the `views:` line
+#   itself, and keep the two-space indent on `- title:`.
+#
+# If ⋮ shows "Take control" instead of a raw editor, the dashboard is still
+# auto-generated — take control first, which is a one-way change.
+# ---------------------------------------------------------------------------
 
 views:
   - title: Cameras

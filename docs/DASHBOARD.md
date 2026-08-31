@@ -18,6 +18,38 @@ Type: JavaScript module
 
 If a tap does nothing at all, check this before anything else.
 
+## Where to paste it
+
+All three options produce a **whole dashboard**, not a single card. The
+top-level `views:` key is the complete configuration for one dashboard, so
+pasting the lot **replaces every view** on the dashboard you paste it into.
+
+**Onto a new dashboard** — recommended, nothing to lose:
+
+1. Settings → Dashboards → **+ Add dashboard** → **New dashboard from scratch**
+2. Open it, click the pencil to edit, then **⋮ → Raw configuration editor**
+3. Select all, delete, paste the file, **Save**
+
+**Onto a dashboard you already have** — paste only the view, not the wrapper:
+
+```yaml
+views:
+  - title: Home          # your existing view, leave it
+    cards: [...]
+
+  - title: Cameras       # <- paste from here down
+    path: cameras
+    cards:
+      ...
+```
+
+Copy from the `- title: Cameras` line down and drop it under the `views:` key
+that is already there. Do not paste the `views:` line itself, and keep the
+two-space indent on `- title:` or the editor will reject it.
+
+If **⋮** offers "Take control" instead of a raw editor, the dashboard is still
+auto-generated. Take control first — that is a one-way change.
+
 ## What each camera can do
 
 | Action | Fired as | Needs |
