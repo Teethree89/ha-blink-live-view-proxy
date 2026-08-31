@@ -11,34 +11,28 @@ BLINK_USERNAME="$(bashio::config 'blink_username')"
 BLINK_PASSWORD="$(bashio::config 'blink_password')"
 export BLINK_USERNAME BLINK_PASSWORD
 
+# No "list" pre-run any more.
+#
+# It used to log in once for "list" and then again for "serve", two logins per
+# start. Blink throttles repeated logins hard - five attempts in 55 seconds and
+# every later one comes back "Login failed", even with correct credentials.
+#
+# Since the 2FA code is now redeemed inside the serving process (see
+# blink_proxy/blink.py), the pre-run is worse than wasteful: it would open the
+# OAuth session, wait for the code, and then "serve" would open a second,
+# entirely new session with a different hardware_id - which is the bug the code
+# is tied to.
+#
+# So: one invocation. "serve" logs in itself and waits for the code if needed.
+
 if [ ! -f "$AUTH_FILE" ]; then
-    if bashio::config.is_empty 'blink_2fa_code'; then
-        # No pin yet — initiate login so Blink sends the 2FA SMS/email,
-        # then exit cleanly and tell the user what to do next.
-        bashio::log.info "No auth file found. Sending credentials to Blink to trigger 2FA..."
-        "$PYTHON" /opt/proxy/blink_liveview_proxy.py \
-            --config "$CONFIG_FILE" list 2>/dev/null || true
-        bashio::log.warning "---------------------------------------------------------------"
-        bashio::log.warning "Blink sent a 2FA PIN to your registered phone or email."
-        bashio::log.warning "1. Copy the PIN from your phone/email."
-        bashio::log.warning "2. Open the add-on Configuration tab."
-        bashio::log.warning "3. Paste the PIN into blink_2fa_code and save."
-        bashio::log.warning "4. Restart the add-on."
-        bashio::log.warning "The PIN expires in a few minutes — restart promptly."
-        bashio::log.warning "---------------------------------------------------------------"
-        exit 0
-    else
-        bashio::log.info "No auth file — completing Blink 2FA login..."
-        PIN="$(bashio::config 'blink_2fa_code')"
-        export BLINK_2FA_CODE="$PIN"
-        if "$PYTHON" /opt/proxy/blink_liveview_proxy.py \
-            --config "$CONFIG_FILE" --pin "$PIN" list; then
-            bashio::log.info "Authentication succeeded."
-            bashio::log.info "You may clear blink_2fa_code from the add-on options."
-        else
-            bashio::log.fatal "Authentication failed. Check blink_username, blink_password, and blink_2fa_code."
-        fi
-    fi
+    bashio::log.info "No auth file yet - the proxy will log in and, if Blink"
+    bashio::log.info "asks for a 2FA code, wait for it in the same session."
+fi
+
+PIN="$(bashio::config 'blink_2fa_code')"
+if [ -n "$PIN" ]; then
+    export BLINK_2FA_CODE="$PIN"
 fi
 
 PORT="$(bashio::config 'port')"
