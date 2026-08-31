@@ -106,6 +106,13 @@ python3 scripts/generate-dashboard.py --format card --camera front_door
 | `card` | one `vertical-stack` card | + Add card → Manual |
 | `card --camera SLUG` | one `picture-elements` tile | + Add card → Manual |
 
+By default the output carries only the **Proxy** pill, because that is the one
+that works with the integration alone. Add `--with-package` for the Cameras,
+Health and Reload pills once you have installed
+[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml)
+— without it those two read a sensor that does not exist and Reload calls a
+script that does not exist, so it looks fine and silently does nothing.
+
 Other options: `--proxy-url http://homeassistant.local:8088` and
 `--token "$BLINK_PROXY_TOKEN"` if the proxy requires one.
 
@@ -160,13 +167,17 @@ entity id or delete that element.
 
 ## Status pills and the reload button
 
-All three options open with a pill row: proxy up/down, `N of M` cameras
+The dashboards open with a pill row: proxy up/down, `N of M` cameras
 discovered, an overall health pill, and a reload button.
 
-The middle two read a REST sensor that polls the proxy's `/status`, defined in
-[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml).
-Install that package to light them up; without it they show as unavailable and
-the proxy pill still works on its own.
+**Only the Proxy pill works on its own.** The other three need
+[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml):
+Cameras and Health read its REST sensor, and Reload calls its guarded script.
+Without that package the first two render as a stub and Reload looks perfectly
+normal while doing nothing at all.
+
+So either install the package, or delete those three pills. The generator
+leaves them out unless you pass `--with-package`.
 
 The reload button calls `script.blink_reload_guarded`, which **refuses to run**
 unless a reload could actually help. Hold it to force. That is not

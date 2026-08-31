@@ -24,16 +24,20 @@ import urllib.request
 
 DEFAULT_PROXY = "http://127.0.0.1:8088"
 
-# The "N of M" and "Health" pills read the REST sensor from
-# examples/homeassistant-package.yaml. Without that package they show as
-# unavailable; the proxy pill works on its own.
-STATUS_PILLS = """\
-      - type: horizontal-stack
-        cards:
+# Pills.
+#
+# Only the proxy pill works with the integration alone. The other three need
+# examples/homeassistant-package.yaml: two read its REST sensor, and Reload
+# calls its guarded script. Without that package they render as a stub or, in
+# Reload's case, look fine and silently do nothing — so they are opt-in behind
+# --with-package rather than shipped broken.
+
+PILL_PROXY = """\
           - type: custom:button-card
             entity: binary_sensor.blink_liveview_proxy
             name: Proxy
             show_state: true
+            icon: mdi:cctv
             state:
               - value: "on"
                 color: "#22c55e"
@@ -44,6 +48,9 @@ STATUS_PILLS = """\
             styles:
               card: [[height, 74px]]
               name: [[font-size, 12px]]
+"""
+
+PILL_CAMERAS = """\
           - type: custom:button-card
             entity: sensor.blink_cameras_discovered
             name: Cameras
@@ -52,18 +59,24 @@ STATUS_PILLS = """\
             show_label: true
             label: >
               [[[
-                const found = entity ? entity.state : '?';
-                const want = entity ? entity.attributes.configured : '?';
-                return `${found} of ${want}`;
+                if (!entity) return String.fromCharCode(8212);
+                const want = entity.attributes.configured;
+                return want === undefined
+                  ? entity.state
+                  : `${entity.state} of ${want}`;
               ]]]
             styles:
               card: [[height, 74px]]
               name: [[font-size, 12px]]
               label: [[font-size, 15px], [font-weight, 600]]
+"""
+
+PILL_HEALTH = """\
           - type: custom:button-card
             entity: binary_sensor.blink_needs_attention
             name: Health
             show_state: true
+            icon: mdi:help-circle-outline
             state:
               - value: "off"
                 color: "#22c55e"
@@ -74,6 +87,9 @@ STATUS_PILLS = """\
             styles:
               card: [[height, 74px]]
               name: [[font-size, 12px]]
+"""
+
+PILL_RELOAD = """\
           - type: custom:button-card
             name: Reload
             icon: mdi:refresh
@@ -87,6 +103,14 @@ STATUS_PILLS = """\
               card: [[height, 74px]]
               name: [[font-size, 12px]]
 """
+
+
+def status_pills(with_package: bool) -> str:
+    """The pill row. Only the proxy pill stands on its own."""
+    pills = PILL_PROXY
+    if with_package:
+        pills += PILL_CAMERAS + PILL_HEALTH + PILL_RELOAD
+    return "      - type: horizontal-stack\n        cards:\n" + pills
 
 
 def fetch_cameras(proxy_url: str, token: str) -> list[dict]:
@@ -324,13 +348,13 @@ HEADER_CARD = """\
 """
 
 
-def emit_dashboard(cameras: list[dict]) -> str:
-    return "views:\n" + emit_view(cameras)
+def emit_dashboard(cameras: list[dict], with_package: bool) -> str:
+    return "views:\n" + emit_view(cameras, with_package)
 
 
-def emit_view(cameras: list[dict]) -> str:
+def emit_view(cameras: list[dict], with_package: bool) -> str:
     out = "  - title: Cameras\n    path: cameras\n    cards:\n"
-    out += STATUS_PILLS
+    out += status_pills(with_package)
     for camera in cameras:
         out += card_for(camera)
     return out
@@ -352,14 +376,14 @@ def unlist(block: str) -> str:
     return reindent("\n".join(lines) + "\n", -2)
 
 
-def emit_card(cameras: list[dict]) -> str:
+def emit_card(cameras: list[dict], with_package: bool) -> str:
     """One vertical-stack holding the pills and a grid of camera tiles."""
     if len(cameras) == 1:
         # A single camera needs no wrapper; the tile is already one card.
         return unlist(reindent(card_for(cameras[0]), -6))
 
     out = "type: vertical-stack\ncards:\n"
-    out += reindent(STATUS_PILLS, -4)
+    out += reindent(status_pills(with_package), -4)
     out += "  - type: grid\n    columns: 2\n    square: false\n    cards:\n"
     for camera in cameras:
         out += card_for(camera)
@@ -393,6 +417,13 @@ def main() -> int:
         metavar="SLUG",
         help="only this camera. With --format card that emits the bare tile.",
     )
+    parser.add_argument(
+        "--with-package",
+        action="store_true",
+        help="add the cameras / health / reload pills. These need "
+        "examples/homeassistant-package.yaml installed; without it they show "
+        "as a stub and Reload does nothing.",
+    )
     args = parser.parse_args()
 
     cameras = fetch_cameras(args.proxy_url, args.token)
@@ -417,7 +448,7 @@ def main() -> int:
         "dashboard": emit_dashboard,
         "view": emit_view,
         "card": emit_card,
-    }[args.format](cameras)
+    }[args.format](cameras, args.with_package)
 
     print("# Generated by scripts/generate-dashboard.py")
     print(f"# {len(cameras)} camera(s) from {args.proxy_url}")
