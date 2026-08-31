@@ -193,3 +193,10 @@ requires a trusted HTTPS origin and working Android microphone input. For the
 tested Frameo USB microphone workflow, see the HA Light Panel companion docs:
 
 [Frameo USB microphone guide](https://github.com/Teethree89/ha-light-panel/blob/main/docs/frameo-usb-microphone.md)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Not affiliated with, endorsed by, or supported by Amazon or Blink. This is an
+interoperability project for cameras you already own.
