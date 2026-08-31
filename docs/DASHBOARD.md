@@ -81,16 +81,36 @@ Best if you want to restyle things, or only have a couple of cameras.
 
 [`scripts/generate-dashboard.py`](../scripts/generate-dashboard.py)
 
-Asks the running proxy what exists and prints a finished dashboard:
+Asks the running proxy what exists and prints finished YAML. `--format`
+decides what shape, so you are not forced to replace a dashboard just to get
+the cameras in:
 
 ```bash
+# a whole dashboard (default)
 python3 scripts/generate-dashboard.py > cameras.yaml
-python3 scripts/generate-dashboard.py --proxy-url http://homeassistant.local:8088
-python3 scripts/generate-dashboard.py --token "$BLINK_PROXY_TOKEN"
+
+# one view, to add to a dashboard you already have
+python3 scripts/generate-dashboard.py --format view
+
+# a single card for the manual-card editor, nothing else touched
+python3 scripts/generate-dashboard.py --format card
+
+# just one camera, as a bare card
+python3 scripts/generate-dashboard.py --format card --camera front_door
 ```
 
-Paste the output into the dashboard's raw configuration editor. Needs
-**button-card** only, and no template rendering at view time.
+| `--format` | Produces | Paste into |
+|---|---|---|
+| `dashboard` | `views:` — a complete dashboard | Raw configuration editor, replacing everything |
+| `view` | one `- title: Cameras` item | Raw configuration editor, under the existing `views:` |
+| `card` | one `vertical-stack` card | + Add card → Manual |
+| `card --camera SLUG` | one `picture-elements` tile | + Add card → Manual |
+
+Other options: `--proxy-url http://homeassistant.local:8088` and
+`--token "$BLINK_PROXY_TOKEN"` if the proxy requires one.
+
+Every shape carries its own paste instructions in the printed header. Needs
+**button-card** only, and nothing renders at view time.
 
 Re-run it after adding a camera — the output is a snapshot, not a live view.
 
