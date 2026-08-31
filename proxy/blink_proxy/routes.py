@@ -47,6 +47,40 @@ async def index_handler(request: web.Request) -> web.Response:
 async def health_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
+WATCHDOG_STATE_FILE = Path("/var/lib/blink-liveview-proxy/watchdog-state")
+PROCESS_STARTED_AT = time.time()
+
+def _read_watchdog_state() -> dict[str, int]:
+    try:
+        text = WATCHDOG_STATE_FILE.read_text()
+    except OSError:
+        return {}
+    state: dict[str, int] = {}
+    for line in text.splitlines():
+        key, _, value = line.partition("=")
+        if key in ("last_restart", "attempts"):
+            try:
+                state[key] = int(value)
+            except ValueError:
+                pass
+    return state
+
+async def status_handler(request: web.Request) -> web.Response:
+    client_status = request.app["client"].status()
+    watchdog = _read_watchdog_state()
+    now = time.time()
+    expiration = client_status["token_expiration"]
+    return web.json_response(
+        {
+            **client_status,
+            "token_seconds_remaining": (expiration - now) if expiration else None,
+            "process_started_at": PROCESS_STARTED_AT,
+            "process_uptime_seconds": now - PROCESS_STARTED_AT,
+            "watchdog_last_restart": watchdog.get("last_restart") or None,
+            "watchdog_attempts": watchdog.get("attempts", 0),
+        }
+    )
+
 async def cameras_handler(request: web.Request) -> web.Response:
     check_authorized(request)
     return web.json_response({"cameras": request.app["client"].list_cameras()})
@@ -349,12 +383,15 @@ async def last_liveview_mp4_download_handler(request: web.Request) -> web.FileRe
 async def hls_playlist_handler(request: web.Request) -> web.Response:
     check_authorized(request)
     slug = request.match_info["slug"]
+    browser_session = request.query.get("session") or ""
     manager: HlsManager = request.app["hls_manager"]
     try:
         session = await manager.get_or_start(slug)
     except KeyError as exc:
         raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
     await session.wait_ready()
+    if browser_session:
+        session.register_liveview_key(liveview_session_key(slug, browser_session))
 
     text = session.playlist.read_text(encoding="utf-8")
     token = request.query.get("token") if request.app.get("proxy_token") else None
@@ -389,7 +426,8 @@ async def make_app(
     await client.start()
 
     broker = BlinkStreamBroker(client)
-    hls_manager = HlsManager(broker, config, config_base)
+    active_liveviews: dict[str, LiveViewHandle] = {}
+    hls_manager = HlsManager(broker, config, config_base, active_liveviews)
     proxy_token = os.getenv(config["proxy_token_env"], config.get("proxy_token", ""))
 
     app = web.Application()
@@ -401,11 +439,12 @@ async def make_app(
     app["liveview_cache_dir"] = resolve_path(config["liveview_cache_dir"], config_base)
     app["last_liveviews"] = {}
     app["mpegts_cooldowns"] = {}
-    app["active_liveviews"] = {}
+    app["active_liveviews"] = active_liveviews
     app["mp4_locks"] = {}
 
     app.router.add_get("/", index_handler)
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/status", status_handler)
     app.router.add_get("/cameras", cameras_handler)
     app.router.add_get("/clips", clips_handler)
     app.router.add_get("/clips/{clip_id}.mp4", clip_download_handler)

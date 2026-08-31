@@ -12,8 +12,24 @@ can usually be patched without touching CLI, install, or HACS packaging code.
 ## Health and Inventory
 
 - `GET /health`
+- `GET /status`
 - `GET /cameras`
 - `GET /`
+
+`GET /status` reports login readiness, discovered vs configured camera
+counts, the cached Blink token expiry, process uptime, and the watchdog's
+last restart and attempt count. It is unauthenticated like `/health`, so it
+deliberately exposes no camera names, serials, or tokens.
+
+A negative `token_seconds_remaining` is normal and is not a fault. BlinkPy
+refreshes lazily: `Auth.query()` checks `need_refresh()` and renews the token
+inline before the request that needs it. An idle proxy therefore sits with an
+expired token until the next live view, then refreshes on demand and persists
+the result through the auth-file callback.
+
+Treat `ready` and `cameras_discovered` as the liveness signals. What matters
+is not whether the token has expired but whether a *refresh* can still
+succeed — a different question, and the one worth alerting on.
 
 ## Live View
 

@@ -96,8 +96,29 @@ Health check:
 
 ```bash
 curl http://127.0.0.1:8088/health
+curl http://127.0.0.1:8088/status
 curl http://127.0.0.1:8088/cameras
 ```
+
+### 2c. Optional Watchdog
+
+BlinkPy can get stuck in a token-refresh retry loop that only a restart
+clears. `scripts/install-proxy.sh` installs a timer that watches the journal
+for that pattern and restarts the service, backing off after three restarts
+in 30 minutes so it never hammers Blink's login endpoint (repeated failures
+there are what triggers a burst of 2FA texts).
+
+To install it by hand:
+
+```bash
+sudo install -m 0755 scripts/blink-liveview-proxy-watchdog.sh /usr/local/sbin/
+sudo cp systemd/blink-liveview-proxy-watchdog.service /etc/systemd/system/
+sudo cp systemd/blink-liveview-proxy-watchdog.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now blink-liveview-proxy-watchdog.timer
+```
+
+Skip it during install with `INSTALL_WATCHDOG=0 sudo -E scripts/install-proxy.sh`.
 
 ---
 

@@ -1,0 +1,7 @@
+[Unit]
+Description=Restart Blink Live View Proxy if its token refresh gets stuck
+After=blink-liveview-proxy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/blink-liveview-proxy-watchdog.sh

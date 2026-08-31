@@ -51,8 +51,11 @@ proxy/blink_liveview_proxy.py            Compatibility CLI entrypoint
 proxy/blink_proxy/                       Modular proxy implementation
 proxy/config.example.json                Generic proxy config template
 systemd/blink-liveview-proxy.service     Example Linux service unit
+systemd/blink-liveview-proxy-watchdog.*  Optional stuck-token-refresh watchdog
 scripts/install-proxy.sh                 Linux install helper
-examples/                                HA package and Lovelace snippets
+scripts/blink-liveview-proxy-watchdog.sh Watchdog script installed by the helper
+examples/                                HA package and Lovelace dashboards
+scripts/generate-dashboard.py            Builds a dashboard from live cameras
 docs/                                    Setup, configuration, and notes
 ```
 
@@ -93,7 +96,8 @@ See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 /api/blink_liveview_proxy/static/blink-liveview-dialog.js
 ```
 
-Full step-by-step in the [install guide](docs/INSTALL.md).
+Full step-by-step in the [install guide](docs/INSTALL.md), and what to do when
+it misbehaves in the [operations guide](docs/OPERATIONS.md).
 
 ## HACS Custom Repository
 
@@ -118,6 +122,25 @@ The local proxy routes are documented in the
 Route handlers live in `proxy/blink_proxy/routes.py`; Blink IMMI and live-view
 behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 `proxy/blink_proxy/ptt.py`.
+
+## Dashboards
+
+Three ready-made options, from hand-edited to self-populating, are in the
+[dashboard guide](docs/DASHBOARD.md):
+
+- [`examples/lovelace-dashboard.yaml`](examples/lovelace-dashboard.yaml) — one
+  commented camera with every action; copy it per camera.
+- [`scripts/generate-dashboard.py`](scripts/generate-dashboard.py) — asks the
+  running proxy what exists and prints a finished dashboard, a single view, or
+  one card, whichever you need (`--format dashboard|view|card`).
+- [`examples/lovelace-auto-populate.yaml`](examples/lovelace-auto-populate.yaml)
+  — builds a tile for every camera automatically as it appears.
+
+Register this dashboard resource first or every tap silently does nothing:
+
+```text
+/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+```
 
 ## Dashboard Helper
 
@@ -170,3 +193,10 @@ requires a trusted HTTPS origin and working Android microphone input. For the
 tested Frameo USB microphone workflow, see the HA Light Panel companion docs:
 
 [Frameo USB microphone guide](https://github.com/Teethree89/ha-light-panel/blob/main/docs/frameo-usb-microphone.md)
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Not affiliated with, endorsed by, or supported by Amazon or Blink. This is an
+interoperability project for cameras you already own.
