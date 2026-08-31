@@ -38,6 +38,8 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyStaticView(hass))
     hass.http.register_view(BlinkLiveviewProxyPlayerView(hass))
     hass.http.register_view(BlinkLiveviewProxyMpegtsView(hass))
+    hass.http.register_view(BlinkLiveviewProxyHlsPlaylistView(hass))
+    hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
@@ -982,6 +984,75 @@ class BlinkLiveviewProxyMpegtsView(HomeAssistantView):
             f"/cameras/{slug}/mpegts",
             "video/mp2t",
             query,
+        )
+
+
+class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
+    """Proxy the HLS playlist so browsers without MSE (iOS) can play live.
+
+    Segment lines are rewritten so the player fetches them back through this
+    integration carrying the same camera token.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/hls/index.m3u8"
+    name = "api:blink_liveview_proxy:hls_playlist"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request: web.Request, slug: str) -> web.Response:
+        """Return the rewritten HLS playlist."""
+        _camera(self.hass, slug)
+        token = _authorize_browser_request(self.hass, request, slug)
+        browser_session = request.query.get("session", "")
+        query = {"session": browser_session} if browser_session else None
+        upstream = await _open_proxy_response(
+            _client(self.hass), f"/cameras/{slug}/hls/index.m3u8", query
+        )
+        try:
+            text = await upstream.text()
+        finally:
+            upstream.release()
+
+        suffix = f"?token={quote(token, safe='')}" if token else ""
+        lines = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                lines.append(stripped.split("?", 1)[0] + suffix)
+            else:
+                lines.append(line)
+        return web.Response(
+            text="\n".join(lines) + "\n",
+            content_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class BlinkLiveviewProxyHlsSegmentView(HomeAssistantView):
+    """Proxy a single HLS media segment for native playback."""
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/hls/{filename}"
+    name = "api:blink_liveview_proxy:hls_segment"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(
+        self, request: web.Request, slug: str, filename: str
+    ) -> web.StreamResponse:
+        """Stream one .ts segment to the browser."""
+        if "/" in filename or not filename.endswith(".ts"):
+            raise web.HTTPNotFound()
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        return await _proxy_stream(
+            self.hass,
+            request,
+            f"/cameras/{slug}/hls/{filename}",
+            "video/mp2t",
         )
 
 

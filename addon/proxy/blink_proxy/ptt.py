@@ -218,7 +218,7 @@ async def ptt_handler(request: web.Request) -> web.WebSocketResponse:
         camera = request.app["client"].camera_for_slug(slug)
     except KeyError as err:
         raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from err
-    if not camera_ptt_supported(camera, request.app["config"]):
+    if not camera_ptt_supported(camera, request.app["config"], slug=slug):
         raise web.HTTPBadRequest(
             text=f"Push-to-talk is not enabled for camera type {camera.camera_type or camera.product_type or 'unknown'}\n"
         )

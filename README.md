@@ -51,7 +51,9 @@ proxy/blink_liveview_proxy.py            Compatibility CLI entrypoint
 proxy/blink_proxy/                       Modular proxy implementation
 proxy/config.example.json                Generic proxy config template
 systemd/blink-liveview-proxy.service     Example Linux service unit
+systemd/blink-liveview-proxy-watchdog.*  Optional stuck-token-refresh watchdog
 scripts/install-proxy.sh                 Linux install helper
+scripts/blink-liveview-proxy-watchdog.sh Watchdog script installed by the helper
 examples/                                HA package and Lovelace snippets
 docs/                                    Setup, configuration, and notes
 ```

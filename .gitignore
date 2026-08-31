@@ -1,0 +1,12 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+*.log
+
+# Local Blink auth/config/cache
+proxy/config.json
+secrets/
+.runtime/
+clips/
+captures/
