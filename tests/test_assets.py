@@ -181,6 +181,42 @@ def test_generator_shapes() -> None:
     check("front_door" in demo, "--demo uses the stand-in inventory")
 
 
+def test_proxy_copies_match() -> None:
+    """proxy/ and addon/proxy/ carry the same source and must not diverge.
+
+    A pull request once added RTSP support to the add-on copy only, which
+    would have left every Linux service install unable to use those cameras.
+    Nothing caught it but a manual diff.
+    """
+    print("\nproxy/ and addon/proxy/ are identical")
+    import filecmp
+
+    left = ROOT / "proxy/blink_proxy"
+    right = ROOT / "addon/proxy/blink_proxy"
+
+    def compare(a: pathlib.Path, b: pathlib.Path, prefix: str = "") -> list[str]:
+        result = filecmp.dircmp(a, b, ignore=["__pycache__"])
+        problems = [f"{prefix}{name}: only in proxy/" for name in result.left_only]
+        problems += [f"{prefix}{name}: only in addon/" for name in result.right_only]
+        problems += [f"{prefix}{name}: contents differ" for name in result.diff_files]
+        for name in result.common_dirs:
+            problems += compare(a / name, b / name, f"{prefix}{name}/")
+        return problems
+
+    problems = compare(left, right)
+    for entry in problems:
+        print(f"        {entry}")
+    check(not problems, f"the two proxy copies match ({len(problems)} differences)")
+
+    # Same for the two example configs, which drifted once already.
+    same = filecmp.cmp(
+        ROOT / "proxy/config.example.json",
+        ROOT / "addon/proxy/config.example.json",
+        shallow=False,
+    )
+    check(same, "the two config.example.json files match")
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -189,6 +225,7 @@ def main() -> int:
         test_hacs_json,
         test_manifest,
         test_generator_shapes,
+        test_proxy_copies_match,
     ):
         test()
 

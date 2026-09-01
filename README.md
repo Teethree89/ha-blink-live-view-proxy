@@ -31,6 +31,9 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - HTTPS-friendly browser microphone flow when HA is served through a trusted
   local HTTPS origin.
 
+See the [roadmap](docs/ROADMAP.md) for what is planned, what is deliberately
+out of scope, and the rough edges worth knowing about.
+
 ## Known Limits
 
 - This is not an official Amazon/Blink integration.
