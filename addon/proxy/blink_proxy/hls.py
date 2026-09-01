@@ -131,6 +131,8 @@ class HlsSession:
         timeout = float(self.manager.config.get("hls_start_timeout", 30))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # A client waiting here is active; keep the idle reaper off it.
+            self.touch()
             if self.process and self.process.returncode is not None:
                 tail = self._ffmpeg_error_tail()
                 LOGGER.error(
