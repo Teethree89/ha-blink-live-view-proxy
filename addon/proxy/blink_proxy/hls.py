@@ -23,6 +23,7 @@ class HlsSession:
         self.manager = manager
         self.directory = manager.root_dir / slug
         self.playlist = self.directory / "index.m3u8"
+        self.log_path = self.directory / "ffmpeg.log"
         self.liveview: LiveViewHandle | None = None
         self.process: asyncio.subprocess.Process | None = None
         self.active_liveview_keys: set[str] = set()
@@ -49,6 +50,7 @@ class HlsSession:
 
         self.liveview = await self.manager.broker.start_liveview(self.slug)
         segment_pattern = self.directory / "segment_%05d.ts"
+        log_handle = open(self.log_path, "wb")
         try:
             self.process = await asyncio.create_subprocess_exec(
                 self.manager.config["ffmpeg"],
@@ -75,7 +77,7 @@ class HlsSession:
                 str(segment_pattern),
                 str(self.playlist),
                 stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=log_handle,
             )
         except Exception:
             if self.liveview is not None:
@@ -83,17 +85,44 @@ class HlsSession:
             if self.directory.exists():
                 shutil.rmtree(self.directory)
             raise
+        finally:
+            # ffmpeg holds its own duplicate of the descriptor, so the parent
+            # copy is finished with either way.
+            log_handle.close()
         LOGGER.info("Started ffmpeg HLS session for %s in %s", self.slug, self.directory)
+
+    def _ffmpeg_error_tail(self, limit: int = 600) -> str:
+        """Return the end of ffmpeg's stderr, or "" if there is nothing to show."""
+        try:
+            text = self.log_path.read_text(errors="replace").strip()
+        except OSError:
+            return ""
+        return text[-limit:]
 
     async def wait_ready(self) -> None:
         timeout = float(self.manager.config.get("hls_start_timeout", 30))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.process and self.process.returncode is not None:
+                tail = self._ffmpeg_error_tail()
+                LOGGER.error(
+                    "ffmpeg exited with %s for %s%s",
+                    self.process.returncode,
+                    self.slug,
+                    f": {tail}" if tail else " (stderr was empty)",
+                )
                 raise RuntimeError(f"ffmpeg exited with {self.process.returncode}")
             if self.playlist.exists() and self.playlist.stat().st_size > 0:
                 return
             await asyncio.sleep(0.2)
+        tail = self._ffmpeg_error_tail()
+        LOGGER.error(
+            "HLS playlist never appeared for %s after %.0fs and ffmpeg is still "
+            "running%s",
+            self.slug,
+            timeout,
+            f". stderr tail: {tail}" if tail else " (stderr was empty)",
+        )
         raise TimeoutError(f"HLS playlist not ready after {timeout:g}s")
 
     async def stop(self) -> None:
