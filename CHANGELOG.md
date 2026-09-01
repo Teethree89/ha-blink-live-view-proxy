@@ -8,6 +8,40 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.4.0] — 2026-09-01
+
+Installing and updating the proxy, without a shell if you want one.
+
+- **A standalone Docker image**, `ghcr.io/teethree89/ha-blink-live-view-proxy`,
+  for hosts with neither Supervisor nor systemd — a NAS, a Docker-only box,
+  Home Assistant Container on something that is not Debian. It writes its own
+  config, discovers cameras, and generates its API token on first start; `/data`
+  holds everything that must survive a container replacement. Built for amd64
+  and arm64 on every push, published on a tag.
+- **A one-line install that is also the upgrade.**
+  `curl … bootstrap.sh | sudo bash` keeps a checkout on the proxy host, moves it
+  to the newest **tag** — never `main` — and runs the installer. It exits with
+  "nothing to do" when there is nothing to do, so it is safe to re-run.
+- **Optional unattended updates.** `INSTALL_AUTOUPDATE=1` installs a nightly
+  timer that runs that same check. Off by default: it restarts the camera proxy
+  when it fires, which should be a decision rather than a surprise.
+- **The authentication panel diagnoses failures** instead of blaming the URL and
+  token. A proxy that predates `/auth`, one running without a token, a rejected
+  token and an unreachable service now each get their own explanation and the
+  command that fixes them, plus a **Check proxy** button to re-run the check.
+  Home Assistant cannot apply those fixes — it has no shell on the proxy host —
+  and the page says so rather than offering a button that does nothing.
+- **A repair notice when the proxy is older than the integration needs.** The
+  two halves update independently, so this is the common surprise after a HACS
+  update; it now arrives as a notice naming the fix, and clears itself on the
+  next poll after the upgrade. `/status` reports `version` for it, and a proxy
+  that predates that field is placed by its capabilities so a correct install is
+  never told to upgrade to what it already runs.
+- Docs: the install guide is organised by which install you have, the upgrade
+  procedure is written down — including that upgrading by copying files leaves
+  the old blinkpy behind and breaks 2FA in a way that looks healthy — and this
+  changelog exists.
+
 ## [0.3.0] — 2026-09-01
 
 Browser authentication, and setup that provisions itself.
@@ -90,6 +124,7 @@ branch.
   is never submitted, and a non-UUID `hardware_id` is discarded because Blink
   answers those with a bare 406 that reads as a wrong password.
 
+[0.4.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.1.0

@@ -8,6 +8,12 @@ from typing import Any
 APP_ROOT = Path(__file__).resolve().parent.parent
 LOGGER_NAME = "blink_liveview_proxy"
 
+# Reported on /status so the Home Assistant integration can tell whether the
+# proxy is old enough to be missing routes it needs. Kept in step with
+# manifest.json and addon/config.yaml by a test, because a version that lies is
+# worse than no version at all.
+PROXY_VERSION = "0.4.0"
+
 IMMI_HEADER_BYTES = 9
 
 MAX_IMMI_PAYLOAD_BYTES = 1024 * 1024
