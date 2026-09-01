@@ -57,10 +57,14 @@ class HlsSession:
                 "-hide_banner",
                 "-loglevel",
                 str(self.manager.config.get("ffmpeg_loglevel", "warning")),
-                "-fflags",
-                "nobuffer",
                 "-flags",
                 "low_delay",
+                # ffmpeg's default 5s probe put the first segment at the third
+                # keyframe, and -fflags nobuffer would have discarded the first.
+                "-probesize",
+                str(self.manager.config.get("ffmpeg_probesize", 1_000_000)),
+                "-analyzeduration",
+                str(self.manager.config.get("ffmpeg_analyzeduration", 500_000)),
                 "-i",
                 self.liveview.tcp_url,
                 "-c",

@@ -46,6 +46,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "proxy_token_env": "BLINK_PROXY_TOKEN",
     "ffmpeg": "ffmpeg",
     "ffmpeg_loglevel": "warning",
+    "ffmpeg_probesize": 1_000_000,
+    "ffmpeg_analyzeduration": 500_000,
     "hls_dir": ".runtime/blink-liveview-proxy",
     "hls_idle_timeout": 45,
     "hls_start_timeout": 30,
