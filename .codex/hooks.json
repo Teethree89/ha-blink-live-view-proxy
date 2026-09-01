@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$PLUGIN_ROOT/scripts/conversation-maintenance.py\" drain-hook --transport auto --refresh-ui --refresh-mode window --auto-submit go --restore-focus",
+            "timeout": 300,
+            "statusMessage": "Draining queued conversation maintenance and restoring the Codex UI"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$PLUGIN_ROOT/scripts/conversation-maintenance.py\" handoff --emit-context --event SessionStart",
+            "timeout": 30,
+            "statusMessage": "Injecting any pending /clear handoff into this new thread"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$PLUGIN_ROOT/scripts/conversation-maintenance.py\" handoff --emit-context --event UserPromptSubmit",
+            "timeout": 30,
+            "statusMessage": "Injecting any pending /clear handoff into this turn"
+          }
+        ]
+      }
+    ]
+  }
+}
