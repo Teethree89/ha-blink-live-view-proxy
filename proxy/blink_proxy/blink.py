@@ -38,6 +38,44 @@ from .util import normalize_slug, redact_liveview_response
 LOGGER = logging.getLogger(LOGGER_NAME)
 
 
+def plan_2fa_code(
+    pin: str | None, env_value: str, *, interactive: bool
+) -> tuple[str, str | None]:
+    """Decide how to obtain a 2FA code, and whether a stale one was ignored.
+
+    Blink issues a code only *after* a sign-in has begun, so any value present
+    before that belongs to an earlier attempt. Nothing clears those values once
+    used: an add-on option stays filled in, and a systemd EnvironmentFile keeps
+    its BLINK_2FA_CODE across every restart. Submitting one fails the login and
+    leaves the user stuck, because the code they were just texted is never
+    asked for.
+
+    So a start-time code is never submitted. Returns the action to take:
+
+        "prompt"  a human is at a terminal and can answer during the challenge
+        "wait"    poll the live sources until a code arrives
+
+    plus a warning naming the stale source, so an ignored value is visible
+    rather than mysterious.
+    """
+    sources = []
+    if pin:
+        sources.append("--pin")
+    if env_value:
+        sources.append("the 2FA environment variable")
+
+    warning = None
+    if sources:
+        warning = (
+            f"Ignoring the code supplied through {' and '.join(sources)}: Blink "
+            "only issues a code after sign-in begins, so a value present "
+            "beforehand is from an earlier attempt and cannot be accepted. "
+            "Waiting for a fresh one instead — clear that value to silence this."
+        )
+
+    return ("prompt" if interactive else "wait"), warning
+
+
 def _discard_bad_hardware_id(login_data: dict[str, Any]) -> None:
     """Drop a cached hardware_id that Blink will reject before login runs.
 
@@ -64,6 +102,7 @@ def _discard_bad_hardware_id(login_data: dict[str, Any]) -> None:
             current,
         )
         login_data.pop("hardware_id", None)
+
 
 def camera_ptt_supported(
     camera: Any, config: dict[str, Any], slug: str | None = None
@@ -321,8 +360,17 @@ class BlinkClient:
                 # login_attributes carries hardware_id, and Auth.startup()
                 # picks it back up on the next run.
                 save_auth_callback()
-                code = self.pin or os.getenv(self.config["twofa_env"], "")
-                if not code and sys.stdin.isatty():
+
+                action, warning = plan_2fa_code(
+                    self.pin,
+                    os.getenv(self.config["twofa_env"], ""),
+                    interactive=sys.stdin.isatty(),
+                )
+                if warning:
+                    LOGGER.warning("%s", warning)
+
+                code = ""
+                if action == "prompt":
                     code = input("Blink 2FA code: ").strip()
                 if not code:
                     # In a container there is no tty, so wait in this same
