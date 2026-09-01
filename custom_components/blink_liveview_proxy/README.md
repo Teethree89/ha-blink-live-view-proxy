@@ -24,6 +24,21 @@ The publishable package lives in the
 This integration is not affiliated with, endorsed by, or supported by Amazon or
 Blink. It is an interoperability layer for cameras you own.
 
+## Requirements
+
+| What | Why |
+|---|---|
+| Home Assistant **2024.6.0+** | Enforced by `hacs.json`; the panel and repair notices rely on it |
+| A running proxy, **0.3.0 or newer** | This integration is only a client. Older proxies work for live view but have no `/auth` routes, and the integration says so rather than failing quietly |
+| A proxy API token | Required for the **Blink Authentication** panel, and for any proxy not bound to loopback. Both installers generate one |
+| `button-card` (HACS → Frontend) | Every example dashboard fires `fire-dom-event` through it |
+| `auto-entities` (HACS → Frontend) | Only for the self-populating dashboard |
+| The official Blink integration | Optional. Snapshots behind the loading frame, the snapshot-refresh button, and motion switches come from it |
+
+This integration installs no Python dependencies of its own — it uses Home
+Assistant's `aiohttp` — and depends only on the built-in `http`, `frontend` and
+`panel_custom` components.
+
 ## Local Test Run
 
 From the repo root:

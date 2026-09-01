@@ -17,6 +17,7 @@ from aiohttp import ClientError, ClientResponse, ClientTimeout, WSMsgType, web
 
 from homeassistant.components.http import HomeAssistantView, require_admin
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceNotFound
 from homeassistant.helpers.http import KEY_AUTHENTICATED
 
 from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
@@ -1323,12 +1324,24 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
         if not source_entity_id:
             raise web.HTTPNotFound(text="Camera has no source Blink entity\n")
 
-        await self.hass.services.async_call(
-            "blink",
-            "trigger_camera",
-            {"entity_id": source_entity_id},
-            blocking=True,
-        )
+        try:
+            await self.hass.services.async_call(
+                "blink",
+                "trigger_camera",
+                {"entity_id": source_entity_id},
+                blocking=True,
+            )
+        except ServiceNotFound as err:
+            # This is the one feature here that genuinely needs the official
+            # Blink integration: it owns blink.trigger_camera. Say that,
+            # instead of raising a 500 that reads like the proxy is broken.
+            raise web.HTTPNotFound(
+                text=(
+                    "Snapshot refresh needs the official Blink integration, "
+                    "which provides the blink.trigger_camera service. Live "
+                    "view, clips and push-to-talk do not.\n"
+                )
+            ) from err
         await asyncio.sleep(1)
         await self.hass.services.async_call(
             "homeassistant",

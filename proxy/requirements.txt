@@ -1,3 +1,18 @@
+# Runtime dependencies of the proxy. Python 3.10 or newer, which is what
+# blinkpy and aiohttp both require.
+
+# The HTTP server, the Blink cloud calls, and the WebSocket that carries
+# push-to-talk audio.
 aiohttp>=3.9
+
+# Blink account login, token refresh, camera discovery, and the IMMI live-view
+# handshake this project extends. Pinned exactly, not ranged: 0.25.5 recognises
+# Blink's 2FA challenge only as a 412, so the current 202 falls through as
+# "login failed" while the code is texted to you anyway. Read the release notes
+# before moving this.
 blinkpy==0.25.9
+
+# CA bundle. Python builds on macOS ship without a usable one, and the Blink
+# endpoints are HTTPS, so the proxy builds its SSL context from certifi rather
+# than hoping the system store is populated.
 certifi>=2023.5.7

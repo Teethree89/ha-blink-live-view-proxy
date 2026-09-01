@@ -600,6 +600,46 @@ def test_proxy_version_notice() -> None:
     )
 
 
+def test_official_integration_is_optional() -> None:
+    print("\nthe official Blink integration stays optional")
+
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    camera = (ROOT / "custom_components/blink_liveview_proxy/camera.py").read_text()
+    manifest = json.loads(
+        (ROOT / "custom_components/blink_liveview_proxy/manifest.json").read_text()
+    )
+    install = (ROOT / "docs/INSTALL.md").read_text()
+    readme = (ROOT / "README.md").read_text()
+
+    check(
+        "blink" in manifest.get("after_dependencies", [])
+        and "blink" not in manifest.get("dependencies", []),
+        "the blink domain is an ordering hint, never a hard dependency",
+    )
+    check(
+        "ServiceNotFound" in views and "needs the official Blink integration" in views,
+        "the one feature that needs it says so instead of raising a 500",
+    )
+    check(
+        "_loading_svg()" in camera,
+        "a missing source snapshot falls back to the generic loading image",
+    )
+    # The guide used to open by assuming it was installed, while the README
+    # called it optional. Both cannot be true.
+    check(
+        "recommended but not required" in install,
+        "the install guide does not claim it is assumed",
+    )
+    check(
+        "assumes Home Assistant already has the official Blink integration" not in install,
+        "the old assumption is gone, not merely contradicted further down",
+    )
+    check(
+        "optional but recommended" in readme,
+        "the README agrees with the install guide",
+    )
+
+
 def test_panel_contract() -> None:
     print("\nauthentication panel contract")
     panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
@@ -653,6 +693,7 @@ async def async_main() -> None:
     test_home_assistant_route_authorization()
     test_failure_classification()
     test_proxy_version_notice()
+    test_official_integration_is_optional()
     test_panel_contract()
     test_compatibility_assets()
 

@@ -1,7 +1,8 @@
 # Install Guide
 
-This guide assumes Home Assistant already has the official Blink integration
-configured and working.
+The official Blink integration is **recommended but not required** — see
+[Alongside the official Blink integration](#alongside-the-official-blink-integration)
+for exactly what it adds and what stops working without it.
 
 ## Which install am I?
 
@@ -63,6 +64,13 @@ On the host that will run the proxy:
 apt-get update
 apt-get install -y python3 python3-venv ffmpeg
 ```
+
+Python **3.10 or newer** — `blinkpy` and `aiohttp` both require it, and the
+installer stops with a clear message rather than letting pip fail obscurely.
+Debian 12 and Ubuntu 22.04 or newer are fine; Debian 11 ships 3.9 and is not.
+`ffmpeg` does the HLS packaging and the push-to-talk encode. The installer adds
+whichever of these is missing on apt systems, so this step is only needed for a
+manual install.
 
 ### 2. Install Proxy Files
 
@@ -348,6 +356,33 @@ adds the configured bearer token on its server-side request to the proxy. No
 password or PIN is placed in a URL, response, log, generated asset, or browser
 persistent storage. If the service restarts, the challenge is cancelled; start
 a new attempt and use the newly issued PIN.
+
+## Alongside the official Blink integration
+
+They are independent. This project never calls Blink through the official
+integration, and the official integration never calls this proxy. Live view,
+clips, push-to-talk, the direct player and the authentication panel all work
+with it absent.
+
+What having it adds:
+
+| Feature | Without the official integration |
+|---|---|
+| Snapshot behind the live-view loading frame | A generic loading image instead of your camera's last still |
+| **Snapshot refresh** button | Unavailable — it calls `blink.trigger_camera`, which that integration owns |
+| Motion detection toggles in the example dashboards | The `switch.*_camera_motion_detection` entities do not exist |
+| Battery, temperature, motion sensors | Not provided here — this project deliberately does not duplicate them |
+
+The link between the two is the `entity_id` in your camera map: point a proxy
+slug at the official camera entity and the snapshot features find it.
+
+**One account, two sessions.** Each logs in to Blink separately, with its own
+device id and its own refresh token, so re-authenticating one does nothing to
+the other. Blink's rate limits, though, are per *account*: a reload loop on the
+official integration can exhaust them and make this proxy's next login fail too.
+That is the failure described in
+[OPERATIONS.md](OPERATIONS.md#reload-restart-re-auth-are-not-interchangeable),
+and it is worth reading before adding automations that reload either one.
 
 ## 4. Add Lovelace Helper Resource
 

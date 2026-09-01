@@ -66,6 +66,43 @@ scripts/generate-dashboard.py            Builds a dashboard from live cameras
 docs/                                    Setup, configuration, and notes
 ```
 
+## Requirements
+
+Two halves with different needs. The **proxy** is what talks to Blink; the
+**integration** is what Home Assistant talks to.
+
+**The proxy**, whichever way you run it:
+
+| Path | Needs |
+|---|---|
+| Add-on | Home Assistant OS or Supervised, on `aarch64` or `amd64` |
+| systemd service | A Linux host with systemd, **Python 3.10+**, `ffmpeg`, and `git` for the one-liner. The installer adds the missing ones on apt systems |
+| Docker | Docker on `linux/amd64` or `linux/arm64`. Everything else is inside the image |
+
+Its Python dependencies are in [`proxy/requirements.txt`](proxy/requirements.txt):
+`aiohttp`, `certifi`, and `blinkpy` pinned to an exact version — 0.25.9 is the
+release that recognises Blink's current 2FA challenge, and an older one fails
+login while still texting you a code.
+
+**The integration**: Home Assistant **2024.6.0 or newer**, installed through
+HACS or copied into `custom_components/`. It adds no Python dependencies of its
+own — it uses Home Assistant's `aiohttp` — and depends only on built-in
+`http`, `frontend` and `panel_custom`.
+
+**Dashboards**: [button-card](https://github.com/custom-cards/button-card) for
+every example, plus
+[auto-entities](https://github.com/thomasloven/lovelace-auto-entities) for the
+self-populating one. Both from HACS → Frontend. The player and clip viewer need
+neither.
+
+**Account and hardware**: a Blink account with cameras, a Sync Module with local
+storage if you want clips, and — optional but recommended — the official Blink
+integration for snapshots, motion and battery. This project deliberately does
+not duplicate those.
+
+**For development**: `pyyaml` and `proxy/requirements.txt` for the tests, `ruff`
+for the lint, and `node` for `node --check` on the frontend files.
+
 ## Install Options
 
 ### Option A — Home Assistant Add-on (HAOS / easiest)

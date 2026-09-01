@@ -613,6 +613,64 @@ def test_standalone_image() -> None:
         check(json.loads((data / "config.json").read_text()) == config, "an existing config is left alone")
 
 
+def test_requirements_are_stated_once_and_true() -> None:
+    print("\nthe stated requirements match the code")
+
+    readme = (ROOT / "README.md").read_text()
+    installer = (ROOT / "scripts/install-proxy.sh").read_text()
+    hacs = json.loads((ROOT / "hacs.json").read_text())
+    requirements = (ROOT / "proxy/requirements.txt").read_text()
+
+    check("## Requirements" in readme, "the requirements are stated in one place")
+
+    # The floor is documented, enforced, and the same number in both.
+    # Bold can sit either side of the word, so compare on the plain text.
+    documented = re.search(r"Python (\d+\.\d+)\+", readme.replace("**", ""))
+    enforced = re.search(r"sys\.version_info >= \((\d+), (\d+)\)", installer)
+    check(documented is not None, "the README names a Python version")
+    check(enforced is not None, "the installer enforces a Python version")
+    if documented and enforced:
+        check(
+            documented.group(1) == f"{enforced.group(1)}.{enforced.group(2)}",
+            f"documented and enforced Python agree ({documented.group(1)})",
+        )
+
+    # HACS refuses to install below this; the README should not promise less.
+    check(
+        hacs["homeassistant"].rsplit(".", 1)[0] in readme or hacs["homeassistant"] in readme,
+        f"the README names the Home Assistant version HACS enforces ({hacs['homeassistant']})",
+    )
+
+    # blinkpy is pinned exactly, on purpose: 0.25.5 reads Blink's 2FA challenge
+    # as a failed login. A range here would let that back in.
+    # Comments now explain each dependency; they must not confuse the parsers
+    # that read this file (pip in CI, pip in the installer, the add-on build).
+    entries = [
+        line.strip()
+        for line in requirements.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    check(
+        {entry.split("=")[0].split(">")[0] for entry in entries}
+        == {"aiohttp", "blinkpy", "certifi"},
+        "the requirements file still declares exactly the three dependencies",
+    )
+    check(
+        all("why" not in entry.lower() for entry in entries),
+        "the explanations are comments, not requirement lines",
+    )
+
+    pin = re.search(r"^blinkpy==(\S+)$", requirements, re.M)
+    check(pin is not None, "blinkpy is pinned to an exact version, not a range")
+    if pin:
+        check(pin.group(1) in readme, f"the README names the pin it relies on ({pin.group(1)})")
+
+    for card in ("button-card", "auto-entities"):
+        check(card in readme, f"the dashboard dependency {card} is named")
+    for tool in ("ffmpeg", "git"):
+        check(tool in readme, f"the host dependency {tool} is named")
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -628,6 +686,7 @@ def main() -> int:
         test_versions_agree,
         test_bootstrap_and_autoupdate,
         test_standalone_image,
+        test_requirements_are_stated_once_and_true,
     ):
         test()
 

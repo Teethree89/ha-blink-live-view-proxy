@@ -23,6 +23,14 @@ if [ "${INSTALL_DEPS:-1}" = "1" ] && command -v apt-get >/dev/null 2>&1; then
   fi
 fi
 
+# blinkpy and aiohttp both require Python 3.10. Without this check the failure
+# lands inside pip's resolver, in a message that names neither this script nor
+# the version it needed.
+if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'; then
+  echo "Python 3.10 or newer is required. Found: $(python3 -V 2>&1)" >&2
+  exit 1
+fi
+
 install -d "$OPT_DIR" "$ETC_DIR" "$STATE_DIR/secrets"
 install -m 0644 "$ROOT/proxy/blink_liveview_proxy.py" "$OPT_DIR/blink_liveview_proxy.py"
 install -m 0644 "$ROOT/proxy/requirements.txt" "$OPT_DIR/requirements.txt"

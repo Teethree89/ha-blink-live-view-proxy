@@ -17,6 +17,19 @@ Runs the Blink Liveview Proxy as a Home Assistant add-on. No separate Linux host
 
 2. Install **Blink Liveview Proxy** from the add-on store and open its **Configuration** tab.
 
+## Requirements
+
+| What | Why |
+|---|---|
+| Home Assistant OS or Supervised | Add-ons need Supervisor. On Container or Core, run the proxy as a systemd service or a Docker container instead |
+| `aarch64` or `amd64` | ffmpeg transcoding a live stream is beyond 32-bit ARM; those builds were dropped in 0.2.0 |
+| A Blink account with cameras | The add-on logs in as you, and Blink texts a 2FA PIN the first time |
+| The matching custom integration | Only if you want the Home Assistant side: entities, the player, the clip viewer, and the **Blink Authentication** panel |
+| The official Blink integration | Optional. It adds the snapshot behind the loading frame, the snapshot-refresh button and motion switches. Everything else works without it |
+
+ffmpeg and Python are inside the add-on image; there is nothing to install on
+the host.
+
 ## Configuration
 
 | Option | Default | Description |
