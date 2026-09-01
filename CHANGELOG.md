@@ -8,6 +8,30 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.4.1] — 2026-09-01
+
+Fixes the install one-liner, and a sweep of the things a release is a good
+excuse to fix.
+
+- **`curl … | sudo bash` aborted before it ran anything.** Piped into bash the
+  script is read from stdin, where `BASH_SOURCE` does not exist, so the guard
+  that keeps `source` from executing it tripped over `set -u` — in exactly the
+  invocation the script exists for. The tests sourced the file, which is the one
+  path where that variable is always set; they now also pipe it into bash the
+  way the documentation does.
+- **`/status` reports its version only to callers holding the proxy token.** The
+  endpoint stays reachable without one, because dashboards and the watchdog use
+  it, but a version number is a shopping list for whoever is asking. The
+  integration sends the token, so its version check is unaffected.
+- **The authentication panel stops polling every two seconds forever.** A live
+  challenge still refreshes every two seconds — it has a countdown — but an idle
+  or finished page drops to fifteen, and leaving the page stops it. Each tick
+  was a round trip through Home Assistant to the proxy.
+- Housekeeping: an unused import, an annotation naming a type its module never
+  imported (invisible at runtime, wrong to every reader), and a mutable class
+  attribute are gone, and `ruff` runs in CI with rules picked to catch mistakes
+  rather than to enforce a style. It found the first two.
+
 ## [0.4.0] — 2026-09-01
 
 Installing and updating the proxy, without a shell if you want one.
@@ -124,6 +148,7 @@ branch.
   is never submitted, and a non-UUID `hardware_id` is discarded because Blink
   answers those with a bare 406 that reads as a wrong password.
 
+[0.4.1]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.4.1
 [0.4.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Teethree89/ha-blink-live-view-proxy/releases/tag/v0.2.0
