@@ -4,6 +4,7 @@
   "after_dependencies": [
     "blink",
     "camera",
+    "lovelace",
     "stream"
   ],
   "codeowners": [
