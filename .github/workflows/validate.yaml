@@ -68,3 +68,6 @@ jobs:
 
       - name: Login decision tests
         run: python tests/test_login_decisions.py
+
+      - name: ffmpeg logging tests
+        run: python tests/test_ffmpeg_log.py
