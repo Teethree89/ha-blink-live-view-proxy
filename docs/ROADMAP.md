@@ -5,7 +5,7 @@ dates — a list so nobody has to rediscover them.
 
 ## Known rough edges
 
-### The proxy source exists twice, and nothing checks it
+### The proxy source exists twice
 
 ```
 proxy/blink_proxy/          the Linux service
