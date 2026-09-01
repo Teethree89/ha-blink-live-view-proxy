@@ -51,6 +51,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hls_dir": ".runtime/blink-liveview-proxy",
     "hls_idle_timeout": 45,
     "hls_start_timeout": 30,
+    "hls_transcode": False,
+    "hls_frame_rate": 24,
     "liveview_cache_dir": ".runtime/blink-liveview-proxy/liveviews",
     "mpegts_session_seconds": 60,
     "mpegts_cooldown_seconds": 30,

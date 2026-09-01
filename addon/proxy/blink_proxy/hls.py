@@ -50,6 +50,31 @@ class HlsSession:
 
         self.liveview = await self.manager.broker.start_liveview(self.slug)
         segment_pattern = self.directory / "segment_%05d.ts"
+
+        # Blink's GOP is 4s, so copied segments are 4s. Re-encoding forces a
+        # keyframe every second; it costs an encode per stream, hence opt-in.
+        transcode = bool(self.manager.config.get("hls_transcode", False))
+        if transcode:
+            codec_args = [
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-tune", "zerolatency",
+                "-g", "30",
+                "-sc_threshold", "0",
+                "-force_key_frames", "expr:gte(t,n_forced*1)",
+                # Uncapped, libx264 hit 8 Mbit/s on foliage and phones stalled.
+                "-maxrate", "2000k",
+                "-bufsize", "2000k",
+                # If the probe misses the frame rate ffmpeg guesses 90000 fps
+                # and never finishes a segment.
+                "-r", str(self.manager.config.get("hls_frame_rate", 24)),
+                "-c:a", "copy",
+            ]
+        else:
+            codec_args = ["-c", "copy"]
+        # iOS wants about six seconds of playlist before it starts.
+        list_size = "6" if transcode else "4"
+
         log_handle = open(self.log_path, "wb")
         try:
             self.process = await asyncio.create_subprocess_exec(
@@ -67,14 +92,13 @@ class HlsSession:
                 str(self.manager.config.get("ffmpeg_analyzeduration", 500_000)),
                 "-i",
                 self.liveview.tcp_url,
-                "-c",
-                "copy",
+                *codec_args,
                 "-f",
                 "hls",
                 "-hls_time",
                 "1",
                 "-hls_list_size",
-                "4",
+                list_size,
                 "-hls_flags",
                 "delete_segments+omit_endlist+program_date_time",
                 "-hls_segment_filename",

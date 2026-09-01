@@ -23,6 +23,7 @@ config = {
     "proxy_token_env": "BLINK_PROXY_TOKEN",
     "ffmpeg": "ffmpeg",
     "hls_dir": "/data/hls",
+    "hls_transcode": bool(options.get("low_latency", False)),
     "liveview_cache_dir": "/data/liveviews",
     "cameras": cameras,
 }

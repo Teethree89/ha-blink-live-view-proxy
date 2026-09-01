@@ -62,6 +62,32 @@ route/proxy to keep each live view open. Valid range: `10-300` seconds.
 
 Blink can still end sessions early.
 
+## Low Latency
+
+By default the proxy copies Blink's stream into HLS segments unchanged. Blink
+sends a keyframe every four seconds and a segment can only begin on one, so
+each segment holds four seconds of video and a player buffers a few of them
+before it starts. The picture typically appears eight to twelve seconds after
+the tap.
+
+`hls_transcode: true` (add-on option `low_latency`) re-encodes the video with
+libx264 so a keyframe can be forced every second and the segments really are
+one second long. On the same cameras the picture appears in two to seven
+seconds, most of which is Blink waking the camera. Audio is still copied.
+
+The cost is one `libx264 ultrafast` encode per open live view. Measured with
+the Supervisor's own add-on stats, a 720p stream takes about a tenth of one
+core on a 2.7 GHz desktop i5; expect roughly half a core per stream on a
+Raspberry Pi 4. Each live view that is open at the same time adds another.
+
+The encode is capped at 2 Mbit/s so a segment is never larger than a phone on
+the far side of the house can fetch in a second, and the output frame rate is
+pinned to 24 (`hls_frame_rate`), which is what every Blink camera sends. Both
+matter: without the cap a busy outdoor scene reached 8 Mbit/s and stalled the
+player, and without the pin a camera on a weak signal, whose stream opened with
+a gap, had ffmpeg guessing a 90,000 fps frame rate and never finishing a
+segment.
+
 ### `send_liveview_token`
 
 Stock BlinkPy sends 64 null bytes in the auth-token field of the IMMI
