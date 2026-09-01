@@ -1,0 +1,19 @@
+# Native Home Assistant dashboard card; no custom card dependency.
+# Only an administrator can run homeassistant.restart. Home Assistant checks
+# the configuration first and cancels the restart if that check fails.
+type: button
+name: Restart Home Assistant
+icon: mdi:restart
+show_state: false
+tap_action:
+  action: perform-action
+  perform_action: homeassistant.restart
+  confirmation:
+    title: Restart Home Assistant?
+    text: Home Assistant will be unavailable briefly while it restarts.
+    confirm_text: Restart
+    dismiss_text: Cancel
+hold_action:
+  action: none
+double_tap_action:
+  action: none

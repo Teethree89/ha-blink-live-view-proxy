@@ -139,6 +139,10 @@ Three ready-made options, from hand-edited to self-populating, are in the
 - [`examples/lovelace-auto-populate.yaml`](examples/lovelace-auto-populate.yaml)
   — builds a tile for every camera automatically as it appears.
 
+For system controls,
+[`examples/homeassistant-restart-button.yaml`](examples/homeassistant-restart-button.yaml)
+is a native, confirmation-gated Home Assistant restart button for admins.
+
 Register this dashboard resource first or every tap silently does nothing:
 
 ```text

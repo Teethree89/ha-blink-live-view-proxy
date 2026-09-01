@@ -55,6 +55,23 @@ two-space indent on `- title:` or the editor will reject it.
 If **⋮** offers "Take control" instead of a raw editor, the dashboard is still
 auto-generated. Take control first — that is a one-way change.
 
+## Restart Home Assistant button
+
+[`examples/homeassistant-restart-button.yaml`](../examples/homeassistant-restart-button.yaml)
+is a standalone native button card. It needs no custom card or package:
+
+1. Open the dashboard and select **Edit dashboard**.
+2. Select **Add card**, choose **Manual**, and paste the example.
+3. Save the card.
+
+The button asks for confirmation and then calls `homeassistant.restart`, the
+same Home Assistant Core action used by the UI and API. Home Assistant checks
+the configuration before restarting and cancels the restart if the check
+fails. Only administrators can run it.
+
+This restarts Home Assistant itself. It is separate from restarting the Blink
+proxy service or add-on described in the package example.
+
 ## What each camera can do
 
 | Action | Fired as | Needs |

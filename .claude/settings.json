@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/scripts/conversation-maintenance.py\" drain-hook --compact-keystroke --clear-keystroke --grab-focus --restore-focus --focus-delay 0.5 --submit-delay 1.0",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/scripts/conversation-maintenance.py\" handoff --emit-context --event SessionStart --auto-submit go --focus-delay 3 --grab-focus --restore-focus",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$CLAUDE_PROJECT_DIR/scripts/conversation-maintenance.py\" handoff --emit-context --event UserPromptSubmit",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
