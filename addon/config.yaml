@@ -5,11 +5,12 @@ description: >-
 version: "0.1.0"
 slug: "blink_liveview_proxy"
 init: false
+# armhf and armv7 are deliberately absent: Supervisor deprecated both, and
+# ffmpeg transcoding a live stream is beyond what that hardware manages
+# usefully anyway.
 arch:
   - aarch64
   - amd64
-  - armhf
-  - armv7
 startup: services
 boot: auto
 options:

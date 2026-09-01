@@ -3,20 +3,25 @@
 Three ways to build a camera wall, from most manual to fully automatic. All
 three give you the same four actions per camera.
 
-## Register the dashboard resource first
+## The dashboard resource
 
-Nothing below works until this is registered, and when it is missing it fails
-**silently** — the tile is there, the tap does nothing, and there is no console
-error, no log line, and no failed request to point you at the cause.
-
-Settings → Dashboards → ⋮ → Resources → Add:
+The integration registers this for you when the config entry is set up:
 
 ```
-URL:  /api/blink_liveview_proxy/static/blink-liveview-dialog.js
-Type: JavaScript module
+/api/blink_liveview_proxy/static/blink-liveview-dialog.js
 ```
 
-If a tap does nothing at all, check this before anything else.
+Nothing below works without it, and when it is missing it fails **silently** —
+the tile is there, the tap does nothing, and there is no console error, no log
+line, and no failed request to point you at the cause. So if a tap does nothing
+at all, check this before anything else, under
+Settings → Dashboards → ⋮ → Resources.
+
+Two cases still need it added by hand, as a **JavaScript module**:
+
+- **YAML-mode Lovelace**, where the resource list comes from
+  `configuration.yaml` and cannot be written to. The log says so on startup.
+- Anyone who removed it.
 
 ## Where to paste it
 
