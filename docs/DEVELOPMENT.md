@@ -100,10 +100,17 @@ and it fails quietly in a different way each time.
 | `addon/config.yaml` | Supervisor | add-on users are never offered the update |
 | the git tag | HACS, and people pinning | HACS installs the default branch instead |
 
+`CHANGELOG.md` is the fourth place, and the only one that is not load-bearing —
+which is exactly why it goes stale. Write its entry in the same commit as the
+bump. GitHub's auto-generated "What's Changed" is not a substitute: it lists
+merged pull requests, so work that lands as direct commits shows up as
+whatever unrelated PR happened to precede it.
+
 Steps:
 
 1. Check `main` is green — HACS, Hassfest and Tests.
-2. Bump `version` in `manifest.json` and `addon/config.yaml` to the same value.
+2. Bump `version` in `manifest.json` and `addon/config.yaml` to the same value,
+   and add the entry to `CHANGELOG.md`.
 3. Commit that on its own, so the bump is easy to find later.
 4. Tag it: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
 5. Publish a GitHub release on that tag. HACS only offers tagged releases, so
