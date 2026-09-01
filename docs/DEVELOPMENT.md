@@ -78,3 +78,27 @@ that a file could have caught.
 rate-limited within minutes and would text the account owner each time. The
 dashboard generator's `--demo` mode exists partly so its output can be tested
 without a proxy.
+
+## Cutting a release
+
+The version lives in **three** places and they have to move together. Miss one
+and it fails quietly in a different way each time.
+
+| Where | Read by | If you forget |
+|---|---|---|
+| `custom_components/blink_liveview_proxy/manifest.json` | HACS | every release looks identical in the UI |
+| `addon/config.yaml` | Supervisor | add-on users are never offered the update |
+| the git tag | HACS, and people pinning | HACS installs the default branch instead |
+
+Steps:
+
+1. Check `main` is green — HACS, Hassfest and Tests.
+2. Bump `version` in `manifest.json` and `addon/config.yaml` to the same value.
+3. Commit that on its own, so the bump is easy to find later.
+4. Tag it: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
+5. Publish a GitHub release on that tag. HACS only offers tagged releases, so
+   an untagged commit reaches nobody, and a draft release reaches nobody either.
+
+While this is pre-1.0, bump the minor for anything user-visible — new
+behaviour, a dropped architecture, a changed default — and the patch for fixes
+that change nothing about how it is used.
