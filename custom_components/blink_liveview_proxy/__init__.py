@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -18,6 +20,62 @@ from .const import (
 from .coordinator import BlinkLiveviewProxyCoordinator
 from .views import async_register_views
 
+LOGGER = logging.getLogger(__name__)
+
+FRONTEND_RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
+
+
+async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
+    """Add the dialog module to Lovelace's resources if it is not there.
+
+    Without this the card's fire-dom-event payload goes out and nothing is
+    listening: no console error, no log line, no failed request in the network
+    tab. The tile just sits there. Registering it by hand was the entire fix,
+    and more than one person lost a day to finding that out.
+
+    Only storage-mode Lovelace can be written to. In YAML mode the resource
+    list comes from configuration.yaml and is read-only, so say what to add
+    rather than failing.
+    """
+    lovelace = hass.data.get("lovelace")
+    if lovelace is None:
+        LOGGER.debug("Lovelace is not set up; skipping resource registration")
+        return
+
+    resources = getattr(lovelace, "resources", None)
+    if resources is None:
+        return
+
+    if getattr(lovelace, "resource_mode", None) != "storage":
+        LOGGER.warning(
+            "Lovelace is in YAML mode, so the dialog resource cannot be added "
+            "automatically. Add this to your resources, or live view, clips "
+            "and snapshot buttons will do nothing when tapped: %s",
+            FRONTEND_RESOURCE_URL,
+        )
+        return
+
+    try:
+        # Storage-backed resources are lazy; async_get_info loads them.
+        await resources.async_get_info()
+        for item in resources.async_items() or []:
+            # Existing entries may carry a cache-busting query string.
+            if str(item.get("url", "")).split("?", 1)[0] == FRONTEND_RESOURCE_URL:
+                return
+        await resources.async_create_item(
+            {"res_type": "module", "url": FRONTEND_RESOURCE_URL}
+        )
+    except Exception:  # noqa: BLE001 - never block setup over a dashboard nicety
+        LOGGER.exception(
+            "Could not register the dialog resource automatically. Add it by "
+            "hand under Settings > Dashboards > Resources as a JavaScript "
+            "module: %s",
+            FRONTEND_RESOURCE_URL,
+        )
+        return
+
+    LOGGER.info("Registered the Lovelace resource %s", FRONTEND_RESOURCE_URL)
+
 
 async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
     """Set up integration-level HTTP views."""
@@ -28,6 +86,7 @@ async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Blink live-view proxy from a config entry."""
     async_register_views(hass)
+    await _async_register_frontend_resource(hass)
     merged = {**entry.data, **entry.options}
     client = BlinkLiveviewProxyClient(
         async_get_clientsession(hass),

@@ -71,3 +71,6 @@ jobs:
 
       - name: ffmpeg logging tests
         run: python tests/test_ffmpeg_log.py
+
+      - name: Frontend resource registration tests
+        run: python tests/test_frontend_resource.py
