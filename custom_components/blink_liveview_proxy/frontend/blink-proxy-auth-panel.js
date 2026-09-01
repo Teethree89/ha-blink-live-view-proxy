@@ -6,7 +6,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._state = { state: "idle", message: "Loading authentication state…" };
     this._showLogin = false;
     this._busy = false;
-    this._poll = null;
+    this._timer = null;
     // Polling runs while the PIN is being typed, so the DOM is only rebuilt
     // when something a user can see actually changed. Rebuilding on every tick
     // would clear the field and steal focus mid-entry.
@@ -18,9 +18,21 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._hass = value;
     if (first) {
       this._render();
-      this._refresh();
-      this._poll = window.setInterval(() => this._refresh(), 2000);
+      this._refresh().then(() => this._schedule());
     }
+  }
+
+  // A live challenge has a countdown and a state that changes under you, so it
+  // is worth two seconds. Idle or finished, this page is a wall poster, and
+  // every tick is a round trip through Home Assistant to the proxy. An open tab
+  // used to make one every two seconds, forever.
+  _schedule() {
+    window.clearTimeout(this._timer);
+    const live = ["authenticating", "waiting_for_pin"].includes(this._state.state);
+    this._timer = window.setTimeout(
+      () => this._refresh().then(() => this._schedule()),
+      live ? 2000 : 15000,
+    );
   }
 
   set narrow(_value) {}
@@ -28,8 +40,8 @@ class BlinkProxyAuthPanel extends HTMLElement {
   set route(_value) {}
 
   disconnectedCallback() {
-    if (this._poll) window.clearInterval(this._poll);
-    this._poll = null;
+    window.clearTimeout(this._timer);
+    this._timer = null;
   }
 
   async _api(method, path, body) {
@@ -71,6 +83,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     } finally {
       this._busy = false;
       this._render();
+      this._schedule();
     }
   }
 
@@ -97,6 +110,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     } finally {
       this._busy = false;
       this._render();
+      this._schedule();
     }
   }
 
@@ -121,6 +135,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     } finally {
       this._busy = false;
       this._render();
+      this._schedule();
     }
   }
 

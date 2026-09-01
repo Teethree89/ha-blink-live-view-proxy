@@ -45,6 +45,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Lint
+        # Rules are in ruff.toml, chosen to catch mistakes rather than style.
+        # It has already caught an unused import and an annotation naming a
+        # type its module never imported.
+        run: pipx run ruff check .
+
       - name: Install test dependencies
         # Deliberately minimal, and nothing here contacts Blink. A login
         # attempt on every CI run would be rate-limited within minutes and

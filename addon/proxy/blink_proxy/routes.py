@@ -17,6 +17,7 @@ from aiohttp import web
 from .auth import (
     check_auth_control_authorized,
     check_authorized,
+    is_authorized,
     rewrite_playlist_for_token,
 )
 from .auth_flow import (
@@ -25,7 +26,7 @@ from .auth_flow import (
     AuthFlowError,
     StaleChallengeError,
 )
-from .blink import BlinkStreamBroker, _wait_for_pin
+from .blink import BlinkStreamBroker, LiveViewHandle, _wait_for_pin
 from .clips import ClipManager, clip_download_url, clip_filename, clip_id, printable_clip
 from .config import resolve_path
 from .constants import LOGGER_NAME, PROXY_VERSION
@@ -182,7 +183,9 @@ async def status_handler(request: web.Request) -> web.Response:
     return web.json_response(
         {
             **client_status,
-            "version": PROXY_VERSION,
+            # Only for callers holding the token. The integration's version
+            # check has it; a stranger on the LAN gets everything else.
+            **({"version": PROXY_VERSION} if is_authorized(request) else {}),
             "token_seconds_remaining": (expiration - now) if expiration else None,
             "process_started_at": PROCESS_STARTED_AT,
             "process_uptime_seconds": now - PROCESS_STARTED_AT,

@@ -199,8 +199,11 @@ async def test_routes() -> None:
         app = web.Application(client_max_size=4096)
         app["proxy_token"] = "proxy-secret"
         app["auth_controller"] = controller
+        app["client"] = None
+        app["config"] = {"cameras": {}}
         app.router.add_get("/auth/status", routes.auth_status_handler)
         app.router.add_post("/auth/login", routes.auth_login_handler)
+        app.router.add_get("/status", routes.status_handler)
         client = TestClient(TestServer(app))
         await client.start_server()
         try:
@@ -210,6 +213,19 @@ async def test_routes() -> None:
             check(response.status == 401, "query token is rejected on auth routes")
             response = await client.get("/auth/status", headers={"Authorization": "Bearer wrong"})
             check(response.status == 401, "wrong bearer token is rejected")
+            # /status stays reachable without a token, but the version is a
+            # shopping list for whoever is asking, so it is held back.
+            public = await (await client.get("/status")).json()
+            private = await (
+                await client.get("/status", headers={"Authorization": "Bearer proxy-secret"})
+            ).json()
+            check("version" not in public, "an unauthenticated /status hides the version")
+            check(private.get("version"), "an authorized /status reports the version")
+            check(
+                public.get("auth_state") == private.get("auth_state"),
+                "everything else on /status is unchanged for both callers",
+            )
+
             response = await client.get("/auth/status", headers={"Authorization": "Bearer pröxy-secret"})
             check(response.status == 401, "a non-ASCII token is rejected, not a server error")
             response = await client.get("/auth/status", headers={"Authorization": "Bearer proxy-secret"})
@@ -607,6 +623,16 @@ def test_panel_contract() -> None:
     check(
         "this._signature" in panel and "if (signature === this._signature)" in panel,
         "polling does not rebuild the form under a PIN being typed",
+    )
+    # An open tab used to poll every two seconds forever, each tick a round
+    # trip through Home Assistant to the proxy.
+    check(
+        "setInterval" not in panel and "live ? 2000 : 15000" in panel,
+        "an idle page polls slowly, a live challenge polls fast",
+    )
+    check(
+        "window.clearTimeout(this._timer)" in panel and "disconnectedCallback" in panel,
+        "leaving the page stops the polling",
     )
     check(
         'getElementById("expires")' in panel and "node.textContent" in panel,

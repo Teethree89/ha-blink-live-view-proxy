@@ -248,7 +248,7 @@ def test_install_token() -> None:
 
     unit = (ROOT / "systemd/blink-liveview-proxy.service").read_text()
     env_line = next(
-        (l for l in unit.splitlines() if l.startswith("EnvironmentFile=")), ""
+        (line for line in unit.splitlines() if line.startswith("EnvironmentFile=")), ""
     )
     check(
         env_line.split("=", 1)[-1].lstrip("-")
@@ -431,7 +431,9 @@ def test_versions_agree() -> None:
     )
     # A minimum above the shipped version would put a repair notice in front of
     # everyone, including people running the matching proxy.
-    to_tuple = lambda v: tuple(int(p) for p in v.split("."))
+    def to_tuple(value: str) -> tuple[int, ...]:
+        return tuple(int(part) for part in value.split("."))
+
     check(
         to_tuple(minimum.group(1)) <= to_tuple(manifest),
         f"the required proxy version is one that exists ({minimum.group(1)} <= {manifest})",

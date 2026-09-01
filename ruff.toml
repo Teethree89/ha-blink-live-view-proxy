@@ -1,0 +1,19 @@
+# Lint rules chosen to catch real mistakes, not to enforce a house style.
+#
+# F caught both bugs this file was added for: an import nothing used, and an
+# annotation naming a type the module never imported — invisible at runtime
+# because of postponed evaluation, wrong to every reader and type checker.
+line-length = 100
+
+[lint]
+select = ["F", "E4", "E7", "E9", "B", "RUF012", "RUF100"]
+
+# noqa codes for rules this config does not enable. They document intent for a
+# stricter run (a broad except that redacts an upstream error, a reach into
+# BlinkPy internals) and must not be reported as unused.
+external = ["BLE001", "SLF001", "E402"]
+
+[lint.per-file-ignores]
+# The tests build shell fixtures and probe scripts, where B is noise. E402 is
+# unavoidable: they put the repository on sys.path before importing from it.
+"tests/*" = ["B", "E402"]

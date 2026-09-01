@@ -17,6 +17,23 @@ def tokens_match(expected: str, provided: str) -> bool:
         str(expected).encode("utf-8"), str(provided).encode("utf-8")
     )
 
+def is_authorized(request: web.Request) -> bool:
+    """Whether this request carries the proxy token, without rejecting it.
+
+    For fields that are fine to omit but not fine to hand out: a version number
+    tells an unauthenticated caller which release to look up exploits for, and
+    /status is deliberately reachable without a token.
+    """
+    token = request.app.get("proxy_token")
+    if not token:
+        return True
+
+    provided = request.query.get("token", "")
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        provided = auth_header.split(" ", 1)[1]
+    return tokens_match(token, provided)
+
 def check_authorized(request: web.Request) -> None:
     token = request.app.get("proxy_token")
     if not token:

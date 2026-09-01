@@ -22,6 +22,11 @@ process uptime, and the watchdog's last restart and attempt count. It is
 unauthenticated like `/health`, so it deliberately exposes no camera names,
 serials, tokens, usernames, or challenge identifiers.
 
+`version` is the exception: it is included only when the request carries the
+proxy token, because a version number is a shopping list for whoever is asking.
+The integration's version check sends the token, so it sees it; anything else on
+the LAN gets the rest of the payload unchanged.
+
 A negative `token_seconds_remaining` is normal and is not a fault. BlinkPy
 refreshes lazily: `Auth.query()` checks `need_refresh()` and renews the token
 inline before the request that needs it. An idle proxy therefore sits with an

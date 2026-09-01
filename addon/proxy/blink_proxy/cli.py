@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import datetime
 import json
 import logging
 import signal

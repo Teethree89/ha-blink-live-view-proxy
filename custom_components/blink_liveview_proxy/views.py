@@ -10,7 +10,7 @@ import logging
 import secrets
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import quote, urlencode
 
 from aiohttp import ClientError, ClientResponse, ClientTimeout, WSMsgType, web
@@ -64,7 +64,7 @@ class BlinkLiveviewProxyStaticView(HomeAssistantView):
     url = "/api/blink_liveview_proxy/static/{filename}"
     name = "api:blink_liveview_proxy:static"
 
-    _content_types = {
+    _content_types: ClassVar[dict[str, str]] = {
         "blink-liveview-dialog.js": "application/javascript",
         "blink-proxy-auth-panel.js": "application/javascript",
         "mpegts.min.js": "application/javascript",

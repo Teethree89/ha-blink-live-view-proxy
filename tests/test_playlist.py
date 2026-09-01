@@ -50,15 +50,16 @@ def main():
     lines = out.splitlines()
 
     check("every segment gets the token",
-          all(l.endswith("?token=abc123") for l in lines if l.endswith(".ts") or "?token=" in l),
+          all(line.endswith("?token=abc123") for line in lines
+              if line.endswith(".ts") or "?token=" in line),
           out)
     check("both segments rewritten",
           lines.count("segment_00003.ts?token=abc123") == 1
           and lines.count("segment_00004.ts?token=abc123") == 1, out)
     check("tags are untouched",
-          all(l.startswith("#") for l in lines if l.startswith("#EXT")))
+          all(line.startswith("#") for line in lines if line.startswith("#EXT")))
     check("no tag gained a token",
-          not any("token=" in l for l in lines if l.startswith("#")))
+          not any("token=" in line for line in lines if line.startswith("#")))
     # A blank line must pass through untouched rather than becoming "?token=".
     blank = tokenise_playlist("#EXTM3U\n\nseg.ts\n", "tok").splitlines()
     check("blank lines survive untouched",
