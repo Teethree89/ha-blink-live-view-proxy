@@ -15,7 +15,7 @@ from urllib.parse import quote, urlencode
 
 from aiohttp import ClientError, ClientResponse, ClientTimeout, WSMsgType, web
 
-from homeassistant.components.http import HomeAssistantView
+from homeassistant.components.http import HomeAssistantView, require_admin
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import KEY_AUTHENTICATED
 
@@ -51,6 +51,8 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyClipsView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipDownloadView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipsViewerView(hass))
+    hass.http.register_view(BlinkLiveviewProxyAuthStatusView(hass))
+    hass.http.register_view(BlinkLiveviewProxyAuthActionView(hass))
     hass.data[DOMAIN]["_views_registered"] = True
 
 
@@ -63,6 +65,7 @@ class BlinkLiveviewProxyStaticView(HomeAssistantView):
 
     _content_types = {
         "blink-liveview-dialog.js": "application/javascript",
+        "blink-proxy-auth-panel.js": "application/javascript",
         "mpegts.min.js": "application/javascript",
     }
 
@@ -97,6 +100,26 @@ def _runtime(hass: HomeAssistant) -> dict[str, Any]:
 
 def _client(hass: HomeAssistant) -> BlinkLiveviewProxyClient:
     return _runtime(hass)["client"]
+
+
+def _auth_client(hass: HomeAssistant) -> BlinkLiveviewProxyClient:
+    """Return a proxy client even while camera discovery is awaiting reauth."""
+    try:
+        return _client(hass)
+    except web.HTTPServiceUnavailable:
+        clients = hass.data.get(DOMAIN, {}).get("_auth_clients", {})
+        if clients:
+            return next(iter(clients.values()))
+        raise
+
+
+def _safe_auth_error(err: Exception) -> web.HTTPException:
+    """Map upstream failures without reflecting URLs, bodies, or credentials."""
+    LOGGER.warning("Proxy authentication request failed (%s)", type(err).__name__)
+    return web.HTTPBadGateway(
+        text="The proxy could not complete the authentication request\n",
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 def _stream_seconds(hass: HomeAssistant) -> int:
@@ -1761,3 +1784,82 @@ class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
             content_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
+
+
+AUTH_VIEW_HEADERS = {
+    "Cache-Control": "no-store",
+    "Pragma": "no-cache",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
+
+
+class BlinkLiveviewProxyAuthStatusView(HomeAssistantView):
+    """Expose safe proxy auth state to authenticated HA administrators."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/auth/status"
+    name = "api:blink_liveview_proxy:auth_status"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def get(self, _request: web.Request) -> web.Response:
+        """Return the redacted authentication state."""
+        try:
+            payload = await _auth_client(self.hass).async_get_auth_status()
+        except Exception as err:  # noqa: BLE001 - redact all upstream details
+            raise _safe_auth_error(err) from err
+        return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
+
+
+class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
+    """Forward credential bodies to proxy auth endpoints for HA admins only."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/auth/{action}"
+    name = "api:blink_liveview_proxy:auth_action"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def post(self, request: web.Request, action: str) -> web.Response:
+        """Run login, PIN submission, or cancellation without logging bodies."""
+        if action not in {"login", "pin", "cancel"}:
+            raise web.HTTPNotFound()
+        if request.content_length is not None and request.content_length > 4096:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=4096, actual_size=request.content_length
+            )
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001 - never reflect parser/request details
+            raise web.HTTPBadRequest(
+                text="Invalid authentication request\n", headers=AUTH_VIEW_HEADERS
+            ) from err
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(
+                text="Invalid authentication request\n", headers=AUTH_VIEW_HEADERS
+            )
+
+        client = _auth_client(self.hass)
+        try:
+            if action == "login":
+                payload = await client.async_start_auth(
+                    str(body.get("username") or ""),
+                    str(body.get("password") or ""),
+                )
+            elif action == "pin":
+                payload = await client.async_submit_auth_pin(
+                    str(body.get("challenge_id") or ""),
+                    str(body.get("pin") or ""),
+                )
+            else:
+                payload = await client.async_cancel_auth(
+                    str(body.get("challenge_id") or "")
+                )
+        except Exception as err:  # noqa: BLE001 - redact all upstream details
+            raise _safe_auth_error(err) from err
+        return web.json_response(payload, status=202, headers=AUTH_VIEW_HEADERS)

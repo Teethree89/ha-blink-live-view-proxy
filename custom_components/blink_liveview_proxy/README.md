@@ -10,9 +10,13 @@ It only talks to the local proxy HTTP API:
 - `GET /cameras/{slug}/mpegts`
 - `GET /clips?source=local`
 - `GET /clips/{clip_id}.mp4?source=local`
+- `GET /auth/status`, `POST /auth/login`, `POST /auth/pin`, `POST /auth/cancel`
 
 The proxy remains responsible for Blink OAuth, two-factor login, token refresh,
-the `immis://` bridge, and HLS generation.
+the `immis://` bridge, and HLS generation. The `/auth/*` routes are only
+forwarded on behalf of a signed-in Home Assistant administrator: the credentials
+and PIN pass through in request bodies, are never persisted by Home Assistant,
+and the refresh token stays inside the proxy's `auth_file`.
 
 The publishable package lives in the
 [Blink Liveview Proxy repository](https://github.com/Teethree89/ha-blink-live-view-proxy).
@@ -35,12 +39,19 @@ integration setup form.
 For first-time Blink auth, run the proxy CLI once before starting `serve`:
 
 ```bash
-python blink-liveview-proxy/proxy/blink_liveview_proxy.py --config /path/to/config.json list
+BLINK_USERNAME='you@example.com' python blink-liveview-proxy/proxy/blink_liveview_proxy.py \
+  --config /path/to/config.json list
 ```
 
-Enter the Blink password and 2FA code when prompted. The proxy stores the Blink
+The CLI submits the credentials first and prompts `Blink 2FA code:` only after
+Blink has issued a PIN. Enter that new PIN in the same session — do not restart
+between the two steps, and do not pre-set `BLINK_2FA_CODE`, which is ignored
+because it can only be from an earlier attempt. The proxy stores the Blink
 refresh token in `secrets/blink-auth.json`; this integration only sees the local
 proxy URL.
+
+Once a proxy token is configured on both sides, later logins can be done from
+the browser instead — see **Blink Authentication panel** below.
 
 ## Home Assistant Setup
 
@@ -62,6 +73,7 @@ After the custom component is present under Home Assistant's
 
 The integration creates:
 
+- an admin-only **Blink Authentication** panel at `/blink-liveview-proxy-auth`
 - one `camera.blink_live_*` stream entity per proxy camera
 - authenticated direct browser player URLs at
   `/api/blink_liveview_proxy/cameras/{slug}/player`
@@ -131,6 +143,28 @@ tap_action:
   blink_snapshot_refresh:
     slug: driveway
 ```
+
+## Blink Authentication Panel
+
+The sidebar panel drives the proxy's login state machine from the browser. It
+requires a proxy API token configured on the proxy and entered in this
+integration; without one the proxy refuses the routes entirely.
+
+1. Open **Blink Authentication** as a Home Assistant administrator.
+2. Select **Reauthenticate** when a working session already exists.
+3. Enter the Blink email and password, then start the login.
+4. When the page shows **waiting for PIN**, enter the PIN Blink just issued.
+5. Wait for **success**.
+
+States shown: idle, authenticating, waiting for PIN, success, expired, failure.
+One attempt runs at a time, a PIN is only accepted for the challenge that asked
+for it, an unanswered challenge expires, cancellation is explicit, and a failed
+attempt leaves the previously working Blink session serving live views.
+
+The page holds nothing: no proxy token, no credentials, no PIN, and no browser
+storage. It calls `/api/blink_liveview_proxy/auth/*`, which requires an
+authenticated administrator and adds the bearer token server-side. Restarting
+the proxy drops an in-flight challenge, so start a new login afterwards.
 
 ## Packaging Notes
 

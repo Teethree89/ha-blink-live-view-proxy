@@ -28,6 +28,8 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.
 - Local Sync Module clip viewer/downloader.
+- Admin-only browser authentication and deliberate reauthentication through
+  Home Assistant, with the Blink OAuth challenge kept in one proxy process.
 - HTTPS-friendly browser microphone flow when HA is served through a trusted
   local HTTPS origin.
 
@@ -74,26 +76,42 @@ directly from the add-on store. No separate Linux host or Python setup required.
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
 2. Install **Blink Liveview Proxy** from the add-on store.
-3. Open the add-on **Configuration** tab, fill in `blink_username`, `blink_password`,
-   and your camera list. Leave `blink_2fa_code` empty for now and start the add-on.
-4. The add-on sends your credentials to Blink, which texts/emails you a PIN. Check the
-   add-on log for instructions, then paste the PIN into `blink_2fa_code` and restart.
-5. Install the HA integration (via HACS or manually — see below) and point it at
-   `http://homeassistant.local:8088`.
+3. Open the add-on **Configuration** tab. Set `blink_username` and
+   `blink_password`, leave `blink_2fa_code` and `proxy_api_token` empty, then
+   start the add-on once. Cameras are discovered, and the add-on generates its
+   own proxy token on first start.
+4. Wait until the log says Blink sent a PIN. Paste that newly issued PIN into
+   `blink_2fa_code` and save the options **while the add-on keeps running**.
+   Do not restart: the PIN belongs to the OAuth session in that process.
+5. After the log reports success, clear `blink_2fa_code` so it cannot be reused
+   accidentally. The auth cache at `/data/blink-auth.json` handles later starts.
+6. Install the HA integration (via HACS or manually — see below) and add it.
+   The URL and the generated token are pre-filled from what the add-on shared,
+   so setup is a click.
 
 See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 
 ### Option B — Linux Service (Container / Supervised / bare-metal)
 
-1. Copy `custom_components/blink_liveview_proxy` into Home Assistant's
-   `custom_components/`.
-2. Install and start the proxy service from `proxy/` and `systemd/`
-   (or run `sudo scripts/install-proxy.sh` from this repo).
-3. Restart Home Assistant.
-4. Add `Blink Liveview Proxy` from `Settings → Devices & services`.
-5. Use `http://127.0.0.1:8088` as the proxy URL when the proxy runs on the HA
-   host.
-6. Add the Lovelace helper resource:
+One command on the proxy host — it installs the code and venv, writes a config
+that discovers cameras, generates a proxy API token, installs the watchdog, and
+starts the service:
+
+```bash
+sudo scripts/install-proxy.sh
+```
+
+It prints the URL to give Home Assistant and the one command that reads the
+token back. Then, in Home Assistant:
+
+1. Install the integration through HACS (see below) and restart HA.
+2. Add `Blink Liveview Proxy` from `Settings → Devices & services`, using the
+   printed URL and token.
+3. Open **Blink Authentication** in the sidebar and sign in to Blink.
+
+Re-running the script upgrades in place, keeping the token, config, and Blink
+session. The Lovelace helper resource is registered for you; add it by hand
+only in YAML-mode dashboards:
 
 ```text
 /api/blink_liveview_proxy/static/blink-liveview-dialog.js
@@ -101,6 +119,28 @@ See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 
 Full step-by-step in the [install guide](docs/INSTALL.md), and what to do when
 it misbehaves in the [operations guide](docs/OPERATIONS.md).
+
+### Browser authentication and reauthentication
+
+The custom integration registers an admin-only **Blink Authentication** panel
+in the Home Assistant sidebar. It needs a proxy API token on both sides, which
+both install paths now provision for you: the installer writes one to the
+service's environment file, and the add-on generates one and shares it with the
+integration's setup form.
+
+1. Open **Blink Authentication** as a Home Assistant administrator.
+2. Select **Reauthenticate** if a working cached session already exists.
+3. Enter the Blink email and password and start login.
+4. Wait for Blink to issue a new PIN, then enter it on the same page before the
+   displayed challenge expires. Do not restart the proxy.
+5. Wait for **success**. The proxy atomically replaces the auth cache; Home
+   Assistant never stores the Blink password or PIN.
+
+The page shows idle, authenticating, waiting-for-PIN, success, expired, and
+failure states. It permits one attempt at a time, rejects stale PINs, supports
+cancellation, and leaves an existing working client active if reauthentication
+fails. A service restart cancels an in-memory challenge, so start a new login
+and use the new PIN afterward.
 
 ## HACS Custom Repository
 
@@ -131,13 +171,21 @@ behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 Three ready-made options, from hand-edited to self-populating, are in the
 [dashboard guide](docs/DASHBOARD.md):
 
+> [!IMPORTANT]
+> The self-populating dashboard is **not standalone**. Install
+> **auto-entities** and **button-card** from HACS → Frontend before using it.
+> The hand-edited and generated options need **button-card**, but do not need
+> auto-entities. Use the generator if you want automatic camera discovery
+> without installing auto-entities.
+
 - [`examples/lovelace-dashboard.yaml`](examples/lovelace-dashboard.yaml) — one
   commented camera with every action; copy it per camera.
 - [`scripts/generate-dashboard.py`](scripts/generate-dashboard.py) — asks the
   running proxy what exists and prints a finished dashboard, a single view, or
   one card, whichever you need (`--format dashboard|view|card`).
 - [`examples/lovelace-auto-populate.yaml`](examples/lovelace-auto-populate.yaml)
-  — builds a tile for every camera automatically as it appears.
+  — builds a tile for every camera automatically as it appears; requires
+  **auto-entities** and **button-card**.
 
 For system controls,
 [`examples/homeassistant-restart-button.yaml`](examples/homeassistant-restart-button.yaml)
@@ -188,10 +236,14 @@ tap_action:
 
 Bind the proxy to `127.0.0.1` unless you have a specific reason not to. If you
 bind it to the LAN, set `BLINK_PROXY_TOKEN` and configure the same token in the
-Home Assistant integration.
+Home Assistant integration. The browser-auth control routes are disabled when
+that token is empty and accept it only as an `Authorization: Bearer` header,
+never in a URL.
 
 The proxy stores Blink OAuth refresh data in the configured `auth_file`. Keep
-that file out of git.
+that file out of git. The authentication panel sends credentials and PINs only
+in no-store request bodies, does not use browser-persistent storage, and never
+receives the proxy token; Home Assistant adds it server-side.
 
 ## Frameo / Wall Panel Notes
 

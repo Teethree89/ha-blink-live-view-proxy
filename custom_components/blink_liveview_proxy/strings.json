@@ -13,6 +13,13 @@
         "data_description": {
           "stream_seconds": "Allowed range: 10-300 seconds. Longer sessions can use more Blink live-view quota and may run into camera or cloud-side limits."
         }
+      },
+      "reauth_confirm": {
+        "title": "Blink Liveview Proxy token",
+        "description": "The proxy rejected the stored token. Enter the current proxy token; if the add-on shared one, it is filled in for you.",
+        "data": {
+          "token": "Proxy token"
+        }
       }
     },
     "error": {
@@ -21,7 +28,9 @@
       "unknown": "Unexpected error."
     },
     "abort": {
-      "already_configured": "This proxy is already configured."
+      "already_configured": "This proxy is already configured.",
+      "reauth_successful": "The proxy token was updated.",
+      "reauth_failed": "The config entry is no longer available."
     }
   },
   "options": {

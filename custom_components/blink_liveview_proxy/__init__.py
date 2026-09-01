@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from homeassistant.components import panel_custom
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -23,6 +24,26 @@ from .views import async_register_views
 LOGGER = logging.getLogger(__name__)
 
 FRONTEND_RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
+AUTH_PANEL_MODULE_URL = "/api/blink_liveview_proxy/static/blink-proxy-auth-panel.js"
+AUTH_PANEL_PATH = "blink-liveview-proxy-auth"
+
+
+async def _async_register_auth_panel(hass: HomeAssistant) -> None:
+    """Register an admin-only panel that receives the authenticated HA object."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("_auth_panel_registered"):
+        return
+    await panel_custom.async_register_panel(
+        hass,
+        frontend_url_path=AUTH_PANEL_PATH,
+        webcomponent_name="blink-proxy-auth-panel",
+        sidebar_title="Blink Authentication",
+        sidebar_icon="mdi:shield-key",
+        module_url=AUTH_PANEL_MODULE_URL,
+        require_admin=True,
+        config_panel_domain=DOMAIN,
+    )
+    domain_data["_auth_panel_registered"] = True
 
 
 async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
@@ -80,12 +101,14 @@ async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
 async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
     """Set up integration-level HTTP views."""
     async_register_views(hass)
+    await _async_register_auth_panel(hass)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Blink live-view proxy from a config entry."""
     async_register_views(hass)
+    await _async_register_auth_panel(hass)
     await _async_register_frontend_resource(hass)
     merged = {**entry.data, **entry.options}
     client = BlinkLiveviewProxyClient(
@@ -93,6 +116,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         merged[CONF_BASE_URL],
         merged.get(CONF_TOKEN),
     )
+    hass.data.setdefault(DOMAIN, {}).setdefault("_auth_clients", {})[
+        entry.entry_id
+    ] = client
     coordinator = BlinkLiveviewProxyCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
 
@@ -112,6 +138,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].get("_auth_clients", {}).pop(entry.entry_id, None)
     return unload_ok
 
 

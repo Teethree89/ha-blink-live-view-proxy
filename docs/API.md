@@ -16,10 +16,11 @@ can usually be patched without touching CLI, install, or HACS packaging code.
 - `GET /cameras`
 - `GET /`
 
-`GET /status` reports login readiness, discovered vs configured camera
-counts, the cached Blink token expiry, process uptime, and the watchdog's
-last restart and attempt count. It is unauthenticated like `/health`, so it
-deliberately exposes no camera names, serials, or tokens.
+`GET /status` reports login readiness, the `auth_state` of the login state
+machine, discovered vs configured camera counts, the cached Blink token expiry,
+process uptime, and the watchdog's last restart and attempt count. It is
+unauthenticated like `/health`, so it deliberately exposes no camera names,
+serials, tokens, usernames, or challenge identifiers.
 
 A negative `token_seconds_remaining` is normal and is not a fault. BlinkPy
 refreshes lazily: `Auth.query()` checks `need_refresh()` and renews the token
@@ -30,6 +31,82 @@ the result through the auth-file callback.
 Treat `ready` and `cameras_discovered` as the liveness signals. What matters
 is not whether the token has expired but whether a *refresh* can still
 succeed — a different question, and the one worth alerting on.
+
+## Authentication Control
+
+These routes drive browser login and deliberate reauthentication. They are the
+only routes that carry credentials, and they are held to stricter rules than the
+media routes.
+
+- `GET /auth/status`
+- `POST /auth/login` — body `{"username": "...", "password": "..."}`
+- `POST /auth/pin` — body `{"challenge_id": "...", "pin": "123456"}`
+- `POST /auth/cancel` — body `{"challenge_id": "..."}`
+
+Access control:
+
+- A proxy token must be configured. Without one every route here answers
+  `503`; browser authentication is never an unauthenticated LAN endpoint.
+- Authorization is accepted **only** as an `Authorization: Bearer` header.
+  Unlike the media routes, the `?token=` query form is rejected, because URLs
+  end up in history, logs, referrers, and caches.
+- Bodies are capped at 4 KB and must be JSON objects.
+- Every response is `Cache-Control: no-store` with `Referrer-Policy: no-referrer`
+  and `X-Content-Type-Options: nosniff`.
+
+All four return the same public status object, and nothing else:
+
+```json
+{
+  "state": "waiting_for_pin",
+  "message": "Blink sent a new PIN. Enter that PIN without restarting the proxy.",
+  "authenticated": true,
+  "challenge_id": "opaque-correlation-id",
+  "expires_in": 540,
+  "can_submit_pin": true,
+  "can_start": false,
+  "can_cancel": true
+}
+```
+
+`state` is one of `idle`, `authenticating`, `waiting_for_pin`, `success`,
+`expired`, `failure`. The username, password, PIN, refresh token, and upstream
+error text never appear in it; failures are reported as classified, redacted
+messages. `challenge_id` is a random correlation id for the live challenge only
+— it is not a credential and is `null` once the attempt ends.
+
+Status codes:
+
+| Code | Meaning |
+|---|---|
+| `200` | Status or cancellation accepted |
+| `202` | Login or PIN accepted for processing; poll `GET /auth/status` |
+| `400` | Missing/invalid credentials, a non-numeric PIN, or an unparseable body |
+| `401` | Missing or wrong bearer token |
+| `409` | A login is already active, or the challenge is stale |
+| `503` | No proxy token is configured |
+
+Exactly one challenge exists at a time. A PIN is only accepted for the challenge
+that requested it, the previously working Blink client keeps serving until a
+candidate login has succeeded and committed its auth cache, and an unanswered
+challenge expires after fifteen minutes. Restarting the service drops the in-memory
+challenge — a new login and a newly issued PIN are required afterwards.
+
+### Home Assistant side
+
+The custom integration exposes the same three actions to its admin-only panel,
+so the browser never holds the proxy token:
+
+- `GET /api/blink_liveview_proxy/auth/status`
+- `POST /api/blink_liveview_proxy/auth/login`
+- `POST /api/blink_liveview_proxy/auth/pin`
+- `POST /api/blink_liveview_proxy/auth/cancel`
+
+They require an authenticated Home Assistant **administrator** (`requires_auth`
+plus `require_admin`), forward only the JSON body, add the bearer token
+server-side, and return the proxy's redacted status object. Upstream failures
+are collapsed into a generic `502` so proxy URLs and library error text are not
+reflected back to the browser.
 
 ## Live View
 

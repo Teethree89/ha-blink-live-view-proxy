@@ -14,8 +14,18 @@ from typing import Any
 
 from aiohttp import web
 
-from .auth import check_authorized, rewrite_playlist_for_token
-from .blink import BlinkClient, BlinkStreamBroker
+from .auth import (
+    check_auth_control_authorized,
+    check_authorized,
+    rewrite_playlist_for_token,
+)
+from .auth_flow import (
+    AuthConflictError,
+    AuthenticationController,
+    AuthFlowError,
+    StaleChallengeError,
+)
+from .blink import BlinkStreamBroker, _wait_for_pin
 from .clips import ClipManager, clip_download_url, clip_filename, clip_id, printable_clip
 from .config import resolve_path
 from .constants import LOGGER_NAME
@@ -26,9 +36,97 @@ from .util import liveview_filename
 
 LOGGER = logging.getLogger(LOGGER_NAME)
 
+AUTH_RESPONSE_HEADERS = {
+    "Cache-Control": "no-store",
+    "Pragma": "no-cache",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+}
+
+def _require_client(request: web.Request):
+    client = request.app.get("client")
+    if client is None or not getattr(client, "ready", False):
+        raise web.HTTPServiceUnavailable(text="Blink authentication is not ready\n")
+    return client
+
+async def _auth_json_body(request: web.Request) -> dict[str, Any]:
+    if request.content_length is not None and request.content_length > 4096:
+        raise web.HTTPRequestEntityTooLarge(
+            max_size=4096, actual_size=request.content_length
+        )
+    try:
+        body = await request.json()
+    except Exception as err:  # noqa: BLE001 - never reflect parser/request details
+        raise web.HTTPBadRequest(text="Invalid authentication request\n") from err
+    if not isinstance(body, dict):
+        raise web.HTTPBadRequest(text="Invalid authentication request\n")
+    return body
+
+def _auth_response(controller: AuthenticationController, *, status: int = 200):
+    return web.json_response(
+        controller.status(), status=status, headers=AUTH_RESPONSE_HEADERS
+    )
+
+async def auth_status_handler(request: web.Request) -> web.Response:
+    check_auth_control_authorized(request)
+    return _auth_response(request.app["auth_controller"])
+
+async def auth_login_handler(request: web.Request) -> web.Response:
+    check_auth_control_authorized(request)
+    body = await _auth_json_body(request)
+    controller: AuthenticationController = request.app["auth_controller"]
+    try:
+        await controller.start_browser_login(
+            str(body.get("username") or ""), str(body.get("password") or "")
+        )
+    except AuthConflictError as err:
+        raise web.HTTPConflict(
+            text="A Blink authentication attempt is already active\n",
+            headers=AUTH_RESPONSE_HEADERS,
+        ) from err
+    except AuthFlowError as err:
+        raise web.HTTPBadRequest(
+            text="Blink username and password are required\n",
+            headers=AUTH_RESPONSE_HEADERS,
+        ) from err
+    return _auth_response(controller, status=202)
+
+async def auth_pin_handler(request: web.Request) -> web.Response:
+    check_auth_control_authorized(request)
+    body = await _auth_json_body(request)
+    controller: AuthenticationController = request.app["auth_controller"]
+    try:
+        await controller.submit_pin(
+            str(body.get("challenge_id") or ""), str(body.get("pin") or "")
+        )
+    except StaleChallengeError as err:
+        raise web.HTTPConflict(
+            text="The Blink challenge is stale or no longer active\n",
+            headers=AUTH_RESPONSE_HEADERS,
+        ) from err
+    except AuthFlowError as err:
+        raise web.HTTPBadRequest(
+            text="Enter the newly issued numeric Blink PIN\n",
+            headers=AUTH_RESPONSE_HEADERS,
+        ) from err
+    return _auth_response(controller, status=202)
+
+async def auth_cancel_handler(request: web.Request) -> web.Response:
+    check_auth_control_authorized(request)
+    body = await _auth_json_body(request)
+    controller: AuthenticationController = request.app["auth_controller"]
+    try:
+        await controller.cancel(str(body.get("challenge_id") or ""))
+    except StaleChallengeError as err:
+        raise web.HTTPConflict(
+            text="The Blink challenge is stale or no longer active\n",
+            headers=AUTH_RESPONSE_HEADERS,
+        ) from err
+    return _auth_response(controller)
+
 async def index_handler(request: web.Request) -> web.Response:
     check_authorized(request)
-    rows = request.app["client"].list_cameras()
+    rows = _require_client(request).list_cameras()
     return web.json_response(
         {
             "service": "blink-liveview-proxy",
@@ -66,7 +164,18 @@ def _read_watchdog_state() -> dict[str, int]:
     return state
 
 async def status_handler(request: web.Request) -> web.Response:
-    client_status = request.app["client"].status()
+    controller: AuthenticationController = request.app["auth_controller"]
+    client = request.app.get("client")
+    client_status = (
+        client.status()
+        if client is not None
+        else {
+            "ready": False,
+            "cameras_discovered": 0,
+            "cameras_configured": len(request.app["config"].get("cameras", {})),
+            "token_expiration": None,
+        }
+    )
     watchdog = _read_watchdog_state()
     now = time.time()
     expiration = client_status["token_expiration"]
@@ -78,12 +187,13 @@ async def status_handler(request: web.Request) -> web.Response:
             "process_uptime_seconds": now - PROCESS_STARTED_AT,
             "watchdog_last_restart": watchdog.get("last_restart") or None,
             "watchdog_attempts": watchdog.get("attempts", 0),
+            "auth_state": controller.state,
         }
     )
 
 async def cameras_handler(request: web.Request) -> web.Response:
     check_authorized(request)
-    return web.json_response({"cameras": request.app["client"].list_cameras()})
+    return web.json_response({"cameras": _require_client(request).list_cameras()})
 
 def _clamped_float(value: str | None, default: float, minimum: float, maximum: float) -> float:
     try:
@@ -110,7 +220,7 @@ async def clips_handler(request: web.Request) -> web.Response:
     pages = _clamped_int(request.query.get("pages"), 3, 1, 10)
     limit = _clamped_int(request.query.get("limit"), 20, 1, 100)
 
-    manager = ClipManager(request.app["client"])
+    manager = ClipManager(_require_client(request))
     clips = await manager.list_clips(
         source=source,
         camera_slug=camera_slug,
@@ -151,7 +261,7 @@ async def clip_download_handler(request: web.Request) -> web.Response:
     pages = _clamped_int(request.query.get("pages"), 3, 1, 10)
     limit = _clamped_int(request.query.get("limit"), 200, 1, 500)
 
-    manager = ClipManager(request.app["client"])
+    manager = ClipManager(_require_client(request))
     clips = await manager.list_clips(
         source=source,
         camera_slug=camera_slug,
@@ -192,6 +302,7 @@ async def clip_download_handler(request: web.Request) -> web.Response:
 
 async def mpegts_handler(request: web.Request) -> web.StreamResponse:
     check_authorized(request)
+    _require_client(request)
     slug = request.match_info["slug"]
     broker: BlinkStreamBroker = request.app["broker"]
     session = request.query.get("session") or secrets.token_urlsafe(16)
@@ -382,6 +493,7 @@ async def last_liveview_mp4_download_handler(request: web.Request) -> web.FileRe
 
 async def hls_playlist_handler(request: web.Request) -> web.Response:
     check_authorized(request)
+    _require_client(request)
     slug = request.match_info["slug"]
     browser_session = request.query.get("session") or ""
     manager: HlsManager = request.app["hls_manager"]
@@ -404,6 +516,7 @@ async def hls_playlist_handler(request: web.Request) -> web.Response:
 
 async def hls_segment_handler(request: web.Request) -> web.FileResponse:
     check_authorized(request)
+    _require_client(request)
     slug = request.match_info["slug"]
     filename = request.match_info["filename"]
     if "/" in filename or not filename.endswith(".ts"):
@@ -422,16 +535,15 @@ async def hls_segment_handler(request: web.Request) -> web.FileResponse:
 async def make_app(
     config: dict[str, Any], config_base: Path, pin: str | None
 ) -> web.Application:
-    client = BlinkClient(config, config_base, pin)
-    await client.start()
-
-    broker = BlinkStreamBroker(client)
+    # Open the HTTP control plane before login so a human can complete 2FA.
+    # Cached/env/add-on authentication starts in the app lifecycle below.
+    broker = BlinkStreamBroker(None)
     active_liveviews: dict[str, LiveViewHandle] = {}
     hls_manager = HlsManager(broker, config, config_base, active_liveviews)
     proxy_token = os.getenv(config["proxy_token_env"], config.get("proxy_token", ""))
 
-    app = web.Application()
-    app["client"] = client
+    app = web.Application(client_max_size=4096)
+    app["client"] = None
     app["broker"] = broker
     app["hls_manager"] = hls_manager
     app["proxy_token"] = proxy_token
@@ -442,9 +554,26 @@ async def make_app(
     app["active_liveviews"] = active_liveviews
     app["mp4_locks"] = {}
 
+    def activate_client(client) -> None:
+        app["client"] = client
+        broker.client = client
+
+    auth_controller = AuthenticationController(
+        config,
+        config_base,
+        startup_pin=pin,
+        legacy_pin_waiter=_wait_for_pin,
+        on_client=activate_client,
+    )
+    app["auth_controller"] = auth_controller
+
     app.router.add_get("/", index_handler)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/status", status_handler)
+    app.router.add_get("/auth/status", auth_status_handler)
+    app.router.add_post("/auth/login", auth_login_handler)
+    app.router.add_post("/auth/pin", auth_pin_handler)
+    app.router.add_post("/auth/cancel", auth_cancel_handler)
     app.router.add_get("/cameras", cameras_handler)
     app.router.add_get("/clips", clips_handler)
     app.router.add_get("/clips/{clip_id}.mp4", clip_download_handler)
@@ -462,6 +591,7 @@ async def make_app(
 
     async def cleanup_context(_app: web.Application):
         cleanup_task = asyncio.create_task(hls_manager.cleanup_loop())
+        await auth_controller.start_startup_login()
         try:
             yield
         finally:
@@ -469,7 +599,7 @@ async def make_app(
             with contextlib.suppress(asyncio.CancelledError):
                 await cleanup_task
             await hls_manager.stop_all()
-            await client.close()
+            await auth_controller.close()
 
     app.cleanup_ctx.append(cleanup_context)
     return app

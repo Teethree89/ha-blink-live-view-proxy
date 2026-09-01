@@ -60,13 +60,23 @@ requiring a separate `/config/www` copy.
 No Home Assistant, no Blink account, no network. From the repo root:
 
 ```bash
-pip install pyyaml
-python tests/test_playlist.py    # HLS playlist rewriting
-python tests/test_assets.py      # shipped YAML/JSON, manifest, generator
+pip install pyyaml -r proxy/requirements.txt
+python tests/test_playlist.py        # HLS playlist rewriting
+python tests/test_assets.py          # shipped YAML/JSON, manifest, generator
+python tests/test_login_decisions.py # stale-PIN handling, PTT eligibility
+python tests/test_authentication.py  # browser/CLI/add-on authentication
+python tests/test_ffmpeg_log.py      # ffmpeg failure messages
+python tests/test_frontend_resource.py  # Lovelace resource registration
 ```
 
-CI runs both on every pull request, alongside a compile pass over every
+CI runs all six on every pull request, alongside a compile pass over every
 tracked Python file and a syntax check on the shell scripts.
+
+`test_authentication.py` is the guard on the authentication rewrite: route
+authorization, one-challenge-at-a-time, same-session PIN delivery, auth-cache
+persistence, stale/expired challenges, shutdown, redaction, and the CLI and
+add-on paths that must keep working. It fakes BlinkPy entirely — see the
+Blink rule below.
 
 Every check in `test_assets.py` exists because something actually broke — a
 button-card style written as a list of lists and silently ignored, `hacs.json`

@@ -13,7 +13,7 @@ import urllib.parse
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from aiohttp import ClientSession
 from blinkpy import api as blink_api
@@ -22,6 +22,7 @@ from blinkpy.blinkpy import Blink
 from blinkpy.livestream import BlinkLiveStream
 
 from .config import create_client_session, load_json_file, resolve_path, save_json_file
+from .auth_flow import AuthFlowError
 from .constants import (
     IMMI_AUDIO_CONFIG_SEQUENCE,
     IMMI_DATA_FLAG_AUDIO,
@@ -36,7 +37,6 @@ from .constants import (
 from .util import normalize_slug, redact_liveview_response
 
 LOGGER = logging.getLogger(LOGGER_NAME)
-
 
 def plan_2fa_code(
     pin: str | None, env_value: str, *, interactive: bool
@@ -75,7 +75,6 @@ def plan_2fa_code(
 
     return ("prompt" if interactive else "wait"), warning
 
-
 def _discard_bad_hardware_id(login_data: dict[str, Any]) -> None:
     """Drop a cached hardware_id that Blink will reject before login runs.
 
@@ -102,7 +101,6 @@ def _discard_bad_hardware_id(login_data: dict[str, Any]) -> None:
             current,
         )
         login_data.pop("hardware_id", None)
-
 
 def camera_ptt_supported(
     camera: Any, config: dict[str, Any], slug: str | None = None
@@ -300,13 +298,32 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
 class BlinkClient:
     """Owns BlinkPy auth/session state and camera lookup."""
 
-    def __init__(self, config: dict[str, Any], config_base: Path, pin: str | None):
+    def __init__(
+        self,
+        config: dict[str, Any],
+        config_base: Path,
+        pin: str | None,
+        *,
+        username: str | None = None,
+        password: str | None = None,
+        pin_provider: Callable[[], Awaitable[str]] | None = None,
+        state_callback: Callable[[str], None] | None = None,
+        fresh_login: bool = False,
+        persist_intermediate: bool = True,
+    ):
         self.config = config
         self.config_base = config_base
         self.pin = pin
+        self._username = username
+        self._password = password
+        self._pin_provider = pin_provider
+        self._state_callback = state_callback
+        self._fresh_login = fresh_login
+        self._persist_intermediate = persist_intermediate
         self.auth_file = resolve_path(config["auth_file"], config_base)
         self.session: ClientSession | None = None
         self.blink: Blink | None = None
+        self.ready = False
 
     async def start(self) -> None:
         if self.blink is not None:
@@ -315,8 +332,22 @@ class BlinkClient:
         self.session = create_client_session()
         login_data = load_json_file(self.auth_file)
 
-        username = os.getenv(self.config["username_env"], "")
-        password = os.getenv(self.config["password_env"], "")
+        if self._fresh_login:
+            # Deliberate reauthentication must contact Blink instead of silently
+            # accepting the cached refresh token. Keep only the stable device id;
+            # no token or account response is copied into the candidate session.
+            login_data = {
+                key: login_data[key]
+                for key in ("hardware_id",)
+                if login_data.get(key)
+            }
+
+        username = self._username
+        if username is None:
+            username = os.getenv(self.config["username_env"], "")
+        password = self._password
+        if password is None:
+            password = os.getenv(self.config["password_env"], "")
         if username:
             login_data["username"] = username
         if password:
@@ -326,11 +357,26 @@ class BlinkClient:
 
         auth: Auth | None = None
 
+        pending_auth_data: dict[str, Any] = {}
+
+        def auth_data_without_password() -> dict[str, Any]:
+            if auth is None:
+                return {}
+            auth_data = dict(auth.login_attributes)
+            auth_data.pop("password", None)
+            return auth_data
+
         def save_auth_callback() -> None:
             if auth is not None:
-                auth_data = dict(auth.login_attributes)
-                auth_data.pop("password", None)
-                save_json_file(self.auth_file, auth_data)
+                pending_auth_data.clear()
+                pending_auth_data.update(auth_data_without_password())
+                if self._persist_intermediate:
+                    save_json_file(self.auth_file, pending_auth_data)
+
+        def commit_auth_cache() -> None:
+            pending_auth_data.clear()
+            pending_auth_data.update(auth_data_without_password())
+            save_json_file(self.auth_file, pending_auth_data)
 
         auth = Auth(
             login_data=login_data,
@@ -343,6 +389,7 @@ class BlinkClient:
         self.blink = blink
 
         try:
+            code = ""
             try:
                 started = await blink.start()
             except BlinkTwoFARequiredError:
@@ -354,24 +401,27 @@ class BlinkClient:
                 # this exception path exited without ever reaching
                 # save_auth_callback(), so a second run drew a new id and the
                 # code the user typed belonged to a device that no longer
-                # existed. The two-start login the README describes therefore
-                # could not work, however carefully it was followed.
+                # existed. That is why every documented flow now completes the
+                # PIN inside this one running process instead of restarting.
                 #
                 # login_attributes carries hardware_id, and Auth.startup()
                 # picks it back up on the next run.
                 save_auth_callback()
+                if self._state_callback is not None:
+                    self._state_callback("waiting_for_pin")
 
-                action, warning = plan_2fa_code(
-                    self.pin,
-                    os.getenv(self.config["twofa_env"], ""),
-                    interactive=sys.stdin.isatty(),
-                )
-                if warning:
-                    LOGGER.warning("%s", warning)
-
-                code = ""
-                if action == "prompt":
-                    code = input("Blink 2FA code: ").strip()
+                if self._pin_provider is not None:
+                    code = await self._pin_provider()
+                else:
+                    action, warning = plan_2fa_code(
+                        self.pin,
+                        os.getenv(self.config["twofa_env"], ""),
+                        interactive=sys.stdin.isatty(),
+                    )
+                    if warning:
+                        LOGGER.warning("%s", warning)
+                    if action == "prompt":
+                        code = input("Blink 2FA code: ").strip()
                 if not code:
                     # In a container there is no tty, so wait in this same
                     # OAuth session instead of exiting. Exiting would start a
@@ -387,7 +437,9 @@ class BlinkClient:
                 started = await blink.send_2fa_code(code)
 
             if not started:
-                raise RuntimeError("Blink login/setup failed")
+                if code:
+                    raise AuthFlowError("invalid_pin")
+                raise AuthFlowError("credential_failure")
 
             configured_count = len(self.configured_cameras())
             if configured_count and not blink.cameras:
@@ -396,9 +448,23 @@ class BlinkClient:
                     f"{configured_count} cameras are configured"
                 )
 
-            save_auth_callback()
+            commit_auth_cache()
+            # From here the cache is this client's own. BlinkPy calls the
+            # callback again on every token refresh, and those must reach disk
+            # or a restart would replay an already-rotated refresh token.
+            self._persist_intermediate = True
+            self.ready = True
+            if self._password is not None and auth is not None:
+                # Browser-provided credentials are only needed for this login.
+                auth.login_attributes.pop("password", None)
+            self._username = None
+            self._password = None
             LOGGER.info("Blink login ready; discovered %d cameras", len(blink.cameras))
         except Exception:
+            if auth is not None and self._password is not None:
+                auth.login_attributes.pop("password", None)
+            self._username = None
+            self._password = None
             await self.close()
             raise
 
@@ -407,6 +473,7 @@ class BlinkClient:
             await self.session.close()
         self.session = None
         self.blink = None
+        self.ready = False
 
     def configured_cameras(self) -> dict[str, dict[str, Any]]:
         return self.config.get("cameras", {})
@@ -420,14 +487,14 @@ class BlinkClient:
             except (TypeError, ValueError):
                 expiration = None
         return {
-            "ready": blink is not None,
-            "cameras_discovered": len(blink.cameras) if blink is not None else 0,
+            "ready": self.ready,
+            "cameras_discovered": len(blink.cameras) if self.ready and blink is not None else 0,
             "cameras_configured": len(self.configured_cameras()),
             "token_expiration": expiration,
         }
 
     def _require_blink(self) -> Blink:
-        if self.blink is None:
+        if self.blink is None or not self.ready:
             raise RuntimeError("Blink client is not started")
         return self.blink
 
@@ -528,7 +595,8 @@ class LiveViewHandle:
 class BlinkStreamBroker:
     """Starts one Blink live-view session per consumer."""
 
-    def __init__(self, client: BlinkClient):
+    def __init__(self, client: BlinkClient | None):
+        # None until the managed authentication flow hands over a live client.
         self.client = client
 
     async def start_liveview(self, slug: str) -> LiveViewHandle:
@@ -620,7 +688,6 @@ PIN_FILES = (
 PIN_WAIT_SECONDS = 900      # 15 minutes; the code itself expires sooner
 PIN_POLL_SECONDS = 5
 
-
 async def _pin_from_supervisor() -> str:
     """Read blink_2fa_code from the add-on's current options.
 
@@ -647,7 +714,6 @@ async def _pin_from_supervisor() -> str:
     except Exception as error:          # never break the wait loop
         LOGGER.debug("Supervisor lookup failed: %s", error)
         return ""
-
 
 async def _wait_for_pin() -> str:
     """Block until a 2FA code appears, or the wait runs out."""

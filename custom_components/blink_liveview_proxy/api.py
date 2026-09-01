@@ -58,6 +58,36 @@ class BlinkLiveviewProxyClient:
             raise ProxyConnectionError("Proxy /cameras response did not include a list")
         return cameras
 
+    async def async_get_auth_status(self) -> dict[str, Any]:
+        """Fetch the proxy's public browser-authentication state."""
+        return await self._request_json("/auth/status")
+
+    async def async_start_auth(self, username: str, password: str) -> dict[str, Any]:
+        """Forward credentials in an authorized request body, never a URL."""
+        return await self._request_json(
+            "/auth/login",
+            method="POST",
+            json_body={"username": username, "password": password},
+        )
+
+    async def async_submit_auth_pin(
+        self, challenge_id: str, pin: str
+    ) -> dict[str, Any]:
+        """Submit a PIN to the same live proxy challenge."""
+        return await self._request_json(
+            "/auth/pin",
+            method="POST",
+            json_body={"challenge_id": challenge_id, "pin": pin},
+        )
+
+    async def async_cancel_auth(self, challenge_id: str) -> dict[str, Any]:
+        """Cancel the matching proxy challenge."""
+        return await self._request_json(
+            "/auth/cancel",
+            method="POST",
+            json_body={"challenge_id": challenge_id},
+        )
+
     def stream_url(self, camera: dict[str, Any]) -> str | None:
         """Return the stream URL HA should give to ffmpeg/stream."""
         stream_url = camera.get("mpegts_url") or camera.get("hls_url")
@@ -92,7 +122,13 @@ class BlinkLiveviewProxyClient:
             return {}
         return {"Authorization": f"Bearer {self.token}"}
 
-    async def _request_json(self, path: str) -> dict[str, Any]:
+    async def _request_json(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        json_body: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Fetch and decode a JSON proxy endpoint."""
         headers = {}
         if self.token:
@@ -100,8 +136,11 @@ class BlinkLiveviewProxyClient:
 
         try:
             async with asyncio.timeout(REQUEST_TIMEOUT):
-                async with self._session.get(
-                    self._absolute_url(path), headers=headers
+                async with self._session.request(
+                    method,
+                    self._absolute_url(path),
+                    headers=headers,
+                    json=json_body,
                 ) as response:
                     if response.status in (401, 403):
                         raise ProxyAuthError("Proxy token was rejected")
@@ -110,7 +149,11 @@ class BlinkLiveviewProxyClient:
         except ProxyAuthError:
             raise
         except (asyncio.TimeoutError, ClientResponseError, ClientError) as err:
-            raise ProxyConnectionError(str(err)) from err
+            # Name the path and the failure type, never the upstream error text:
+            # it can carry the full URL and request detail of an auth call.
+            raise ProxyConnectionError(
+                f"Proxy request to {path} failed ({type(err).__name__})"
+            ) from err
         except ValueError as err:
             raise ProxyConnectionError("Proxy returned invalid JSON") from err
 

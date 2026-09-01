@@ -15,11 +15,18 @@ install the proxy as an add-on.
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
 2. Install **Blink Liveview Proxy** from the store.
-3. Open the add-on **Configuration** tab and fill in `blink_username`,
-   `blink_password`, `blink_2fa_code`, and your camera list.
-4. Start the add-on. It authenticates with Blink and begins serving on port 8088.
-5. Clear `blink_2fa_code` from options after the first successful start.
-6. Continue from [Step 3 — Add the HA Integration](#3-add-the-ha-integration) below.
+3. Open the add-on **Configuration** tab. Fill in `blink_username` and
+   `blink_password`. Leave `blink_2fa_code` and `proxy_api_token` empty: the
+   add-on generates a token on first start, keeps it across updates, and shares
+   it with the integration. Cameras are discovered, so the camera list is
+   optional and only pins slugs to HA entities.
+4. Start the add-on once and keep it running. When its log says Blink sent a
+   PIN, enter that newly issued PIN in `blink_2fa_code` and save the options.
+   Saving is enough; **do not restart the add-on**.
+5. Wait for the success log, then clear `blink_2fa_code`. The refresh data is
+   now in `/data/blink-auth.json` and is reused on later starts.
+6. Continue from [Step 3 — Add the HA Integration](#3-add-the-ha-integration).
+   The URL and token are pre-filled from what the add-on shared.
 
 See [addon/DOCS.md](../addon/DOCS.md) for full add-on configuration details.
 
@@ -38,11 +45,27 @@ apt-get install -y python3 python3-venv ffmpeg
 
 ### 2. Install Proxy Files
 
-Use the install script (recommended):
+Use the install script (recommended). It is unattended and idempotent:
 
 ```bash
 sudo scripts/install-proxy.sh
 ```
+
+It installs the code and a venv, writes `/etc/blink-liveview-proxy/config.json`
+with camera discovery and no sample entries, generates a proxy API token into
+the service's environment file, installs the optional watchdog, then enables and
+starts the service and waits for `/health`. It ends by printing the URL and the
+command that reads the token back, which are the only two things Home Assistant
+asks for. Re-run it to upgrade: code is replaced and the service restarted,
+while the token, config, and Blink session are left alone.
+
+Environment overrides: `BIND_HOST=127.0.0.1` keeps the proxy on loopback,
+`PROXY_PORT` changes the port, `BLINK_PROXY_TOKEN` supplies your own token, and
+`INSTALL_WATCHDOG=0` skips the watchdog.
+
+Steps 2a to 2d below are what the script does. Follow them only for a manual
+install — the script covers all of it except the Blink login, which needs a
+human either way.
 
 Or manually — recommended Linux layout:
 
@@ -69,21 +92,48 @@ Edit `/etc/blink-liveview-proxy/config.json`.
 
 ### 2a. First Blink Login
 
-Run once interactively or pass a current 2FA code:
+Run the login interactively. The command first submits the credentials; only
+after Blink issues a new PIN does it prompt for that PIN in the same process:
 
 ```bash
-BLINK_USERNAME="you@example.com" \
-BLINK_PASSWORD="your-password" \
-BLINK_2FA_CODE="123456" \
+read -r -p "Blink email: " BLINK_USERNAME
+read -r -s -p "Blink password: " BLINK_PASSWORD; printf '\n'
+export BLINK_USERNAME BLINK_PASSWORD
 /opt/blink-liveview-proxy/.venv/bin/python \
   /opt/blink-liveview-proxy/blink_liveview_proxy.py \
   --config /etc/blink-liveview-proxy/config.json list
+unset BLINK_USERNAME BLINK_PASSWORD
 ```
+
+Enter the freshly issued PIN at `Blink 2FA code:`. Do not put a PIN in
+`BLINK_2FA_CODE` or `--pin` before starting: a pre-supplied code belongs to an
+older challenge and is intentionally ignored.
 
 After this succeeds, the proxy will have an auth cache under
 `/var/lib/blink-liveview-proxy/secrets/blink-auth.json`.
 
-### 2b. Install Systemd Service
+### 2b. Proxy API Token
+
+`scripts/install-proxy.sh` already did this. Do it by hand only for a manual
+install, or to replace a token deliberately.
+
+A token is required for the browser authentication panel, and for any proxy
+bound wider than `127.0.0.1`. The service reads it from an environment file, so
+exporting it in a shell is not enough — `/auth/*` answers `503` while the
+running service has no token.
+
+```bash
+sudo install -m 600 /dev/null /etc/blink-liveview-proxy/blink-liveview-proxy.env
+printf 'BLINK_PROXY_TOKEN=%s\n' "$(openssl rand -hex 32)" \
+  | sudo tee /etc/blink-liveview-proxy/blink-liveview-proxy.env >/dev/null
+sudo systemctl restart blink-liveview-proxy.service
+```
+
+`systemd/blink-liveview-proxy.service` already reads that path. Read the value
+back with `sudo cat` when the Home Assistant integration asks for it, and keep
+it out of URLs and shell history.
+
+### 2c. Install Systemd Service
 
 ```bash
 sudo cp systemd/blink-liveview-proxy.service /etc/systemd/system/
@@ -100,7 +150,7 @@ curl http://127.0.0.1:8088/status
 curl http://127.0.0.1:8088/cameras
 ```
 
-### 2c. Optional Watchdog
+### 2d. Optional Watchdog
 
 BlinkPy can get stuck in a token-refresh retry loop that only a restart
 clears. `scripts/install-proxy.sh` installs a timer that watches the journal
@@ -146,6 +196,27 @@ Settings → Devices & services → Add integration → Blink Liveview Proxy
 
 Use `http://127.0.0.1:8088` if the proxy runs on the HA host, or
 `http://homeassistant.local:8088` for the add-on.
+
+The integration can be added while a new proxy is waiting for Blink login as
+long as the proxy API token is configured. It adds an admin-only **Blink
+Authentication** sidebar panel — that panel is the only browser entry point,
+including for a systemd install: the proxy itself never serves a login page.
+Home Assistant must be able to reach the proxy URL you entered, so a proxy bound
+to `127.0.0.1` on another machine has no panel. For browser login or deliberate
+reauthentication:
+
+1. Open **Blink Authentication** as a Home Assistant administrator.
+2. Enter the Blink email and password; select **Start login**.
+3. Leave the proxy running while Blink sends a new PIN.
+4. Enter that PIN on the same page before the challenge expires.
+5. Wait for **success**. The existing `auth_file` is replaced atomically only
+   after the candidate login succeeds.
+
+The panel contains no proxy token. Home Assistant authenticates the admin and
+adds the configured bearer token on its server-side request to the proxy. No
+password or PIN is placed in a URL, response, log, generated asset, or browser
+persistent storage. If the service restarts, the challenge is cancelled; start
+a new attempt and use the newly issued PIN.
 
 ## 4. Add Lovelace Helper Resource
 

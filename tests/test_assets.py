@@ -17,14 +17,20 @@ Every check here exists because something actually broke:
     an easy wrong guess is Home Assistant core's own ordering, which differs.
   * the generator's three output shapes each have a different root, and getting
     one wrong produces YAML the dashboard editor refuses.
+  * the installer has to write the proxy API token to exactly the path the
+    systemd unit reads, owner-only, and must never rotate one already in use:
+    the Home Assistant integration holds the only other copy.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import re
 import subprocess
 import sys
+import tempfile
 
 try:
     import yaml
@@ -217,6 +223,186 @@ def test_proxy_copies_match() -> None:
     check(same, "the two config.example.json files match")
 
 
+def _token_block() -> str:
+    """Pull the installer's token step out so it can run without root."""
+    text = (ROOT / "scripts/install-proxy.sh").read_text()
+    start = text.index('ENV_FILE="$ETC_DIR/blink-liveview-proxy.env"')
+    end = text.index("\nfi\n", start) + len("\nfi\n")
+    return "set -euo pipefail\n" + text[start:end]
+
+
+def _run_block(script: str, etc_dir: pathlib.Path, **env_extra: str) -> None:
+    subprocess.run(
+        ["bash", "-c", script],
+        check=True,
+        env={"PATH": os.environ["PATH"], "ETC_DIR": str(etc_dir), **env_extra},
+    )
+
+
+def _run_token_block(etc_dir: pathlib.Path, **env_extra: str) -> None:
+    _run_block(_token_block(), etc_dir, **env_extra)
+
+
+def test_install_token() -> None:
+    print("\ninstaller provisions the proxy API token")
+
+    unit = (ROOT / "systemd/blink-liveview-proxy.service").read_text()
+    env_line = next(
+        (l for l in unit.splitlines() if l.startswith("EnvironmentFile=")), ""
+    )
+    check(
+        env_line.split("=", 1)[-1].lstrip("-")
+        == "/etc/blink-liveview-proxy/blink-liveview-proxy.env",
+        "the unit reads the env file the installer writes",
+    )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        etc = pathlib.Path(tmp)
+        env_file = etc / "blink-liveview-proxy.env"
+
+        _run_token_block(etc)
+        first = env_file.read_text()
+        check(
+            re.fullmatch(r"BLINK_PROXY_TOKEN=[0-9a-f]{64}\n", first) is not None,
+            "a fresh install writes a 256-bit random token",
+        )
+        check(oct(env_file.stat().st_mode)[-3:] == "600", "the token file is owner-only")
+
+        _run_token_block(etc)
+        check(env_file.read_text() == first, "re-running the installer never rotates it")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        etc = pathlib.Path(tmp)
+        env_file = etc / "blink-liveview-proxy.env"
+        env_file.write_text("BLINK_USERNAME=you@example.com\n")
+        env_file.chmod(0o644)
+
+        _run_token_block(etc)
+        contents = env_file.read_text()
+        check(
+            "BLINK_USERNAME=you@example.com" in contents
+            and "BLINK_PROXY_TOKEN=" in contents,
+            "an existing env file keeps its other variables",
+        )
+        check(
+            oct(env_file.stat().st_mode)[-3:] == "600",
+            "a loose env file is tightened before a token lands in it",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        etc = pathlib.Path(tmp)
+        _run_token_block(etc, BLINK_PROXY_TOKEN="supplied-by-the-operator")
+        check(
+            (etc / "blink-liveview-proxy.env").read_text()
+            == "BLINK_PROXY_TOKEN=supplied-by-the-operator\n",
+            "an operator-supplied token is used as-is",
+        )
+
+    installer = (ROOT / "scripts/install-proxy.sh").read_text()
+    check(
+        "NEW_TOKEN" not in installer and "TOKEN_VALUE" not in installer,
+        "the generated token is never held in a shell variable that could echo",
+    )
+    message = installer[installer.index("cat <<MSG") :]
+    check(
+        "$TOKEN_NOTE" in message and "sed -n 's/^BLINK_PROXY_TOKEN=//p'" in message,
+        "the installer reports where the token is, and how to read it back",
+    )
+
+
+def _config_block() -> str:
+    """Pull the installer's config-writing step out so it can run unprivileged."""
+    text = (ROOT / "scripts/install-proxy.sh").read_text()
+    start = text.index('PROXY_PORT="${PROXY_PORT:-8088}"')
+    end = text.index("\nfi\n", text.index('chmod 0600 "$ETC_DIR/config.json"'))
+    return f'set -euo pipefail\nROOT="{ROOT}"\n' + text[start:end] + "\nfi\n"
+
+
+def test_install_writes_config() -> None:
+    print("\ninstaller writes a working config unattended")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        etc = pathlib.Path(tmp)
+        _run_block(_config_block(), etc)
+        config = json.loads((etc / "config.json").read_text())
+        check(config["cameras"] == {}, "no example camera is left behind to fail")
+        check(config["host"] == "0.0.0.0", "it binds the LAN by default, now that a token is always set")
+        check(config["port"] == 8088, "the default port is written")
+        check(
+            oct((etc / "config.json").stat().st_mode)[-3:] == "600",
+            "the config file is owner-only",
+        )
+
+        (etc / "config.json").write_text(json.dumps({"port": 9999}))
+        _run_block(_config_block(), etc)
+        check(
+            json.loads((etc / "config.json").read_text()) == {"port": 9999},
+            "an existing config is never rewritten",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        etc = pathlib.Path(tmp)
+        _run_block(_config_block(), etc, BIND_HOST="127.0.0.1", PROXY_PORT="9099")
+        config = json.loads((etc / "config.json").read_text())
+        check(
+            config["host"] == "127.0.0.1" and config["port"] == 9099,
+            "BIND_HOST and PROXY_PORT are honoured",
+        )
+
+    installer = (ROOT / "scripts/install-proxy.sh").read_text()
+    message = installer[installer.index("cat <<MSG") :]
+    check(
+        "systemctl restart blink-liveview-proxy.service" in installer,
+        "the installer starts the service instead of asking the reader to",
+    )
+    check(
+        "command -v apt-get" in installer and "INSTALL_DEPS:-1" in installer,
+        "missing ffmpeg/python3-venv are installed, and that step is skippable",
+    )
+    check(
+        "Edit $ETC_DIR/config.json" not in message,
+        "the closing message asks for no file editing",
+    )
+
+
+def test_addon_token_handoff() -> None:
+    print("\nadd-on hands its token to the integration")
+
+    run_sh = (ROOT / "addon/run.sh").read_text()
+    const = (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text()
+    config_flow = (ROOT / "custom_components/blink_liveview_proxy/config_flow.py").read_text()
+    addon_config = yaml.safe_load((ROOT / "addon/config.yaml").read_text())
+
+    handoff = re.search(r'TOKEN_HANDOFF_FILE = "([^"]+)"', const)
+    check(handoff is not None, "the integration names the handoff file")
+    if handoff:
+        check(
+            f"$HA_CONFIG/{handoff.group(1)}" in run_sh,
+            "the add-on writes exactly the file the integration reads",
+        )
+    check(
+        "homeassistant_config:rw" in addon_config["map"],
+        "the add-on maps the directory it writes that file into",
+    )
+    check(
+        "bashio::config.has_value 'proxy_api_token'" in run_sh
+        and "secrets.token_hex(32)" in run_sh,
+        "an empty token option is provisioned rather than refused",
+    )
+    check(
+        "/data/proxy-token" in run_sh,
+        "the generated token persists across restarts and updates",
+    )
+    check(
+        not re.search(r"bashio::log\.\w+ .*BLINK_PROXY_TOKEN", run_sh),
+        "the add-on never logs the token value",
+    )
+    check(
+        "_async_handoff_token" in config_flow and "async_step_reauth" in config_flow,
+        "the config flow pre-fills the shared token and can heal a rejected one",
+    )
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -226,6 +412,9 @@ def main() -> int:
         test_manifest,
         test_generator_shapes,
         test_proxy_copies_match,
+        test_install_token,
+        test_install_writes_config,
+        test_addon_token_handoff,
     ):
         test()
 

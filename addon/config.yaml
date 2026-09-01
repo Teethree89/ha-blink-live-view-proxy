@@ -17,12 +17,14 @@ options:
   blink_username: ""
   blink_password: ""
   blink_2fa_code: ""
+  proxy_api_token: ""
   port: 8088
   cameras: []
 schema:
   blink_username: str
   blink_password: str
   blink_2fa_code: str
+  proxy_api_token: str
   port: int
   cameras:
     - slug: str
@@ -56,8 +58,14 @@ ports_description:
 # the file as soon as it reads it. To drop the redundancy, remove share:rw
 # below and the /share entry from PIN_FILES in blink_proxy/blink.py. Nothing
 # else depends on it.
+# homeassistant_config:rw is what makes setup hands-off. The add-on writes its
+# generated proxy token to blink_liveview_proxy.token in the Home Assistant
+# config directory, and the integration's config flow pre-fills the token from
+# it, so no one has to read a token out of one screen and type it into another.
+# Nothing else is written there, and the file holds only that token.
 hassio_api: true
 map:
   - data:rw
   - share:rw
+  - homeassistant_config:rw
 url: "https://github.com/Teethree89/ha-blink-live-view-proxy"

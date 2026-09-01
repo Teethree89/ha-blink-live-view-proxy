@@ -3,6 +3,25 @@
 Three ways to build a camera wall, from most manual to fully automatic. All
 three give you the same four actions per camera.
 
+## Requirements at a glance
+
+The custom frontend cards below are dependencies, not optional enhancements.
+Install them from **HACS → Frontend** before pasting the matching dashboard:
+
+| Option | Required frontend cards | Updates when cameras change? |
+|---|---|---|
+| Hand-edited example | **button-card** | No — copy/edit a tile |
+| Generated dashboard, view, or card | **button-card** | No — rerun the generator |
+| Self-populating dashboard | **auto-entities** and **button-card** | Yes |
+
+The self-populating option does not work fully without `auto-entities`: that
+card discovers the camera entities and builds the card list. If you do not want
+that dependency, use `scripts/generate-dashboard.py`; it discovers cameras once
+and emits ordinary pasted YAML instead.
+
+All three options also use the integration's dashboard helper resource described
+below. The integration normally registers it automatically.
+
 ## The dashboard resource
 
 The integration registers this for you when the config entry is set up:

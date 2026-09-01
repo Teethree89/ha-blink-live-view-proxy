@@ -226,7 +226,8 @@ automation:
             The proxy has not recovered on its own.
             {% set n = state_attr('sensor.blink_proxy', 'watchdog_attempts') | int(0) %}
             {% if n >= 3 %}The watchdog restarted it {{ n }} times and stopped,
-            which usually means the Blink session needs a manual re-auth.
+            which usually means the Blink session needs a manual re-auth in the
+            admin-only Blink Authentication panel.
             {% else %}The proxy is not answering.{% endif %}
             Reloading will not fix expired credentials.
 

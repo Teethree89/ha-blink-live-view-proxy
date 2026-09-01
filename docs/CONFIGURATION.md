@@ -109,10 +109,46 @@ not expose them.
 
 ## Proxy Token
 
-If the proxy listens anywhere broader than `127.0.0.1`, set:
+Both install paths provision this, so there is normally nothing to do:
+
+| Install | Where the token comes from | Where it lives |
+|---|---|---|
+| `scripts/install-proxy.sh` | Generated on first install, never rotated after | `/etc/blink-liveview-proxy/blink-liveview-proxy.env` |
+| Add-on | Generated on first start unless `proxy_api_token` is set | `/data/proxy-token`, shared with the integration |
+
+To set one yourself on a manual install, the service reads it from the
+environment:
 
 ```bash
 export BLINK_PROXY_TOKEN="long-random-token"
 ```
 
-Enter the same token in the HA integration config flow.
+Enter the same token in the HA integration config flow — the add-on pre-fills
+it. If a token is ever rejected, Home Assistant opens a reauthentication prompt
+for that entry rather than failing silently.
+
+The token is also what gates browser authentication. `/auth/*` answers `503`
+while it is empty, and accepts it only as an `Authorization: Bearer` header —
+never as `?token=`. Keep the token out of dashboards, shell history, and URLs;
+Home Assistant adds it server-side for the authentication panel, so no browser
+ever receives it.
+
+## Blink Account Authentication
+
+Blink credentials belong to the proxy, not the integration. The integration
+configures only the proxy URL, live-view duration, and this proxy token.
+
+Three ways to authenticate, all documented step by step in
+[OPERATIONS.md](OPERATIONS.md#re-authenticating):
+
+| Where | How the PIN is delivered |
+|---|---|
+| **Blink Authentication** panel | Typed into the page that started the login |
+| Add-on without a browser | `blink_2fa_code` option, saved while it runs |
+| Linux CLI | Answered at the interactive `Blink 2FA code:` prompt |
+
+In all three the PIN is only issued *after* sign-in begins and is only valid for
+the process that asked for it, so a start-time value in `--pin` or
+`BLINK_2FA_CODE` (the `twofa_env` field) is deliberately ignored with a warning.
+The `auth_file` holds the resulting refresh data; back it up like a secret and
+keep it out of git.

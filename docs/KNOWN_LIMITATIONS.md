@@ -10,7 +10,23 @@
 - The repository should not include Blink app binaries, copied app code,
   captures, account tokens, client secrets, or Amazon/Blink brand assets.
 - The HA custom integration does not perform Blink login. The proxy owns Blink
-  auth and stores the refresh token.
+  auth and stores the refresh token. The integration's **Blink Authentication**
+  panel is a front end for the proxy's authentication routes; it needs a proxy
+  API token configured on both sides, and it is restricted to Home Assistant
+  administrators.
+- Blink 2FA cannot be automated. A PIN is only issued after sign-in starts, it
+  is valid only for the process that asked for it, and it must be entered while
+  that process is still running. Restarting the proxy, add-on, or CLI between
+  the two steps always forces a new login and a new PIN.
+- Only one Blink login attempt can be in flight at a time. A second attempt is
+  rejected while one is active, and an unanswered challenge expires after
+  fifteen minutes — Blink's own PIN expires well before that.
+- The proxy serves its HTTP API before Blink login finishes. Camera, live-view,
+  and clip routes answer `503` until a session exists, and `serve` does not
+  prompt for a PIN on a terminal — use the panel, the add-on option, or the
+  `list` command.
+- A successful reauthentication replaces the Blink session, which ends any live
+  view that happens to be open at that moment.
 - Motion zones, camera settings, and deep account administration are not
   implemented.
 - Push-to-talk is experimental. Tested regular Blink cameras can receive audio.

@@ -9,7 +9,39 @@ bashio::log.info "Building proxy configuration..."
 
 BLINK_USERNAME="$(bashio::config 'blink_username')"
 BLINK_PASSWORD="$(bashio::config 'blink_password')"
-export BLINK_USERNAME BLINK_PASSWORD
+
+# Proxy API token, provisioned rather than requested.
+#
+# The browser authentication routes refuse to run without one, and inventing a
+# token by hand is exactly the setup step people skip, so generate one on first
+# start and keep it in /data. An explicit proxy_api_token option always wins,
+# and the generated value survives restarts and add-on updates.
+TOKEN_FILE=/data/proxy-token
+if bashio::config.has_value 'proxy_api_token'; then
+    BLINK_PROXY_TOKEN="$(bashio::config 'proxy_api_token')"
+else
+    if [ ! -s "$TOKEN_FILE" ]; then
+        ( umask 077
+          "$PYTHON" -c 'import secrets; print(secrets.token_hex(32))' > "$TOKEN_FILE" )
+        bashio::log.info "Generated a proxy API token (kept in the add-on's /data)."
+    fi
+    BLINK_PROXY_TOKEN="$(cat "$TOKEN_FILE")"
+fi
+export BLINK_USERNAME BLINK_PASSWORD BLINK_PROXY_TOKEN
+
+# Hand the token to the Home Assistant integration so nobody has to copy it.
+# Its config flow reads this file out of the Home Assistant config directory and
+# pre-fills the token field. Rewritten every start, so changing the option
+# heals the integration on the next restart. The value is never logged: add-on
+# logs get pasted into issues.
+for HA_CONFIG in /homeassistant /config; do
+    if [ -d "$HA_CONFIG" ] && [ -w "$HA_CONFIG" ]; then
+        ( umask 077
+          printf '%s\n' "$BLINK_PROXY_TOKEN" > "$HA_CONFIG/blink_liveview_proxy.token" )
+        bashio::log.info "Shared the proxy token with Home Assistant."
+        break
+    fi
+done
 
 # No "list" pre-run any more.
 #

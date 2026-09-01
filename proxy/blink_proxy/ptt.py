@@ -213,6 +213,10 @@ class PttAudioBridge:
 async def ptt_handler(request: web.Request) -> web.WebSocketResponse:
     """Handle experimental push-to-talk audio for an active live-view session."""
     check_authorized(request)
+    if request.app.get("client") is None or not getattr(
+        request.app["client"], "ready", False
+    ):
+        raise web.HTTPServiceUnavailable(text="Blink authentication is not ready\n")
     slug = request.match_info["slug"]
     try:
         camera = request.app["client"].camera_for_slug(slug)

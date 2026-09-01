@@ -49,7 +49,7 @@ jobs:
         # Deliberately minimal, and nothing here contacts Blink. A login
         # attempt on every CI run would be rate-limited within minutes and
         # would text the account owner each time.
-        run: pip install pyyaml
+        run: pip install pyyaml -r proxy/requirements.txt
 
       - name: Compile every tracked Python file
         run: python -m compileall -q $(git ls-files '*.py')
@@ -68,6 +68,9 @@ jobs:
 
       - name: Login decision tests
         run: python tests/test_login_decisions.py
+
+      - name: Browser authentication tests
+        run: python tests/test_authentication.py
 
       - name: ffmpeg logging tests
         run: python tests/test_ffmpeg_log.py

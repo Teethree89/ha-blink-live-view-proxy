@@ -31,18 +31,24 @@ The number is accurate. It is just not the question anyone is asking, and it
 invites alerting on the wrong thing. What matters is whether a *refresh* can
 still succeed, which is different.
 
-### Nothing signals that re-auth is needed
+### Half of "nothing signals that re-auth is needed" is fixed
 
-Two states look identical from outside:
+Two states used to look identical from outside:
 
 - the refresh token still works — silent self-heal, no human needed
 - the refresh token is rejected — `Auth.startup()` falls through to a full
   login flow at `debug` level, sends an SMS, and needs a human
 
-The first sign of the second is usually cameras not working, or an unexplained
-text. `/status` should carry an `auth_state` (`ok` / `refresh_due` /
-`reauth_required`) so a dashboard can say so once, instead of the user finding
-out. The package example currently approximates it from the watchdog counter.
+`/status` now carries `auth_state` (`idle`, `authenticating`,
+`waiting_for_pin`, `success`, `expired`, `failure`), so a login that is stuck
+waiting on a human is visible to a dashboard instead of being inferred from
+cameras going quiet.
+
+What is still missing is the *mid-life* case. BlinkPy refreshes lazily inside
+the request that needs the token, so a refresh rejected hours after startup
+does not move `auth_state` — the proxy only finds out on the next live view.
+Catching that needs a hook on the refresh path itself, not another status
+field. The package example still approximates it from the watchdog counter.
 
 ### Blink cannot be tested automatically
 
@@ -80,9 +86,13 @@ breaks.
 
 ## Deliberately not doing
 
-- **Logging in to Blink from the integration.** It only ever talks to the
-  proxy. That is what makes it safe to run a second Home Assistant against the
-  same proxy for testing, and what keeps credentials in one place.
+- **Logging in to Blink from the integration.** The **Blink Authentication**
+  panel does not change this: the integration forwards an authenticated
+  administrator's form straight to the proxy's `/auth/*` routes and shows the
+  redacted state that comes back. It never contacts Blink, never stores the
+  credentials or the PIN, and never holds the refresh token. That is what keeps
+  credentials in one place, and what makes it safe to run a second Home
+  Assistant against the same proxy for testing.
 - **Retrying a failed login automatically.** Blink throttles hard — five
   attempts in 55 seconds and everything after fails, with a text each time.
   Every retry path here has a cap and a cooldown for that reason.

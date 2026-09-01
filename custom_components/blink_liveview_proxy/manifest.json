@@ -12,7 +12,9 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "http"
+    "frontend",
+    "http",
+    "panel_custom"
   ],
   "documentation": "https://github.com/Teethree89/ha-blink-live-view-proxy",
   "integration_type": "hub",
