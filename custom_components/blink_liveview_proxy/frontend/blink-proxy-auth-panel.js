@@ -37,19 +37,39 @@ class BlinkProxyAuthPanel extends HTMLElement {
     return this._hass.callApi(method, `blink_liveview_proxy/auth/${path}`, body);
   }
 
-  async _refresh() {
-    if (this._busy || !this._hass) return;
+  async _refresh(force = false) {
+    if ((this._busy && !force) || !this._hass) return;
     try {
       this._state = await this._api("GET", "status");
       if (["authenticating", "waiting_for_pin"].includes(this._state.state)) {
         this._showLogin = false;
       }
       this._render();
-    } catch (_error) {
-      this._state = {
+    } catch (error) {
+      // The status route reports proxy problems as a state, so reaching this
+      // means Home Assistant itself did not answer.
+      this._state = this._failureFrom(error, {
         state: "failure",
-        message: "The authenticated Home Assistant route could not reach the proxy. Check the proxy URL and API token.",
-      };
+        message: "Home Assistant did not answer the authentication status request. Reload the page, and check the Home Assistant log.",
+      });
+      this._render();
+    }
+  }
+
+  _failureFrom(error, fallback) {
+    // Action routes answer with an error status but a classified body.
+    const body = error && error.body;
+    if (body && typeof body === "object" && body.message) return body;
+    return fallback;
+  }
+
+  async _recheck() {
+    this._busy = true;
+    this._render();
+    try {
+      await this._refresh(true);
+    } finally {
+      this._busy = false;
       this._render();
     }
   }
@@ -69,11 +89,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
     try {
       this._state = await this._api("POST", "login", { username, password });
       this._showLogin = false;
-    } catch (_error) {
-      this._state = {
+    } catch (error) {
+      this._state = this._failureFrom(error, {
         state: "failure",
         message: "Blink login could not be started. Verify the credentials and that no other attempt is active.",
-      };
+      });
     } finally {
       this._busy = false;
       this._render();
@@ -93,11 +113,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
         challenge_id: this._state.challenge_id,
         pin,
       });
-    } catch (_error) {
-      this._state = {
+    } catch (error) {
+      this._state = this._failureFrom(error, {
         state: "failure",
         message: "The PIN was rejected or the challenge is stale. Start a new login to request a fresh PIN.",
-      };
+      });
     } finally {
       this._busy = false;
       this._render();
@@ -134,6 +154,8 @@ class BlinkProxyAuthPanel extends HTMLElement {
     const signature = JSON.stringify([
       state,
       this._state.message,
+      this._state.reason,
+      this._state.remedy,
       this._state.challenge_id,
       this._state.authenticated,
       showLogin,
@@ -163,6 +185,9 @@ class BlinkProxyAuthPanel extends HTMLElement {
         button:disabled { opacity:.55; cursor:default; }
         .muted { color:var(--secondary-text-color); font-size:14px; }
         code { overflow-wrap:anywhere; }
+        pre { margin:12px 0 0; padding:12px; overflow-x:auto; border-radius:4px; background:var(--secondary-background-color); border:1px solid var(--divider-color); font-size:13px; line-height:1.45; }
+        .remedy { margin-top:16px; }
+        .remedy h3 { font-size:15px; margin:0; }
       </style>
       <main>
         <ha-card>
@@ -170,6 +195,13 @@ class BlinkProxyAuthPanel extends HTMLElement {
           <p class="muted">Admin-only. Credentials and PINs are sent in request bodies through Home Assistant and are never stored by this page.</p>
           <div class="state ${state}" role="status"><strong>${this._escape(state.replaceAll("_", " "))}</strong><br>${this._escape(this._state.message || "")}</div>
           <p class="muted" id="expires"></p>
+          <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Check proxy</button>
+          ${this._state.remedy ? `
+            <div class="remedy">
+              <h3>How to fix it</h3>
+              <p class="muted">Home Assistant cannot run this for you: the proxy is a separate service, on a host it has no shell on.</p>
+              <pre>${this._escape(this._state.remedy)}</pre>
+            </div>` : ""}
           ${waiting ? `
             <form id="pin-form">
               <h2>Enter the new Blink PIN</h2>
@@ -198,6 +230,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.getElementById("pin-form")?.addEventListener("submit", (event) => this._submitPin(event));
     this.shadowRoot.getElementById("cancel")?.addEventListener("click", () => this._cancel());
     this.shadowRoot.getElementById("reauth")?.addEventListener("click", () => { this._showLogin = true; this._render(); });
+    this.shadowRoot.getElementById("recheck")?.addEventListener("click", () => this._recheck());
   }
 
   _escape(value) {

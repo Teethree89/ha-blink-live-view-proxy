@@ -132,6 +132,34 @@ removes the old exit-and-restart cycle that could text you a code per restart.
 One consequence: `serve` never prompts on a terminal any more. Use the panel, or
 the `list` command below, to answer a PIN.
 
+#### If the panel will not start a login
+
+The panel diagnoses this from what the proxy answered, and shows the fix. It
+cannot apply it: the proxy is a separate service, on a host Home Assistant has
+no shell on. **Check proxy** re-runs the diagnosis after you have fixed it.
+
+| What it says | What happened | Fix |
+|---|---|---|
+| The proxy has no `/auth` routes | The proxy predates browser authentication | Upgrade the proxy — `sudo scripts/install-proxy.sh`, or the add-on store |
+| Running without an API token | A token is not configured, so the routes are refused | Provision one and restart, then enter it in the integration |
+| The proxy rejected this token | Home Assistant's token does not match the proxy's | Accept the reauthentication prompt, or fix it in the integration's options |
+| Could not reach the proxy | Service down, or the wrong URL | `systemctl status blink-liveview-proxy.service` |
+
+The first one is the common surprise after updating the integration through
+HACS: the integration and the proxy version independently, so a 0.3.0
+integration will happily talk to an older proxy right up until it needs a route
+that proxy has never had.
+
+#### Upgrading the proxy
+
+`scripts/install-proxy.sh`, from a checkout on the proxy host — see
+[INSTALL.md](INSTALL.md#2b-1-upgrading-later). It keeps the token, config and
+Blink session, updates the virtualenv, and restarts the service.
+
+The virtualenv part matters: the blinkpy pin moves between releases, and a
+proxy running new code against an old blinkpy looks completely healthy until
+someone tries to authenticate.
+
 ### Add-on, without the browser
 
 1. Set `blink_username` and `blink_password`, leave `blink_2fa_code` empty, and

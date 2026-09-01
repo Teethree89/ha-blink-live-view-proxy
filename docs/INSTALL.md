@@ -3,12 +3,33 @@
 This guide assumes Home Assistant already has the official Blink integration
 configured and working.
 
+## Which install am I?
+
+Two pieces get installed: the **proxy**, which logs in to Blink and does the
+work, and the **integration**, which is how Home Assistant talks to it. The
+integration is always the same — HACS, restart, add it. Only the proxy differs.
+
+| Your Home Assistant | Run the proxy as | Section |
+|---|---|---|
+| Home Assistant OS or Supervised | An add-on | [A](#a--home-assistant-os-or-supervised) |
+| Container or Core, on a Linux host with systemd | A systemd service | [B](#b--linux-host-with-systemd) |
+| Anything else — a NAS, a Docker-only host | A Docker container | [C](#c--docker-anywhere) |
+| Proxy on a different machine from HA | Either B or C, on that machine | [B](#b--linux-host-with-systemd) / [C](#c--docker-anywhere) |
+
+Whichever you pick, these happen without you: the proxy API token, a config
+that discovers your cameras, and the dashboard helper resource. One step is
+irreducible in every path — **the Blink 2FA PIN**. Blink only issues it after a
+sign-in starts and it dies with that session, so no installer can supply it in
+advance. You will type it once, into the page or option that is waiting for it.
+
+Then everyone continues from
+[Step 3 — Add the HA Integration](#3-add-the-ha-integration).
+
 ---
 
-## Option A — Home Assistant Add-on (HAOS / easiest)
+## A — Home Assistant OS or Supervised
 
-If you run Home Assistant OS or Supervised, skip the Linux setup entirely and
-install the proxy as an add-on.
+The add-on is the whole proxy. No Linux setup, no Python, no separate host.
 
 1. Go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
    ```
@@ -32,7 +53,7 @@ See [addon/DOCS.md](../addon/DOCS.md) for full add-on configuration details.
 
 ---
 
-## Option B — Linux Service (Container / Supervised / bare-metal)
+## B — Linux host with systemd
 
 ### 1. Install Proxy Prerequisites
 
@@ -133,6 +154,59 @@ sudo systemctl restart blink-liveview-proxy.service
 back with `sudo cat` when the Home Assistant integration asks for it, and keep
 it out of URLs and shell history.
 
+### 2b-1. Upgrading later
+
+One line, which is also the install line — it keeps a checkout on the host,
+moves it to the newest tag, and runs the installer from there:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/scripts/bootstrap.sh | sudo bash
+```
+
+It exits with `Already on vX.Y.Z - nothing to do` when there is nothing to do,
+so it is safe to run whenever. `VERSION=v0.3.0` pins a tag, `FORCE=1`
+reinstalls the current one.
+
+To let it run itself, install the timer once:
+
+```bash
+INSTALL_AUTOUPDATE=1 sudo scripts/install-proxy.sh
+```
+
+That adds `blink-liveview-proxy-update.timer`, which runs the same check nightly
+with an hour of jitter and installs a new tag when there is one. It is off by
+default: it restarts the camera proxy when it fires, and that should be a
+decision, not a surprise. `systemctl disable --now blink-liveview-proxy-update.timer`
+turns it back off.
+
+Doing it by hand instead needs a checkout of the repository *on the proxy host*
+— a fresh install usually does not have one, so the first upgrade starts by
+making it:
+
+```bash
+mkdir -p /opt/src
+git clone https://github.com/Teethree89/ha-blink-live-view-proxy \
+  /opt/src/ha-blink-live-view-proxy
+git -C /opt/src/ha-blink-live-view-proxy checkout v0.3.0
+/opt/src/ha-blink-live-view-proxy/scripts/install-proxy.sh
+```
+
+Afterwards, upgrading is `git -C /opt/src/ha-blink-live-view-proxy fetch --tags`,
+a `checkout` of the tag you want, and the script again. The script finds its own
+repository root, so it can be run from anywhere by full path.
+
+> [!WARNING]
+> **Do not upgrade by copying files over the old ones.** `requirements.txt`
+> pins blinkpy, and 0.3.0 raised that pin from 0.25.5 to 0.25.9. Copied files
+> land on the old virtualenv, so the proxy starts, imports cleanly, serves live
+> view — and then fails 2FA, because 0.25.5 reads Blink's challenge response as
+> a failed login. The installer updates the virtualenv; a file copy does not.
+
+If you paste those commands into a terminal while `ssh` is still connecting,
+they land in the type-ahead buffer and are discarded when the remote shell
+starts. Nothing runs, and the only sign is a prompt in the wrong directory. Run
+them at a live prompt, or pass the whole block to `ssh` as one argument.
+
 ### 2c. Install Systemd Service
 
 ```bash
@@ -172,6 +246,55 @@ Skip it during install with `INSTALL_WATCHDOG=0 sudo -E scripts/install-proxy.sh
 
 ---
 
+## C — Docker, anywhere
+
+For hosts with neither Supervisor nor systemd: a NAS, a Docker-only box, Home
+Assistant Container on something that is not Debian. The image carries the
+proxy and ffmpeg, and configures itself on first start.
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docker-compose.example.yml
+printf 'BLINK_USERNAME=you@example.com\nBLINK_PASSWORD=your-password\n' > blink.env
+chmod 600 blink.env
+docker compose -f docker-compose.example.yml up -d
+```
+
+Or without compose:
+
+```bash
+docker run -d --name blink-liveview-proxy --restart unless-stopped \
+  -p 8088:8088 -v blink-proxy-data:/data \
+  -e BLINK_USERNAME=you@example.com -e BLINK_PASSWORD=your-password \
+  ghcr.io/teethree89/ha-blink-live-view-proxy:latest
+```
+
+On first start it writes `/data/config.json` (cameras are discovered, so there
+is nothing to fill in) and generates a proxy API token. Read the token for the
+integration:
+
+```bash
+docker exec blink-liveview-proxy cat /data/proxy-token
+```
+
+Keep `/data` on a volume. It holds the Blink refresh token, the proxy token,
+the config, and the caches — losing it means logging in to Blink again.
+
+Upgrading is `docker compose pull && docker compose up -d`, or `docker pull` and
+recreate. Your `/data` survives.
+
+**The 2FA PIN, in a container.** There is no terminal to prompt on, so use the
+**Blink Authentication** panel once the integration is installed. If you would
+rather not wait for that, drop the PIN into the volume while the container is
+waiting for it:
+
+```bash
+docker exec blink-liveview-proxy sh -c 'echo 123456 > /data/blink_2fa_pin.txt'
+```
+
+The proxy reads it within seconds and deletes the file.
+
+---
+
 ## 3. Add the HA Integration
 
 **Via HACS (recommended):**
@@ -194,8 +317,16 @@ After restarting:
 Settings → Devices & services → Add integration → Blink Liveview Proxy
 ```
 
-Use `http://127.0.0.1:8088` if the proxy runs on the HA host, or
-`http://homeassistant.local:8088` for the add-on.
+The URL depends on where the proxy runs:
+
+| Proxy | URL |
+|---|---|
+| Add-on | `http://homeassistant.local:8088` — pre-filled, along with the token |
+| systemd or Docker on the HA host | `http://127.0.0.1:8088` if HA uses host networking, otherwise the host's name |
+| Another machine | `http://<that-host>:8088` |
+
+Paste the proxy API token in the token field. Add-on installs have it filled in
+already; the other paths printed where to read it.
 
 The integration can be added while a new proxy is waiting for Blink login as
 long as the proxy API token is configured. It adds an admin-only **Blink

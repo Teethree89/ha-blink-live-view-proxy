@@ -28,7 +28,7 @@ from .auth_flow import (
 from .blink import BlinkStreamBroker, _wait_for_pin
 from .clips import ClipManager, clip_download_url, clip_filename, clip_id, printable_clip
 from .config import resolve_path
-from .constants import LOGGER_NAME
+from .constants import LOGGER_NAME, PROXY_VERSION
 from .hls import HlsManager
 from .liveview_cache import ensure_last_liveview_mp4, find_last_liveview
 from .ptt import liveview_session_key, ptt_handler
@@ -182,6 +182,7 @@ async def status_handler(request: web.Request) -> web.Response:
     return web.json_response(
         {
             **client_status,
+            "version": PROXY_VERSION,
             "token_seconds_remaining": (expiration - now) if expiration else None,
             "process_started_at": PROCESS_STARTED_AT,
             "process_uptime_seconds": now - PROCESS_STARTED_AT,

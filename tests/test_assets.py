@@ -403,6 +403,197 @@ def test_addon_token_handoff() -> None:
     )
 
 
+def test_versions_agree() -> None:
+    print("\nthe version means the same thing everywhere")
+
+    manifest = json.loads(
+        (ROOT / "custom_components/blink_liveview_proxy/manifest.json").read_text()
+    )["version"]
+    addon = yaml.safe_load((ROOT / "addon/config.yaml").read_text())["version"]
+    proxy = re.search(
+        r'PROXY_VERSION = "([^"]+)"',
+        (ROOT / "proxy/blink_proxy/constants.py").read_text(),
+    )
+    minimum = re.search(
+        r'MINIMUM_PROXY_VERSION = "([^"]+)"',
+        (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text(),
+    )
+
+    check(proxy is not None, "the proxy declares a version")
+    check(minimum is not None, "the integration declares the proxy version it needs")
+    if not (proxy and minimum):
+        return
+
+    check(manifest == addon, f"manifest and add-on agree ({manifest} / {addon})")
+    check(
+        proxy.group(1) == manifest,
+        f"the proxy reports the release version ({proxy.group(1)} / {manifest})",
+    )
+    # A minimum above the shipped version would put a repair notice in front of
+    # everyone, including people running the matching proxy.
+    to_tuple = lambda v: tuple(int(p) for p in v.split("."))
+    check(
+        to_tuple(minimum.group(1)) <= to_tuple(manifest),
+        f"the required proxy version is one that exists ({minimum.group(1)} <= {manifest})",
+    )
+
+    changelog = (ROOT / "CHANGELOG.md").read_text()
+    check(f"## [{manifest}]" in changelog, f"the changelog has an entry for {manifest}")
+
+
+def test_bootstrap_and_autoupdate() -> None:
+    print("\none-line install, and the timer that reuses it")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        repo, opt = root / "repo", root / "opt"
+        (opt / "blink_proxy").mkdir(parents=True)
+        (opt / "blink_proxy" / "constants.py").write_text('PROXY_VERSION = "0.3.0"\n')
+        repo.mkdir()
+        git = ["git", "-C", str(repo)]
+        subprocess.run(git + ["init", "-q", "."], check=True)
+        subprocess.run(
+            git + ["-c", "user.email=t@t", "-c", "user.name=t",
+                   "commit", "-q", "--allow-empty", "-m", "x"],
+            check=True,
+        )
+        # v0.10.0 last, so an alphabetical sort would pick v0.9.0 and quietly
+        # stop upgrading anyone after the ninth release.
+        for tag in ("v0.2.0", "v0.9.0", "v0.10.0"):
+            subprocess.run(git + ["tag", tag], check=True)
+
+        probe = f"""
+        SRC_DIR={repo} OPT_DIR={opt}
+        source {ROOT}/scripts/bootstrap.sh
+        echo "newest=$(newest_tag)"
+        echo "installed=$(installed_version)"
+        should_install 'v0.3.0' '0.3.0' && echo same=install || echo same=skip
+        should_install 'v0.10.0' '0.3.0' && echo newer=install || echo newer=skip
+        should_install 'v0.3.0' '' && echo unknown=install || echo unknown=skip
+        FORCE=1 should_install 'v0.3.0' '0.3.0' && echo forced=install || echo forced=skip
+        """
+        out = subprocess.run(
+            ["bash", "-c", probe], check=True, capture_output=True, text=True
+        ).stdout
+        results = dict(
+            line.split("=", 1) for line in out.strip().splitlines() if "=" in line
+        )
+        check(results.get("newest") == "v0.10.0", "the newest tag is chosen by version, not alphabetically")
+        check(results.get("installed") == "0.3.0", "the installed version is read from the deployed proxy")
+        check(results.get("same") == "skip", "an up-to-date host does nothing")
+        check(results.get("newer") == "install", "a newer tag installs")
+        check(results.get("unknown") == "install", "an install too old to report a version upgrades")
+        check(results.get("forced") == "install", "FORCE reinstalls the same tag")
+
+    bootstrap = (ROOT / "scripts/bootstrap.sh").read_text()
+    check(
+        "refusing to guess at main" in bootstrap,
+        "a piped one-liner installs a tag, never whatever main holds",
+    )
+    check('if [ "$(id -u)" != "0" ]' in bootstrap, "it fails loudly rather than half-installing as a user")
+
+    installer = (ROOT / "scripts/install-proxy.sh").read_text()
+    check(
+        'INSTALL_AUTOUPDATE:-0' in installer,
+        "unattended updates are off unless asked for",
+    )
+    for fragment in (
+        "/usr/local/sbin/blink-liveview-proxy-update.sh",
+        "blink-liveview-proxy-update.timer",
+        'printf \'SRC_DIR=%s\\n\'',
+    ):
+        check(fragment in installer, f"the auto-update install writes {fragment.split('/')[-1]}")
+
+    unit = (ROOT / "systemd/blink-liveview-proxy-update.service").read_text()
+    timer = (ROOT / "systemd/blink-liveview-proxy-update.timer").read_text()
+    check(
+        "/usr/local/sbin/blink-liveview-proxy-update.sh" in unit,
+        "the unit runs the script the installer put in place",
+    )
+    check("EnvironmentFile=-/etc/blink-liveview-proxy/update.env" in unit, "the unit is told where the checkout is")
+    check("Persistent=true" in timer and "RandomizedDelaySec" in timer, "the timer catches up, and does not stampede")
+
+
+def test_standalone_image() -> None:
+    print("\nstandalone Docker image")
+
+    dockerfile = (ROOT / "Dockerfile").read_text()
+    entrypoint = (ROOT / "docker/entrypoint.sh").read_text()
+    compose = yaml.safe_load((ROOT / "docker-compose.example.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github/workflows/publish-image.yaml").read_text())
+
+    check("COPY proxy/ ./" in dockerfile, "the image ships the canonical proxy copy")
+    check("ffmpeg" in dockerfile, "ffmpeg is in the image, not assumed on the host")
+    check('VOLUME ["/data"]' in dockerfile, "state is declared as a volume")
+    check('ENTRYPOINT ["/entrypoint.sh"]' in dockerfile, "the entrypoint configures before serving")
+
+    service = compose["services"]["blink-liveview-proxy"]
+    image = service["image"].split(":")[0]
+    published = [
+        step["with"]["images"]
+        for step in workflow["jobs"]["build"]["steps"]
+        if step.get("id") == "meta"
+    ]
+    check(published and published[0] == image, f"compose points at the image CI publishes ({image})")
+    check(image.islower(), "the image name is lowercase, which GHCR requires")
+    check(
+        any("/data" in v for v in service["volumes"]),
+        "the example mounts the directory the image writes state into",
+    )
+    push = [
+        step["with"]["push"]
+        for step in workflow["jobs"]["build"]["steps"]
+        if step.get("uses", "").startswith("docker/build-push-action")
+    ]
+    check(
+        push and "startsWith(github.ref, 'refs/tags/v')" in str(push[0]),
+        "every push builds the image, but only a tag publishes it",
+    )
+
+    # The entrypoint is what makes the image self-configuring; run it for real,
+    # stopping just before it would exec the proxy.
+    with tempfile.TemporaryDirectory() as tmp:
+        data = pathlib.Path(tmp)
+        probe = data / "probe.sh"
+        probe.write_text(
+            re.sub(
+                r"^exec python3 .*$",
+                'echo "token_exported=${BLINK_PROXY_TOKEN:+yes}"',
+                entrypoint,
+                flags=re.M,
+            )
+        )
+        out = subprocess.run(
+            ["bash", str(probe)],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={
+                "PATH": os.environ["PATH"],
+                "DATA_DIR": str(data),
+                "BLINK_PROXY_CONFIG": str(data / "config.json"),
+            },
+        ).stdout
+        config = json.loads((data / "config.json").read_text())
+        token = data / "proxy-token"
+        check("token_exported=yes" in out, "a generated token reaches the proxy process")
+        check(config["cameras"] == {} and config["host"] == "0.0.0.0", "the container config discovers cameras")
+        check(
+            all(str(data) in config[key] for key in ("auth_file", "hls_dir", "liveview_cache_dir")),
+            "all state is written inside the volume, not the image layer",
+        )
+        check(oct(token.stat().st_mode)[-3:] == "600", "the generated token file is owner-only")
+        check(token.read_text().strip() not in out, "the token value itself is never printed")
+
+        # Second start: keep the identity the integration was given.
+        first = token.read_text()
+        subprocess.run(["bash", str(probe)], check=True, capture_output=True, text=True,
+                       env={"PATH": os.environ["PATH"], "DATA_DIR": str(data),
+                            "BLINK_PROXY_CONFIG": str(data / "config.json")})
+        check(token.read_text() == first, "restarting the container keeps the same token")
+        check(json.loads((data / "config.json").read_text()) == config, "an existing config is left alone")
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -415,6 +606,9 @@ def main() -> int:
         test_install_token,
         test_install_writes_config,
         test_addon_token_handoff,
+        test_versions_agree,
+        test_bootstrap_and_autoupdate,
+        test_standalone_image,
     ):
         test()
 

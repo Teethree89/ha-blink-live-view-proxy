@@ -27,6 +27,8 @@
   `list` command.
 - A successful reauthentication replaces the Blink session, which ends any live
   view that happens to be open at that moment.
+- The Docker image is built for `linux/amd64` and `linux/arm64` only, matching
+  the add-on. 32-bit ARM cannot usefully transcode a live stream.
 - Motion zones, camera settings, and deep account administration are not
   implemented.
 - Push-to-talk is experimental. Tested regular Blink cameras can receive audio.

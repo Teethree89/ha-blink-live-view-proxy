@@ -1,0 +1,35 @@
+# Standalone proxy, for hosts with no Supervisor and no systemd.
+#
+#   docker compose -f docker-compose.example.yml up -d
+#
+# Then read the generated token and give it to the Home Assistant integration:
+#
+#   docker exec blink-liveview-proxy cat /data/proxy-token
+#
+# Blink's 2FA still needs a human. Either use the integration's Blink
+# Authentication panel, or drop the PIN into the volume while the container is
+# waiting for it:
+#
+#   docker exec blink-liveview-proxy sh -c 'echo 123456 > /data/blink_2fa_pin.txt'
+
+services:
+  blink-liveview-proxy:
+    image: ghcr.io/teethree89/ha-blink-live-view-proxy:latest
+    container_name: blink-liveview-proxy
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    volumes:
+      # The Blink refresh token, the generated proxy token, config and caches.
+      - blink-proxy-data:/data
+    # Keep the credentials out of this file and out of `docker inspect` output
+    # as much as the platform allows: put them in blink.env, chmod 600.
+    env_file:
+      - blink.env
+    # blink.env:
+    #   BLINK_USERNAME=you@example.com
+    #   BLINK_PASSWORD=...
+    #   BLINK_PROXY_TOKEN=      # optional; generated into /data when unset
+
+volumes:
+  blink-proxy-data:

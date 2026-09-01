@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily check for a new Blink Live View Proxy release
+
+[Timer]
+# Overnight, with an hour of jitter so every install of this does not hit
+# GitHub at the same second.
+OnCalendar=*-*-* 04:00:00
+RandomizedDelaySec=1h
+# A machine that was off at 04:00 still checks once it is back.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

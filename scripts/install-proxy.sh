@@ -94,6 +94,23 @@ if [ "${INSTALL_WATCHDOG:-1}" = "1" ]; then
     /etc/systemd/system/blink-liveview-proxy-watchdog.timer
 fi
 
+# Unattended updates: off unless asked for. This restarts the camera proxy on
+# its own schedule, which is a choice to make deliberately, not a default to
+# discover. INSTALL_AUTOUPDATE=1 turns it on; it stays on across re-runs.
+if [ "${INSTALL_AUTOUPDATE:-0}" = "1" ]; then
+  install -m 0755 "$ROOT/scripts/bootstrap.sh" \
+    /usr/local/sbin/blink-liveview-proxy-update.sh
+  install -m 0644 "$ROOT/systemd/blink-liveview-proxy-update.service" \
+    /etc/systemd/system/blink-liveview-proxy-update.service
+  install -m 0644 "$ROOT/systemd/blink-liveview-proxy-update.timer" \
+    /etc/systemd/system/blink-liveview-proxy-update.timer
+  # The updater has to find the checkout this install came from.
+  ( umask 077; printf 'SRC_DIR=%s\n' "$ROOT" > "$ETC_DIR/update.env" )
+  AUTOUPDATE_NOTE="on - daily, from the newest tag"
+else
+  AUTOUPDATE_NOTE="off - re-run this script, or set INSTALL_AUTOUPDATE=1"
+fi
+
 systemctl daemon-reload
 systemctl enable blink-liveview-proxy.service
 # restart, not start: re-running this script is also how you upgrade, and the
@@ -101,6 +118,9 @@ systemctl enable blink-liveview-proxy.service
 systemctl restart blink-liveview-proxy.service
 if [ "${INSTALL_WATCHDOG:-1}" = "1" ]; then
   systemctl enable --now blink-liveview-proxy-watchdog.timer
+fi
+if [ "${INSTALL_AUTOUPDATE:-0}" = "1" ]; then
+  systemctl enable --now blink-liveview-proxy-update.timer
 fi
 
 HEALTH_URL="http://127.0.0.1:$PROXY_PORT/health"
@@ -123,6 +143,7 @@ Installed and started Blink Liveview Proxy.
   Config:   $ETC_DIR/config.json - cameras are discovered, nothing to edit
   Token:    $TOKEN_NOTE
   Auth:     $STATE_DIR/secrets/blink-auth.json - written at first Blink login
+  Updates:  $AUTOUPDATE_NOTE
 
 Nothing else to do on this host. Finish in Home Assistant:
 
@@ -141,6 +162,10 @@ Nothing else to do on this host. Finish in Home Assistant:
      then the PIN Blink texts you while that page waits. This is the only
      interactive step there is: Blink 2FA cannot be automated, by design.
 
-Re-run this script to upgrade. It replaces the code and restarts the service,
-and keeps your token, config, and Blink session as they are.
+Re-run this script to upgrade, or use the one-liner, which keeps a checkout on
+this host and moves it to the newest tag:
+
+  curl -fsSL https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/scripts/bootstrap.sh | sudo bash
+
+Either way your token, config, and Blink session are kept as they are.
 MSG

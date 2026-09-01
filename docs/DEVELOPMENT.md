@@ -98,6 +98,7 @@ and it fails quietly in a different way each time.
 |---|---|---|
 | `custom_components/blink_liveview_proxy/manifest.json` | HACS | every release looks identical in the UI |
 | `addon/config.yaml` | Supervisor | add-on users are never offered the update |
+| `proxy/blink_proxy/constants.py` (`PROXY_VERSION`) | the integration's version check | the proxy under-reports itself, and users get a repair notice they cannot clear |
 | the git tag | HACS, and people pinning | HACS installs the default branch instead |
 
 `CHANGELOG.md` is the fourth place, and the only one that is not load-bearing —
@@ -109,8 +110,11 @@ whatever unrelated PR happened to precede it.
 Steps:
 
 1. Check `main` is green — HACS, Hassfest and Tests.
-2. Bump `version` in `manifest.json` and `addon/config.yaml` to the same value,
-   and add the entry to `CHANGELOG.md`.
+2. Bump `version` in `manifest.json`, `addon/config.yaml` and `PROXY_VERSION`
+   to the same value, and add the entry to `CHANGELOG.md`. `test_assets.py`
+   fails if they disagree. Raise `MINIMUM_PROXY_VERSION` in the integration's
+   `const.py` only when it genuinely needs the newer proxy — every bump shows a
+   repair notice to people whose setup works.
 3. Commit that on its own, so the bump is easy to find later.
 4. Tag it: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
 5. Publish a GitHub release on that tag. HACS only offers tagged releases, so

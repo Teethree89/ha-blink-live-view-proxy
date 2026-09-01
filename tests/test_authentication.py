@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import pathlib
+import re
 import sys
 import tempfile
 from typing import Any
@@ -471,6 +472,118 @@ def test_home_assistant_route_authorization() -> None:
     check(len(panel_calls) == 1 and len(admin_only) == 1, "the auth panel is registered as admin-only")
 
 
+def test_failure_classification() -> None:
+    print("\nproxy failure diagnosis")
+    sys.path.insert(0, str(ROOT / "custom_components/blink_liveview_proxy"))
+    import failures
+
+    cases = {
+        None: ("proxy_unreachable", "reach"),
+        404: ("proxy_outdated", "predates"),
+        503: ("proxy_token_missing", "without an API token"),
+        401: ("proxy_token_mismatch", "rejected"),
+        403: ("proxy_token_mismatch", "rejected"),
+        500: ("proxy_error", "proxy log"),
+    }
+    for status, (reason, phrase) in cases.items():
+        payload = failures.failure_payload(status)
+        check(payload["reason"] == reason, f"status {status} is diagnosed as {reason}")
+        check(phrase in payload["message"], f"{reason} says what actually happened")
+
+    outdated = failures.failure_payload(404)
+    check("install-proxy.sh" in outdated["remedy"], "an old proxy is told how to upgrade")
+    no_token = failures.failure_payload(503)
+    check(
+        "BLINK_PROXY_TOKEN" in no_token["remedy"]
+        and "systemctl restart" in no_token["remedy"],
+        "a tokenless proxy is given the exact provisioning commands",
+    )
+    for status in cases:
+        payload = failures.failure_payload(status)
+        check(
+            payload["state"] == "failure" and payload["can_submit_pin"] is False,
+            f"status {status} produces a renderable failure state",
+        )
+        check(
+            not any(k in payload for k in ("username", "password", "pin", "token")),
+            f"status {status} payload carries no credential fields",
+        )
+
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    check(
+        "_safe_auth_error" not in views and "failure_payload" in views,
+        "the status view reports the diagnosis instead of a bare 502",
+    )
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
+    check('id="recheck"' in panel and "_recheck()" in panel, "the panel offers a re-check button")
+    check(
+        "cannot run this for you" in panel,
+        "the panel says plainly that it cannot apply the fix itself",
+    )
+
+
+def test_proxy_version_notice() -> None:
+    print("\nproxy version notice")
+    sys.path.insert(0, str(ROOT / "custom_components/blink_liveview_proxy"))
+    import version_check
+
+    check(version_check.is_outdated(None, "0.3.0"), "a proxy reporting no version is outdated")
+    check(version_check.is_outdated("0.2.0", "0.3.0"), "an older proxy is outdated")
+    check(version_check.is_outdated("0.2.9", "0.3.0"), "0.2.9 sorts below 0.3.0, not above")
+    check(not version_check.is_outdated("0.3.0", "0.3.0"), "the exact minimum is fine")
+    check(not version_check.is_outdated("0.4.1", "0.3.0"), "a newer proxy is never nagged")
+    check(not version_check.is_outdated("1.0", "0.3.0"), "a short version still compares")
+    check(version_check.is_outdated("garbage", "0.3.0"), "an unparseable version is treated as old")
+    check(
+        version_check.describe(None) == version_check.UNKNOWN_VERSION
+        and version_check.describe("0.2.0") == "0.2.0",
+        "the notice can name the version, or say it has none",
+    )
+
+    # The released 0.3.0 answers /status without a version field, because the
+    # field landed a commit after the tag. Placing it by capability is what
+    # keeps that install from being told to upgrade to what it already runs.
+    check(
+        version_check.infer_version({"auth_state": "success", "ready": True}) == "0.3.0",
+        "a versionless proxy with auth routes is placed at 0.3.0",
+    )
+    check(
+        not version_check.is_outdated(
+            version_check.infer_version({"auth_state": "idle"}), "0.3.0"
+        ),
+        "a correct 0.3.0 install is never told it is out of date",
+    )
+    check(
+        version_check.infer_version({"ready": True}) is None
+        and version_check.is_outdated(version_check.infer_version({"ready": True}), "0.3.0"),
+        "a proxy with neither a version nor the newer fields is still outdated",
+    )
+    check(
+        version_check.infer_version({"version": "0.4.0", "auth_state": "idle"}) == "0.4.0",
+        "a reported version always wins over the inference",
+    )
+
+    coordinator = (ROOT / "custom_components/blink_liveview_proxy/coordinator.py").read_text()
+    check("ir.async_create_issue" in coordinator, "an outdated proxy raises a repair issue")
+    check("ir.async_delete_issue" in coordinator, "the notice clears itself once upgraded")
+    check(
+        "async_get_status" in coordinator,
+        "the version is read from /status on the normal poll, not only at setup",
+    )
+
+    strings = json.loads((ROOT / "custom_components/blink_liveview_proxy/strings.json").read_text())
+    issue = strings.get("issues", {}).get("proxy_outdated", {})
+    check(bool(issue.get("title") and issue.get("description")), "the notice has text to show")
+    placeholders = set(re.findall(r"\{(\w+)\}", issue.get("description", "") + issue.get("title", "")))
+    supplied = set(re.findall(r'"(\w+)": ', coordinator[coordinator.index("translation_placeholders"):]))
+    missing = placeholders - supplied
+    check(not missing, f"every placeholder in the notice is supplied ({sorted(missing)} missing)")
+    check(
+        "install-proxy.sh" in issue["description"],
+        "the notice says what to run, not just what is wrong",
+    )
+
+
 def test_panel_contract() -> None:
     print("\nauthentication panel contract")
     panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
@@ -512,6 +625,8 @@ async def async_main() -> None:
     await test_restart_safety()
     await test_blink_client_persistence()
     test_home_assistant_route_authorization()
+    test_failure_classification()
+    test_proxy_version_notice()
     test_panel_contract()
     test_compatibility_assets()
 

@@ -133,6 +133,23 @@ never as `?token=`. Keep the token out of dashboards, shell history, and URLs;
 Home Assistant adds it server-side for the authentication panel, so no browser
 ever receives it.
 
+## Install and Update Knobs
+
+`scripts/bootstrap.sh` and `scripts/install-proxy.sh` read these from the
+environment:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `VERSION` | newest tag | Install a specific tag instead |
+| `FORCE` | unset | Reinstall even when that tag is already installed |
+| `SRC_DIR` | `/opt/src/ha-blink-live-view-proxy` | Where the checkout lives |
+| `BIND_HOST` | `0.0.0.0` | `127.0.0.1` keeps the proxy on loopback |
+| `PROXY_PORT` | `8088` | Listen port written into a new config |
+| `BLINK_PROXY_TOKEN` | generated | Use a token of your own |
+| `INSTALL_DEPS` | `1` | `0` skips the apt prerequisite install |
+| `INSTALL_WATCHDOG` | `1` | `0` skips the stuck-refresh watchdog |
+| `INSTALL_AUTOUPDATE` | `0` | `1` installs the nightly update timer |
+
 ## Blink Account Authentication
 
 Blink credentials belong to the proxy, not the integration. The integration

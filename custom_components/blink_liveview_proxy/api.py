@@ -20,7 +20,16 @@ class ProxyAuthError(ProxyError):
 
 
 class ProxyConnectionError(ProxyError):
-    """The proxy could not be reached or returned invalid data."""
+    """The proxy could not be reached or returned invalid data.
+
+    `status` is the proxy's HTTP status when there was one, and None when the
+    request never got an answer. It is what tells an old proxy (404 on the auth
+    routes) apart from one deliberately running without a token (503).
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def normalize_base_url(value: str) -> str:
@@ -57,6 +66,10 @@ class BlinkLiveviewProxyClient:
         if not isinstance(cameras, list):
             raise ProxyConnectionError("Proxy /cameras response did not include a list")
         return cameras
+
+    async def async_get_status(self) -> dict[str, Any]:
+        """Fetch the proxy's unauthenticated status, including its version."""
+        return await self._request_json("/status")
 
     async def async_get_auth_status(self) -> dict[str, Any]:
         """Fetch the proxy's public browser-authentication state."""
@@ -152,7 +165,8 @@ class BlinkLiveviewProxyClient:
             # Name the path and the failure type, never the upstream error text:
             # it can carry the full URL and request detail of an auth call.
             raise ProxyConnectionError(
-                f"Proxy request to {path} failed ({type(err).__name__})"
+                f"Proxy request to {path} failed ({type(err).__name__})",
+                status=getattr(err, "status", None),
             ) from err
         except ValueError as err:
             raise ProxyConnectionError("Proxy returned invalid JSON") from err

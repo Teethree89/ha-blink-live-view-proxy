@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for a new Blink Live View Proxy release and install it
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# bootstrap.sh exits early when the newest tag is already installed, so this is
+# a cheap no-op on almost every run. It restarts the proxy only when it
+# actually installs something.
+EnvironmentFile=-/etc/blink-liveview-proxy/update.env
+ExecStart=/usr/local/sbin/blink-liveview-proxy-update.sh

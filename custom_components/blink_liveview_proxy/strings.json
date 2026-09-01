@@ -53,5 +53,11 @@
       "invalid_auth": "The proxy token was rejected.",
       "unknown": "Unexpected error."
     }
+  },
+  "issues": {
+    "proxy_outdated": {
+      "title": "The Blink proxy is older than this integration needs",
+      "description": "The proxy at {base_url} reports {proxy_version}. This integration needs {minimum_version} or newer.\n\nLive view, clips and push-to-talk keep working. What fails is anything the newer proxy added \u2014 browser authentication answers 404, because those routes have never existed in that build.\n\nThe two halves update independently: HACS moves the integration, and nothing moves the proxy. On a Linux service install, run this on the proxy host from a checkout of the repository:\n\n```\nsudo scripts/install-proxy.sh\n```\n\nIt keeps your token, config and Blink session, and restarts the service. Add-on installs update from the add-on store.\n\nThis notice clears itself once the proxy reports {minimum_version} or newer."
+    }
   }
 }

@@ -19,7 +19,8 @@ from homeassistant.components.http import HomeAssistantView, require_admin
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import KEY_AUTHENTICATED
 
-from .api import BlinkLiveviewProxyClient
+from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
+from .failures import failure_payload
 from .playlist import tokenise_playlist
 from .const import DEFAULT_STREAM_SECONDS, DOMAIN
 
@@ -113,13 +114,25 @@ def _auth_client(hass: HomeAssistant) -> BlinkLiveviewProxyClient:
         raise
 
 
-def _safe_auth_error(err: Exception) -> web.HTTPException:
-    """Map upstream failures without reflecting URLs, bodies, or credentials."""
-    LOGGER.warning("Proxy authentication request failed (%s)", type(err).__name__)
-    return web.HTTPBadGateway(
-        text="The proxy could not complete the authentication request\n",
-        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+def _auth_failure_payload(err: Exception) -> dict[str, Any]:
+    """Describe a failure by what the proxy answered, never by its error text.
+
+    A reachable, correctly configured proxy can still refuse these routes — it
+    may predate them, or be running without a token — and telling that user to
+    check their URL and token sends them to look at the one thing that is fine.
+    """
+    if isinstance(err, ProxyAuthError):
+        status: int | None = 401
+    elif isinstance(err, ProxyConnectionError):
+        status = err.status
+    else:
+        status = None
+    LOGGER.warning(
+        "Proxy authentication request failed (%s, upstream status %s)",
+        type(err).__name__,
+        status,
     )
+    return failure_payload(status)
 
 
 def _stream_seconds(hass: HomeAssistant) -> int:
@@ -1806,11 +1819,15 @@ class BlinkLiveviewProxyAuthStatusView(HomeAssistantView):
 
     @require_admin
     async def get(self, _request: web.Request) -> web.Response:
-        """Return the redacted authentication state."""
+        """Return the redacted authentication state, or why there is none.
+
+        A failure is reported as a state, not an HTTP error: the panel's job is
+        to say what is wrong, and a 502 with no body leaves it guessing.
+        """
         try:
             payload = await _auth_client(self.hass).async_get_auth_status()
         except Exception as err:  # noqa: BLE001 - redact all upstream details
-            raise _safe_auth_error(err) from err
+            payload = _auth_failure_payload(err)
         return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
 
 
@@ -1861,5 +1878,11 @@ class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
                     str(body.get("challenge_id") or "")
                 )
         except Exception as err:  # noqa: BLE001 - redact all upstream details
-            raise _safe_auth_error(err) from err
+            # The body carries the classified reason even though the status is
+            # an error, so a panel that reads it can be specific either way.
+            raise web.HTTPBadGateway(
+                text=json.dumps(_auth_failure_payload(err)),
+                content_type="application/json",
+                headers=AUTH_VIEW_HEADERS,
+            ) from err
         return web.json_response(payload, status=202, headers=AUTH_VIEW_HEADERS)

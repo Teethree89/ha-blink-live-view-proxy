@@ -30,6 +30,8 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Local Sync Module clip viewer/downloader.
 - Admin-only browser authentication and deliberate reauthentication through
   Home Assistant, with the Blink OAuth challenge kept in one proxy process.
+- Three ways to run the proxy — add-on, systemd, or a standalone Docker image —
+  each provisioning its own API token.
 - HTTPS-friendly browser microphone flow when HA is served through a trusted
   local HTTPS origin.
 
@@ -91,15 +93,20 @@ directly from the add-on store. No separate Linux host or Python setup required.
 
 See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 
-### Option B — Linux Service (Container / Supervised / bare-metal)
+### Option B — Linux Service (systemd)
 
 One command on the proxy host — it installs the code and venv, writes a config
 that discovers cameras, generates a proxy API token, installs the watchdog, and
 starts the service:
 
 ```bash
-sudo scripts/install-proxy.sh
+curl -fsSL https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/scripts/bootstrap.sh | sudo bash
 ```
+
+That keeps a checkout on the host and installs the newest **tag** — re-run the
+same line to upgrade. `VERSION=v0.3.0` pins one, and `INSTALL_AUTOUPDATE=1`
+installs a daily timer that runs the same check for you. From a checkout you
+already have, `sudo scripts/install-proxy.sh` does the same thing.
 
 It prints the URL to give Home Assistant and the one command that reads the
 token back. Then, in Home Assistant:
@@ -141,6 +148,21 @@ failure states. It permits one attempt at a time, rejects stale PINs, supports
 cancellation, and leaves an existing working client active if reauthentication
 fails. A service restart cancels an in-memory challenge, so start a new login
 and use the new PIN afterward.
+
+### Option C — Docker (NAS, or any host without systemd)
+
+```bash
+docker run -d --name blink-liveview-proxy --restart unless-stopped \
+  -p 8088:8088 -v blink-proxy-data:/data \
+  -e BLINK_USERNAME=you@example.com -e BLINK_PASSWORD=your-password \
+  ghcr.io/teethree89/ha-blink-live-view-proxy:latest
+```
+
+It writes its own config, discovers your cameras, and generates a proxy API
+token on first start — read it with
+`docker exec blink-liveview-proxy cat /data/proxy-token`. Keep `/data` on a
+volume: it holds the Blink refresh token. A `docker-compose.example.yml` is in
+the repository root.
 
 ## HACS Custom Repository
 
