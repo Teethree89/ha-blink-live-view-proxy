@@ -490,6 +490,23 @@ def test_bootstrap_and_autoupdate() -> None:
         "refusing to guess at main" in bootstrap,
         "a piped one-liner installs a tag, never whatever main holds",
     )
+
+    # The advertised way to run this is `curl ... | sudo bash`, where bash reads
+    # the script from stdin and BASH_SOURCE is unset. Under `set -u` that
+    # aborted before main ran, and sourcing the file in a test could never see
+    # it. So run it the way the documentation does.
+    if os.geteuid() == 0:
+        check(True, "piped run skipped: as root it would install for real")
+    else:
+        piped = subprocess.run(
+            ["bash"], input=bootstrap, capture_output=True, text=True
+        )
+        output = piped.stdout + piped.stderr
+        check("unbound variable" not in output, "piping the script into bash does not abort on an unset variable")
+        check(
+            "needs root" in output and piped.returncode == 1,
+            "a piped run reaches the script's own checks",
+        )
     check('if [ "$(id -u)" != "0" ]' in bootstrap, "it fails loudly rather than half-installing as a user")
 
     installer = (ROOT / "scripts/install-proxy.sh").read_text()

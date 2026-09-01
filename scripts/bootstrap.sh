@@ -88,6 +88,10 @@ exec "$SRC_DIR/scripts/install-proxy.sh"
 
 # Sourcing this file defines the functions above and runs nothing, which is how
 # the tests exercise the tag and version logic without root or a network.
-if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+#
+# The default matters: piped into bash from curl, the script is read from stdin
+# and BASH_SOURCE is unset, which under `set -u` aborted before main ever ran -
+# in exactly the invocation this script exists for.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
   main "$@"
 fi
