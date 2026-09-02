@@ -238,8 +238,6 @@ behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 
 ## Dashboards
 
-<img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/example-dashboard.jpg" alt="A Home Assistant dashboard view showing six Blink camera tiles, each with a live snapshot, temperature, battery state, and Snapshot, Motion and Clips buttons" width="100%">
-
 Three ready-made options, from hand-edited to self-populating, are in the
 [dashboard guide](docs/DASHBOARD.md):
 
@@ -318,6 +316,14 @@ in no-store request bodies, does not use browser-persistent storage, and never
 receives the proxy token; Home Assistant adds it server-side.
 
 ## Frameo / Wall Panel Notes
+
+<img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/ha-light-panel-cameras.jpg" alt="The HA Light Panel camera view: six Blink camera tiles, each with a snapshot, temperature, battery state, and Snapshot, Motion and Clips buttons" width="100%">
+
+<sub>The camera view from
+[HA Light Panel](https://github.com/Teethree89/ha-light-panel) — a separate
+wall-panel project for low-power browsers and photo frames — with its tiles fed
+by this proxy. It is not a Lovelace dashboard; for those see
+[Dashboards](#dashboards) above.</sub>
 
 Push-to-talk on Android frames is possible, but browser microphone capture
 requires a trusted HTTPS origin and working Android microphone input. For the
