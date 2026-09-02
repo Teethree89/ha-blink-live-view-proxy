@@ -8,6 +8,8 @@
   "proxy_token_env": "BLINK_PROXY_TOKEN",
   "ffmpeg": "ffmpeg",
   "ffmpeg_loglevel": "warning",
+  "ffmpeg_probesize": 1000000,
+  "ffmpeg_analyzeduration": 500000,
   "hls_dir": "/var/lib/blink-liveview-proxy/hls",
   "hls_idle_timeout": 45,
   "hls_start_timeout": 30,
