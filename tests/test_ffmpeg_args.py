@@ -119,9 +119,45 @@ async def main():
         "ffmpeg_analyzeduration in the config reaches the command line",
     )
     check(
-        "the stream is still copied, not re-encoded",
-        option(args, "-c") == "copy",
-        "-c copy is unchanged",
+        "by default the stream is copied, not re-encoded",
+        option(args, "-c") == "copy" and option(args, "-hls_list_size") == "4",
+        "-c copy with a four segment playlist, as before",
+    )
+
+    fast = await record_args({"hls_transcode": True})
+    outputs = fast[fast.index("-i") + 2 :]
+    check(
+        "low latency re-encodes the video and copies the audio",
+        option(outputs, "-c:v") == "libx264" and option(outputs, "-c:a") == "copy",
+        f"-c:v {option(outputs, '-c:v')} -c:a {option(outputs, '-c:a')}",
+    )
+    check(
+        "low latency forces a keyframe every second",
+        option(outputs, "-force_key_frames") == "expr:gte(t,n_forced*1)"
+        and option(outputs, "-hls_time") == "1",
+        "one forced keyframe per second, one second segments",
+    )
+    check(
+        "the re-encode has a bitrate ceiling",
+        option(outputs, "-maxrate") == "2000k" and option(outputs, "-bufsize") == "2000k",
+        "-maxrate 2000k -bufsize 2000k (an uncapped encode reached 8 Mbit/s "
+        "on a busy scene and the phone could not keep up)",
+    )
+    check(
+        "the output frame rate is pinned",
+        option(outputs, "-r") == "24",
+        "-r 24 (left to guess from a stream that opens with a gap, ffmpeg "
+        "took 90000 fps and never finished a segment)",
+    )
+    check(
+        "one second segments come with a longer playlist",
+        option(outputs, "-hls_list_size") == "6",
+        "six one second segments; four stalled iOS",
+    )
+    check(
+        "the frame rate pin is configurable",
+        option(await record_args({"hls_transcode": True, "hls_frame_rate": 30}), "-r") == "30",
+        "hls_frame_rate in the config reaches the command line",
     )
     print("all ffmpeg argument checks passed")
 

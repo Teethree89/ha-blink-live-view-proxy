@@ -19,6 +19,7 @@ options:
   blink_2fa_code: ""
   proxy_api_token: ""
   port: 8088
+  low_latency: false
   cameras: []
 schema:
   blink_username: str
@@ -26,6 +27,7 @@ schema:
   blink_2fa_code: str
   proxy_api_token: str
   port: int
+  low_latency: bool
   cameras:
     - slug: str
       entity_id: str
