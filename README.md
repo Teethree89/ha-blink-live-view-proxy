@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/logo.png" alt="Blink Liveview Proxy" width="520">
+</p>
+
 # Blink Liveview Proxy
 
 Unofficial Home Assistant custom integration plus a small local Blink proxy
@@ -233,6 +237,8 @@ behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 `proxy/blink_proxy/ptt.py`.
 
 ## Dashboards
+
+<img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/example-dashboard.jpg" alt="A Home Assistant dashboard view showing six Blink camera tiles, each with a live snapshot, temperature, battery state, and Snapshot, Motion and Clips buttons" width="100%">
 
 Three ready-made options, from hand-edited to self-populating, are in the
 [dashboard guide](docs/DASHBOARD.md):
