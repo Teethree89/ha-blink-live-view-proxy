@@ -34,6 +34,7 @@ from .constants import (
     LOGGER_NAME,
     MAX_IMMI_PAYLOAD_BYTES,
 )
+from .rtsp import BlinkRtspLiveStream
 from .util import normalize_slug, redact_liveview_response
 
 LOGGER = logging.getLogger(LOGGER_NAME)
@@ -556,7 +557,10 @@ class BlinkClient:
 
 @dataclass
 class LiveViewHandle:
-    stream: TokenAwareBlinkLiveStream
+    # Two shapes reach here. BlinkRtspLiveStream is not a subclass of the other
+    # one - it is a separate class offering the same surface (.socket, .server,
+    # feed(), stop()), because the RTSP path shares no code with the IMMI path.
+    stream: TokenAwareBlinkLiveStream | BlinkRtspLiveStream
     feed_task: asyncio.Task[None]
     config: dict[str, Any]
 
@@ -602,8 +606,40 @@ class BlinkStreamBroker:
     async def start_liveview(self, slug: str) -> LiveViewHandle:
         camera = self.client.camera_for_slug(slug)
         response = await self._request_liveview(camera)
-        server = response.get("server", "")
-        if not str(server).startswith("immis://"):
+        server = str(response.get("server", ""))
+
+        # Blink hands some cameras an rtsps:// URL instead of immis://; see
+        # rtsp.py for why handing that URL to ffmpeg does not work.
+        if server.startswith(("rtsp://", "rtsps://")):
+            rtsp_stream = BlinkRtspLiveStream(camera, response)
+            await rtsp_stream.start(host="127.0.0.1", port=None)
+            try:
+                await rtsp_stream.connect()
+            except Exception:
+                rtsp_stream.stop()
+                raise
+            feed_task = asyncio.create_task(
+                rtsp_stream.feed(), name=f"blink-rtsp-{slug}"
+            )
+            LOGGER.info(
+                "Started Blink liveview (RTSP) for %s: %s",
+                slug,
+                redact_liveview_response(response),
+            )
+            return LiveViewHandle(
+                stream=rtsp_stream, feed_task=feed_task, config=self.client.config
+            )
+
+        if not server:
+            # Distinct from "unsupported": Blink intermittently returns no
+            # server at all after "v6 liveview request failed ... falling
+            # back". Reporting that as "Unsupported liveview server URL: " is
+            # misleading - no session was ever created.
+            raise RuntimeError(
+                f"Blink returned no liveview server for {slug}; "
+                "the session was never created"
+            )
+        if not server.startswith("immis://"):
             raise RuntimeError(f"Unsupported liveview server URL: {server}")
 
         stream = TokenAwareBlinkLiveStream(

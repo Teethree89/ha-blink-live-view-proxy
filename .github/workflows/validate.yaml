@@ -83,3 +83,6 @@ jobs:
 
       - name: Frontend resource registration tests
         run: python tests/test_frontend_resource.py
+
+      - name: RTSP relay tests
+        run: python tests/test_rtsp.py
