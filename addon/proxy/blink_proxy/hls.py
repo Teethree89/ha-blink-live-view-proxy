@@ -92,6 +92,12 @@ class HlsSession:
                 str(self.manager.config.get("ffmpeg_analyzeduration", 500_000)),
                 "-i",
                 self.liveview.tcp_url,
+                # Some cameras open with pictures seconds apart, so the analysis
+                # can end without one. Left to auto-map, ffmpeg then drops video.
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0?",
                 *codec_args,
                 "-f",
                 "hls",

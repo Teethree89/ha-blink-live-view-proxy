@@ -110,6 +110,13 @@ async def main():
         f"-analyzeduration {option(inputs, '-analyzeduration')}, both before -i",
     )
     check(
+        "the video stream is mapped whether or not the analysis delimited it",
+        args[args.index("-i") + 2 : args.index("-i") + 6]
+        == ["-map", "0:v:0", "-map", "0:a:0?"],
+        "-map 0:v:0 -map 0:a:0? right after the input (auto-mapping drops a "
+        "video stream the analysis never delimited)",
+    )
+    check(
         "the analysis window can be widened per install",
         option(
             (await record_args({"ffmpeg_analyzeduration": 2_000_000}))[: args.index("-i") + 2],
