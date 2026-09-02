@@ -6,9 +6,11 @@ downloads, and local Sync Module clip browsing.
 
 This project exists because the official Home Assistant Blink integration is
 good for snapshots, motion switches, arming, sensors, and normal Blink services,
-but it does not expose Blink's `immis://` live-view stream. The proxy uses
-BlinkPy to log in to Blink with your own account, request a live-view session,
-read Blink's IMMI framing, and expose browser/HA-friendly endpoints on your LAN.
+but it does not expose Blink's live-view stream. The proxy uses BlinkPy to log
+in to Blink with your own account, request a live-view session, read whichever
+transport Blink hands that camera — its own `immis://` framing, or `rtsps://`
+on the older `xt` and `white` models — and expose browser/HA-friendly endpoints
+on your LAN.
 
 It is an interoperability project for cameras you own. It is not affiliated
 with, endorsed by, or supported by Amazon or Blink.
@@ -20,10 +22,15 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 ## What Works
 
 - Live view through a direct MSE player.
+- Both of Blink's live-view transports, so the older `xt` and `white` cameras
+  work too, not only the `immis://` models.
+- Optional low-latency mode: one-second HLS segments instead of four-second
+  ones, at the cost of an encode per open live view.
 - Configurable direct player duration, default `60` seconds.
 - "End & Save" and "Save MP4" for the most recent watched live view.
 - Push-to-talk on tested regular Blink cameras and doorbells.
-- PTT hidden on Blink Mini/`owl` cameras by default.
+- PTT hidden on Blink Mini/`owl` cameras by default, and unavailable on
+  RTSP-transport cameras, which have no upstream audio channel.
 - Fresh snapshot button using the official HA Blink camera entity.
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.

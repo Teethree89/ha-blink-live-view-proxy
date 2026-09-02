@@ -62,6 +62,32 @@ route/proxy to keep each live view open. Valid range: `10-300` seconds.
 
 Blink can still end sessions early.
 
+## Live View Transports
+
+Blink does not hand every camera the same kind of live-view URL, and the proxy
+reads both. The transport is chosen per camera from whatever Blink returns —
+there is nothing to configure, and which one a camera gets is Blink's decision
+and can change under you.
+
+- **`immis://`** — Blink's own framing, used by the newer battery cameras
+  (`catalina`, `xt2`), by Mini/`owl`, and by `lotus` doorbells. This is the
+  path the proxy has always taken.
+- **`rtsps://`** — handed to the oldest generations, `xt` and `white`. Before
+  0.5.0 these were rejected outright and had no live view at all.
+
+The one user-visible difference is that **push-to-talk is not available on a
+camera using the RTSP transport**: the transport carries no upstream audio
+channel, so the proxy raises `push-to-talk is not available over RTSP` rather
+than appearing to send audio nowhere. Everything else — the MSE player, HLS,
+"End & Save", snapshots, motion controls — behaves the same on both.
+
+Blink's RTSP server does not follow RFC 2326: it answers every request with
+`CSeq: 1` instead of echoing the sequence number, and omits both `Session` and
+`Transport` on `SETUP`. Any one of those is fatal to a strict client, which is
+why the proxy speaks the protocol itself rather than handing the URL to ffmpeg
+— ffmpeg aborts with `CSeq 2 expected, 1 received` before the camera is ever
+asked to wake, so the camera never lights up and nothing explains why.
+
 ## Low Latency
 
 By default the proxy copies Blink's stream into HLS segments unchanged. Blink
@@ -87,6 +113,43 @@ matter: without the cap a busy outdoor scene reached 8 Mbit/s and stalled the
 player, and without the pin a camera on a weak signal, whose stream opened with
 a gap, had ffmpeg guessing a 90,000 fps frame rate and never finishing a
 segment.
+
+## ffmpeg Tuning
+
+Four keys control how ffmpeg is invoked for HLS. The defaults are what the
+measurements behind them produced, and there is normally no reason to change
+any of them.
+
+```json
+{
+  "ffmpeg": "ffmpeg",
+  "ffmpeg_loglevel": "warning",
+  "ffmpeg_probesize": 1000000,
+  "ffmpeg_analyzeduration": 500000
+}
+```
+
+`ffmpeg` is the binary to run. `ffmpeg_loglevel` is passed straight through to
+`-loglevel`; raise it to `info` or `debug` when reading `ffmpeg.log` after a
+live view failed to start.
+
+`ffmpeg_probesize` and `ffmpeg_analyzeduration` bound how long ffmpeg inspects
+the stream before writing anything — in bytes and in microseconds. ffmpeg's
+MPEG-TS defaults are 5 MB and 5 seconds, whichever fills first, and Blink sends
+well under a megabit, so the byte limit never filled and every live view paid
+the full five seconds before its first segment existed. Bounding the window to
+half a second of analysis has the first keyframe in hand about a second and a
+half after `PLAY`.
+
+The window is measured on packets whose duration ffmpeg already knows, which on
+this stream means the audio. Widen both values if a camera ever sends something
+the short window cannot identify.
+
+One cosmetic effect worth knowing before you chase it in `ffmpeg.log`: on a
+stream that opens with a gap, the window can end before the picture size is
+known and ffmpeg logs `Could not find codec parameters ... unspecified size`.
+On the default copy path that is harmless — segments are still written from the
+first keyframe and play normally.
 
 ## Session Lifetime
 
