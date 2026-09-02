@@ -288,8 +288,18 @@ class BlinkRtspLiveStream:
         if status != 200:
             raise RtspError(f"SETUP returned {status} (interleaved TCP)")
         self._session = headers.get("session", "").split(";")[0].strip() or None
-        LOGGER.info("RTSP: session %s, transport %s",
-                    self._session, headers.get("transport"))
+        transport = headers.get("transport")
+        # Say this in words. "session None, transport None" reads like a
+        # failure to anyone scanning a log, and it is the normal case here:
+        # Blink answers SETUP with neither header and PLAY works anyway.
+        # Reported by @bbolinger after running the branch on four cameras.
+        if self._session or transport:
+            LOGGER.info("RTSP: session %s, transport %s",
+                        self._session or "-", transport or "-")
+        else:
+            LOGGER.info("RTSP: SETUP returned no Session and no Transport "
+                        "header, which is what Blink does; continuing with "
+                        "interleaved TCP")
 
         status, _, _ = await self._request("PLAY", self.server_url)
         if status != 200:
