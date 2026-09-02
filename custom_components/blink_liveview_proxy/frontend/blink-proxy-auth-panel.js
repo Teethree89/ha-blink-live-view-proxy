@@ -44,6 +44,17 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._timer = null;
   }
 
+  // A custom panel draws its own toolbar. Without one, a phone (sidebar not
+  // docked) has no way to leave this page except killing the app.
+  _back() {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    window.history.pushState(null, "", "/");
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+  }
+
   async _api(method, path, body) {
     if (!this._hass) throw new Error("Home Assistant is not ready");
     return this._hass.callApi(method, `blink_liveview_proxy/auth/${path}`, body);
@@ -186,6 +197,8 @@ class BlinkProxyAuthPanel extends HTMLElement {
       <style>
         :host { display:block; min-height:100%; box-sizing:border-box; padding:24px; color:var(--primary-text-color); background:var(--primary-background-color); font-family:var(--paper-font-body1_-_font-family, sans-serif); }
         main { max-width:640px; margin:0 auto; }
+        button.back { display:flex; width:48px; height:48px; margin:-12px 0 4px -12px; padding:12px; background:none; color:var(--primary-text-color); border-radius:50%; }
+        button.back svg { width:24px; height:24px; fill:currentColor; }
         ha-card { display:block; padding:24px; }
         h1 { font-size:24px; margin:0 0 8px; }
         h2 { font-size:18px; margin:24px 0 12px; }
@@ -205,6 +218,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
         .remedy h3 { font-size:15px; margin:0; }
       </style>
       <main>
+        <button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button>
         <ha-card>
           <h1>Blink Authentication</h1>
           <p class="muted">Admin-only. Credentials and PINs are sent in request bodies through Home Assistant and are never stored by this page.</p>
@@ -246,6 +260,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.getElementById("cancel")?.addEventListener("click", () => this._cancel());
     this.shadowRoot.getElementById("reauth")?.addEventListener("click", () => { this._showLogin = true; this._render(); });
     this.shadowRoot.getElementById("recheck")?.addEventListener("click", () => this._recheck());
+    this.shadowRoot.getElementById("back")?.addEventListener("click", () => this._back());
   }
 
   _escape(value) {
