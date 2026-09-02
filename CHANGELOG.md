@@ -8,6 +8,55 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.5.0] — 2026-09-02
+
+Live view for the cameras that never had it, and a much shorter wait for the
+ones that did.
+
+**Upgrade note: `hls_idle_timeout` now defaults to `10` seconds, down from
+`45`.** This applies whether or not you opt into anything else below. An HLS
+session is stopped that long after the last playlist or segment request, and a
+playing client asks for something at least once per segment, so the change
+should only ever shorten the gap between a viewer closing and the camera being
+released. Set `hls_idle_timeout` back to `45` if a slow client ever loses its
+session.
+
+- **RTSP transport, so older `xt` and `white` cameras have live view at all.**
+  Blink does not hand every camera an `immis://` URL; the oldest generations
+  get `rtsps://`, and those were previously rejected outright. Handing that URL
+  to ffmpeg does not work either, because Blink's RTSP server breaks RFC 2326
+  three separate ways — every response carries `CSeq: 1` rather than echoing
+  the request, and `SETUP` replies omit both `Session` and `Transport`. ffmpeg
+  aborts on the first of those before the camera is ever asked to wake, so the
+  camera never lights up and nothing says why. The proxy now performs the
+  handshake itself and treats all three fields as optional. Push-to-talk is not
+  available over this transport. Thanks to @fritzzetik, with review from
+  @bbolinger.
+- **A live view starts at the first keyframe instead of the third**, which was
+  costing about eight seconds on every tap. `-fflags nobuffer` was the culprit
+  and is gone: its only effect is at start-up, where it discards the packets
+  ffmpeg read while working out what the stream is — and Blink's first keyframe
+  is in those. The analysis window is bounded too (`ffmpeg_probesize`,
+  `ffmpeg_analyzeduration`), because ffmpeg's MPEG-TS defaults wait five
+  seconds for 5 MB that a sub-megabit stream never delivers. Thanks to
+  @bbolinger.
+- **An opt-in low-latency mode**, `hls_transcode` (add-on option
+  `low_latency`), re-encodes video through `libx264 ultrafast` so keyframes can
+  be forced every second and segments really are one second long, taking tap to
+  picture from eight-to-twelve seconds down to two-to-seven. Off by default
+  because it costs an encode per open live view — about a tenth of a core at
+  720p on a desktop i5. It ships with a 2 Mbit/s ceiling and a pinned 24 fps
+  output, both of which were needed to make real cameras work rather than being
+  precautions. Thanks to @bbolinger.
+- **A client waiting for a camera to wake now counts as active.** The idle
+  reaper measured from a timestamp set once before `wait_ready()` began
+  blocking, so any idle timeout shorter than `hls_start_timeout` would have
+  stopped a session while its first request was still waiting on it. Invisible
+  at the old 45s default; a prerequisite for the new one.
+- Documentation: new **Live View Transports**, **ffmpeg Tuning**, **Low
+  Latency** and **Session Lifetime** sections in `docs/CONFIGURATION.md`. The
+  `ffmpeg_*` keys and both HLS timeouts had never been written down.
+
 ## [0.4.1] — 2026-09-01
 
 Fixes the install one-liner, and a sweep of the things a release is a good

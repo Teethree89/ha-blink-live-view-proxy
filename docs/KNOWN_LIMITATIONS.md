@@ -35,6 +35,13 @@
   Blink Mini/`owl` cameras remain disabled by default, but specific slugs can be
   force-enabled with `ptt_force_enabled_slugs`; one was confirmed audible that
   way on June 30, 2026.
+- Push-to-talk is not available at all on cameras Blink serves over the RTSP
+  transport (the older `xt` and `white` models). That transport carries no
+  upstream audio channel, so the proxy raises `push-to-talk is not available
+  over RTSP`. Live view on those cameras is otherwise unaffected.
+- Which transport a camera gets is Blink's decision, not a setting. A model
+  moved from `rtsps://` to `immis://` by Blink would gain push-to-talk, and a
+  model moved the other way would lose it, with no change here.
 - On low-power Android wall panels, tap-to-toggle talk is more reliable than
   press-and-hold because WebView is decoding video and capturing microphone
   audio at the same time.

@@ -56,7 +56,16 @@ Nothing in CI contacts Blink, and nothing should start to: every run would be a
 login attempt, and repeated attempts get the account rate-limited and text the
 owner each time.
 
-That leaves the protocol paths untested. Two ways forward, in order of value:
+That leaves most of the protocol paths untested. The exception since 0.5.0 is
+the RTSP relay: `tests/test_rtsp.py` runs a stub server that reproduces the
+three ways Blink's RTSP violates RFC 2326, and asserts the relay copes. It is
+worth being honest that this sits close to the line drawn at the end of this
+section — it fakes Blink's RTSP server. What makes it worth having anyway is
+that the three behaviours it reproduces were *observed* and are the entire
+reason the module exists, so the stub encodes captured facts rather than
+assumptions. IMMI framing has no equivalent and is still untested.
+
+Two ways forward for the rest, in order of value:
 
 1. **Fixtures.** Capture real IMMI and RTSP bytes once, commit them, and assert
    the parsers handle them. Tests real data, nothing to drift.
@@ -68,12 +77,6 @@ Faking Blink's cloud itself is explicitly *not* wanted. It would mean
 reimplementing their server from our own assumptions, and the tests would then
 only prove the stub agrees with the code — staying green while production
 breaks.
-
-## In flight
-
-- **RTSP transport** for cameras handed an `rtsps://` URL rather than
-  `immis://` — older `xt` and `white` models, which have no live view at all
-  today. See the open pull request.
 
 ## Wanted
 
