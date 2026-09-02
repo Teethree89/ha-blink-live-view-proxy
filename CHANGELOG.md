@@ -8,6 +8,26 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.5.1] — 2026-09-02
+
+Icons, and only icons. Nothing about how the proxy is used changes.
+
+- **The integration ships its own brand images.** `home-assistant/brands` no
+  longer accepts custom integrations — a bot closes the PR — because since
+  2026.3.0 an integration serves its own from a `brand/` folder next to
+  `manifest.json`, which Home Assistant prefers over the CDN and serves at
+  `/api/brands/integration/<domain>/<image>`. All eight slots are filled: icon
+  and logo, each with an `@2x` and a dark variant. Home Assistant older than
+  2026.3.0 keeps falling back to the CDN placeholder exactly as before, so the
+  version floor is unchanged.
+- **The dark variants are not decoration.** The navy wordmark measures 1.28:1
+  against Home Assistant's dark background and the floor for large text is
+  3.0:1, so it was very close to invisible there. The dark set swaps it for
+  white at 17.04:1 and leaves the cyan alone.
+- **The add-on has an icon and a logo**, 128×128 and 520×155, matching the
+  official add-ons. Supervisor reads only those two filenames from the add-on
+  folder and has no dark slot, so that one is the light wordmark.
+
 ## [0.5.0] — 2026-09-02
 
 Live view for the cameras that never had it, and a much shorter wait for the

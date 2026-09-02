@@ -12,7 +12,7 @@ LOGGER_NAME = "blink_liveview_proxy"
 # proxy is old enough to be missing routes it needs. Kept in step with
 # manifest.json and addon/config.yaml by a test, because a version that lies is
 # worse than no version at all.
-PROXY_VERSION = "0.5.0"
+PROXY_VERSION = "0.5.1"
 
 IMMI_HEADER_BYTES = 9
 
