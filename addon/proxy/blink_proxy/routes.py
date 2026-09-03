@@ -7,8 +7,12 @@ import contextlib
 import datetime
 import logging
 import os
+import platform
 import secrets
+import shutil
 import time
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
@@ -166,6 +170,32 @@ def _read_watchdog_state() -> dict[str, int]:
                 pass
     return state
 
+def _environment(config: dict[str, Any]) -> dict[str, Any]:
+    """What this proxy is actually running on, for the dashboard's checks.
+
+    Three answers to three questions the integration cannot ask from the other
+    side of an HTTP boundary: which Python is running it, which blinkpy it
+    imports, and whether ffmpeg is really where the config says. Every one of
+    those fails as something else - a login that reports bad credentials, a
+    live view that opens and never produces a frame - so naming them is worth
+    the field.
+
+    Read on each request rather than cached: `ffmpeg` is a config value, and
+    someone who installs it while the proxy runs should see the dashboard clear
+    on the next poll instead of after a restart.
+    """
+    try:
+        blinkpy = package_version("blinkpy")
+    except PackageNotFoundError:
+        # Importable but not installed as a distribution - a source checkout on
+        # PYTHONPATH. The version is genuinely unknown, so do not invent one.
+        blinkpy = None
+    return {
+        "python": platform.python_version(),
+        "blinkpy": blinkpy,
+        "ffmpeg": shutil.which(str(config.get("ffmpeg") or "ffmpeg")),
+    }
+
 async def status_handler(request: web.Request) -> web.Response:
     controller: AuthenticationController = request.app["auth_controller"]
     client = request.app.get("client")
@@ -189,10 +219,19 @@ async def status_handler(request: web.Request) -> web.Response:
             **client_status,
             # A configured token hides these from strangers on the LAN. A
             # tokenless proxy has no private caller, so version keeps its
-            # legacy public behavior. Update capability does not: /update
+            # legacy public behavior. The environment goes with it: library
+            # versions and binary paths are exactly what someone probing the
+            # host would want. Update capability is stricter still: /update
             # refuses to run without a bearer token, so advertising a Fix
             # button in that state would promise an action that cannot work.
-            **({"version": PROXY_VERSION} if authorized else {}),
+            **(
+                {
+                    "version": PROXY_VERSION,
+                    "environment": _environment(request.app["config"]),
+                }
+                if authorized
+                else {}
+            ),
             **(
                 {"update": selfupdate.describe()}
                 if token_configured and authorized

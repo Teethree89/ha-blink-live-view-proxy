@@ -114,6 +114,10 @@ not duplicate those.
 **For development**: `pyyaml` and `proxy/requirements.txt` for the tests, `ruff`
 for the lint, and `node` for `node --check` on the frontend files.
 
+Once it is installed, the **Blink Proxy** sidebar panel checks every one of
+these against the running install and keeps the setup steps for each next to
+the result — see the [Dashboard Guide](docs/DASHBOARD.md#requirements-at-a-glance).
+
 ## Install Options
 
 ### Option A — Home Assistant Add-on (HAOS / easiest)

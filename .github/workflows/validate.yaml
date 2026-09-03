@@ -87,6 +87,9 @@ jobs:
       - name: Admin dashboard tests
         run: python tests/test_panel_dashboard.py
 
+      - name: Prerequisite readout tests
+        run: python tests/test_prerequisites.py
+
       - name: ffmpeg logging tests
         run: python tests/test_ffmpeg_log.py
 

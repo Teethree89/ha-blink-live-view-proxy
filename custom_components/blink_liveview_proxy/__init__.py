@@ -16,14 +16,15 @@ from .const import (
     CONF_TOKEN,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
+    FRONTEND_RESOURCE_URL,
     PLATFORMS,
 )
 from .coordinator import BlinkLiveviewProxyCoordinator
+from .lovelace import is_writable, resource_collection
 from .views import async_register_views
 
 LOGGER = logging.getLogger(__name__)
 
-FRONTEND_RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
 AUTH_PANEL_MODULE_URL = "/api/blink_liveview_proxy/static/blink-proxy-auth-panel.js"
 AUTH_PANEL_PATH = "blink-liveview-proxy-auth"
 
@@ -57,17 +58,21 @@ async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
     Only storage-mode Lovelace can be written to. In YAML mode the resource
     list comes from configuration.yaml and is read-only, so say what to add
     rather than failing.
+
+    Both questions go through lovelace.py because the answers moved twice:
+    reading them directly found nothing below 2026.3, so this returned early
+    every time and the registration it promises never happened.
     """
     lovelace = hass.data.get("lovelace")
     if lovelace is None:
         LOGGER.debug("Lovelace is not set up; skipping resource registration")
         return
 
-    resources = getattr(lovelace, "resources", None)
+    resources = resource_collection(lovelace)
     if resources is None:
         return
 
-    if getattr(lovelace, "resource_mode", None) != "storage":
+    if not is_writable(lovelace):
         LOGGER.warning(
             "Lovelace is in YAML mode, so the dialog resource cannot be added "
             "automatically. Add this to your resources, or live view, clips "

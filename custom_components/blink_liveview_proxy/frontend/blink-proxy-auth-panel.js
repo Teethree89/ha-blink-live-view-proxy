@@ -14,6 +14,10 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._yamlFormat = "dashboard";
     this._yamlCamera = "";
     this._timer = null;
+    // Which prerequisite accordions are open. Seeded once from the first
+    // payload so unmet checks explain themselves without a click, then left
+    // alone: a poll that rebuilt the page must not close what is being read.
+    this._openHelp = null;
     // Polling runs while the PIN is being typed. Only rebuild when something
     // visible changed, or the focused credential field would be erased.
     this._signature = null;
@@ -252,11 +256,102 @@ class BlinkProxyAuthPanel extends HTMLElement {
     }));
   }
 
+  // Home Assistant themes are not tied to prefers-color-scheme - a light OS
+  // runs a dark theme perfectly happily - so ask the theme's own background
+  // what it is. This is not decoration: the navy half of the wordmark measures
+  // 1.28:1 against Home Assistant's dark background, well under the 3.0:1
+  // floor for large text, which is why there is a white one to switch to.
+  _darkTheme() {
+    const styles = getComputedStyle(this);
+    const rgb = this._rgb(styles.getPropertyValue("--primary-background-color"))
+      || this._rgb(styles.backgroundColor);
+    if (!rgb) return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2] < 128;
+  }
+
+  // Themes state their colours as hex or rgb(), and a fully transparent
+  // computed background says nothing about the theme, so it is not an answer.
+  _rgb(value) {
+    const text = String(value || "").trim();
+    const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hex) {
+      const pairs = hex[1].length === 3
+        ? [...hex[1]].map((character) => character + character)
+        : hex[1].match(/../g);
+      return pairs.map((pair) => parseInt(pair, 16));
+    }
+    const parts = text.match(/^rgba?\(([^)]+)\)$/i);
+    if (!parts) return null;
+    const numbers = parts[1].split(/[\s,/]+/).map(Number).filter((n) => !Number.isNaN(n));
+    if (numbers.length < 3 || numbers[3] === 0) return null;
+    return numbers.slice(0, 3);
+  }
+
+  _wordmark() {
+    const file = this._darkTheme() ? "dark_logo.png" : "logo.png";
+    // Intrinsic dimensions, so the header reserves the right box before the
+    // image loads; CSS scales it. The alt text names the heading it sits in.
+    return `<img class="wordmark" width="520" height="155" alt="Blink Live View Proxy"
+      src="/api/blink_liveview_proxy/static/${file}">`;
+  }
+
   _renderExpiry() {
     const node = this.shadowRoot.getElementById("expires");
     if (!node) return;
     node.textContent = Number.isFinite(this._state.expires_in)
       ? `Challenge expires in about ${Math.max(0, this._state.expires_in)} seconds.` : "";
+  }
+
+  // Three answers, not two. "Not checked" is a real outcome - an older proxy
+  // cannot report its environment, and Lovelace may not have started - and
+  // colouring it like a failure would send people to fix working installs.
+  _checkLabel(check) {
+    if (check.state === "ok") return "Ready";
+    if (check.state === "unknown") return "Not checked";
+    return check.required ? "Action needed" : "Not found";
+  }
+
+  _prerequisitesHtml() {
+    const prerequisites = this._panelData.prerequisites || {};
+    // Home Assistant caches frontend modules hard, so a browser can hold this
+    // file across a downgrade. Never let a payload it does not recognise take
+    // the whole Overview tab down with it.
+    const checks = prerequisites.checks || [];
+    if (!checks.length) return "";
+    const summary = prerequisites.summary || { ok: 0, total: checks.length };
+    if (!this._openHelp) {
+      this._openHelp = new Set(
+        checks.filter((check) => check.state !== "ok").map((check) => check.key),
+      );
+    }
+    const headline = [
+      `${summary.ok} of ${summary.total} ready`,
+      summary.missing ? `${summary.missing} to look at` : "",
+      summary.unknown ? `${summary.unknown} not checked` : "",
+    ].filter(Boolean).join(" · ");
+
+    return `
+      <ha-card>
+        <h2>Prerequisites</h2>
+        <p class="muted">${this._escape(headline)}. The setup steps stay here whether or not a check passes — they are the reference for rebuilding this on another host, not just a repair note.</p>
+        <ul class="checks">${checks.map((check) => `
+          <li class="check ${check.state} ${check.required ? "required" : "optional"}">
+            <div class="check-head">
+              <span class="dot" aria-hidden="true"></span>
+              <div class="check-text">
+                <h3>${this._escape(check.label)}</h3>
+                <p class="detail">${this._escape(check.detail)}</p>
+                <p class="muted">Needed for: ${this._escape(check.needed_for)}</p>
+              </div>
+              <span class="badge status">${this._escape(this._checkLabel(check))}</span>
+            </div>
+            <details data-help="${this._escape(check.key)}" ${this._openHelp.has(check.key) ? "open" : ""}>
+              <summary>Setup and reference</summary>
+              <ul>${check.instructions.map((line) => `<li>${this._escape(line)}</li>`).join("")}</ul>
+              ${check.docs_url ? `<p><a href="${this._escape(check.docs_url)}" target="_blank" rel="noreferrer noopener">Documentation</a></p>` : ""}
+            </details>
+          </li>`).join("")}</ul>
+      </ha-card>`;
   }
 
   _overviewHtml() {
@@ -273,11 +368,12 @@ class BlinkProxyAuthPanel extends HTMLElement {
       </section>
       <ha-card>
         <h2>${this._escape(data.title)}</h2>
-        <dl><dt>Proxy URL</dt><dd><code>${this._escape(data.base_url)}</code></dd><dt>Authentication</dt><dd>${this._escape(data.status.auth_state || "unknown")}</dd><dt>Update method</dt><dd>${this._escape(data.update.method || "manual")}</dd></dl>
+        <dl><dt>Proxy URL</dt><dd><code>${this._escape(data.base_url)}</code></dd><dt>Authentication</dt><dd>${this._escape(data.status.auth_state || "unknown")}</dd><dt>Update method</dt><dd>${this._escape(data.update.method || "manual")}</dd>${data.environment && data.environment.python ? `<dt>Proxy host</dt><dd>Python ${this._escape(data.environment.python)}</dd>` : ""}</dl>
         ${behind ? `<p class="warn">The proxy is behind integration ${this._escape(data.versions.integration)}.</p>` : `<p class="good">The integration and proxy versions are aligned.</p>`}
         ${behind && data.update.available ? `<button id="update" ${this._busy ? "disabled" : ""}>Update proxy</button>` : !data.update.available ? `<p class="muted">Updates are manual for this installation${data.update.blocker ? `: ${this._escape(data.update.blocker)}` : "."}</p>` : ""}
         <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Refresh details</button>
-      </ha-card>`;
+      </ha-card>
+      ${this._prerequisitesHtml()}`;
   }
 
   _camerasHtml() {
@@ -339,13 +435,15 @@ class BlinkProxyAuthPanel extends HTMLElement {
       this._yaml,
       this._yamlFormat,
       this._yamlCamera,
+      // Swapping themes swaps the wordmark, and nothing else here would say so.
+      this._darkTheme(),
     ]);
     if (signature === this._signature) { this._renderExpiry(); return; }
     this._signature = signature;
     const content = { overview: this._overviewHtml(), cameras: this._camerasHtml(), auth: this._authHtml(), yaml: this._yamlHtml() }[this._tab];
     this.shadowRoot.innerHTML = `<style>
-      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}}
-    </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>Blink Liveview Proxy</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
+      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h1 .wordmark{display:block;height:40px;width:auto} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin:18px 0 0;padding:0}.check{padding:14px 16px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-left:4px solid var(--secondary-text-color);border-radius:6px}.check.ok{border-left-color:var(--success-color,#2e7d32)}.check.missing.required{border-left-color:var(--error-color,#c62828)}.check.missing.optional{border-left-color:var(--warning-color,#e68a00)}.check-head{display:flex;align-items:flex-start;gap:12px}.check-text{flex:1 1 auto;min-width:0}.check h3{margin:0;font-size:15px}.check .detail{margin:4px 0 0;font-size:14px;line-height:1.5}.check .muted{margin:4px 0 0;font-size:13px}.dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--secondary-text-color)}.check.ok .dot{background:var(--success-color,#2e7d32)}.check.missing.required .dot{background:var(--error-color,#c62828)}.check.missing.optional .dot{background:var(--warning-color,#e68a00)}.badge.status{white-space:nowrap}.check details{margin-top:10px}.check summary{padding:4px 0;font-size:13px;color:var(--secondary-text-color);cursor:pointer}.check details ul{margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--secondary-text-color)}.check details li{margin-bottom:6px}.check details a{color:var(--primary-color)}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}.check-head{flex-wrap:wrap}h1 .wordmark{height:32px}}
+    </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>${this._wordmark()}</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
     this._renderExpiry();
     this.shadowRoot.querySelectorAll("[data-tab]").forEach((node) => node.addEventListener("click", () => { this._tab = node.dataset.tab; this._notice = ""; this._render(); }));
     this.shadowRoot.getElementById("login-form")?.addEventListener("submit", (event) => this._startLogin(event));
@@ -363,6 +461,13 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.getElementById("generate-yaml")?.addEventListener("click", () => this._loadYaml());
     this.shadowRoot.getElementById("copy-yaml")?.addEventListener("click", () => this._copyYaml());
     this.shadowRoot.getElementById("back")?.addEventListener("click", () => this._back());
+    // Recorded, never re-rendered: the browser has already opened or closed
+    // the element, and rebuilding here would fight the click that did it.
+    this.shadowRoot.querySelectorAll("details[data-help]").forEach((node) =>
+      node.addEventListener("toggle", () => {
+        if (node.open) this._openHelp.add(node.dataset.help);
+        else this._openHelp.delete(node.dataset.help);
+      }));
   }
 
   _escape(value) {

@@ -9,6 +9,13 @@ repo root:
 This runs on every config-entry setup, so being idempotent matters more than
 anything else here: a bug that adds the resource each time would quietly grow
 the user's resource list on every restart.
+
+It also has to find Lovelace at all. `hass.data["lovelace"]` was a plain dict
+up to 2025.1, a LovelaceData dataclass with `mode` from 2025.2, and only from
+2026.3 does that dataclass carry `resource_mode`. Reading `resource_mode`
+directly found nothing on the first two, so this function returned early on
+every core below 2026.3 and the registration silently never happened - which is
+the exact failure it exists to prevent. Each shape is exercised below.
 """
 
 from __future__ import annotations
@@ -20,8 +27,12 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "custom_components/blink_liveview_proxy/__init__.py"
+COMPONENT = ROOT / "custom_components/blink_liveview_proxy"
+SOURCE = COMPONENT / "__init__.py"
 URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
+
+sys.path.insert(0, str(COMPONENT))
+import lovelace as lovelace_module  # noqa: E402
 
 logging.getLogger("test").setLevel(logging.CRITICAL)
 
@@ -58,6 +69,10 @@ def load_function():
         "LOGGER": logging.getLogger("test"),
         "FRONTEND_RESOURCE_URL": URL,
         "HomeAssistant": object,
+        # The real accessors, not stand-ins: reading Lovelace across its three
+        # shapes is the half of this that was broken.
+        "resource_collection": lovelace_module.resource_collection,
+        "is_writable": lovelace_module.is_writable,
     }
     exec(compile(ast.fix_missing_locations(module), "__init__.py", "exec"), namespace)
     return namespace["_async_register_frontend_resource"]
@@ -95,10 +110,18 @@ class Hass:
         self.data = data
 
 
-def lovelace(mode="storage", **kwargs):
+def lovelace(mode="storage", shape="modern", **kwargs):
+    """Lovelace as one of the three things Home Assistant has stored there."""
+    resources = Resources(**kwargs)
+    if shape == "dict":  # 2024.6 to 2025.1
+        return {"mode": mode, "resources": resources}
     obj = type("LovelaceData", (), {})()
-    obj.resource_mode = mode
-    obj.resources = Resources(**kwargs)
+    obj.resources = resources
+    if shape == "dataclass":  # 2025.2 to 2026.2: mode, and no resource_mode
+        obj.mode = mode
+    else:  # 2026.3 onwards
+        obj.mode = mode
+        obj.resource_mode = mode
     return obj
 
 
@@ -113,13 +136,20 @@ def main() -> int:
     run(Hass({}))
     check(True, "no lovelace present is survivable")
 
-    # Storage mode, nothing registered yet.
-    ll = lovelace()
-    run(Hass({"lovelace": ll}))
-    check(
-        ll.resources.created == [{"res_type": "module", "url": URL}],
-        "registers the module when absent",
-    )
+    # Storage mode, nothing registered yet - in all three shapes, because a
+    # shape this cannot read is a shape where nothing is ever registered.
+    for shape, era in (
+        ("dict", "2024.6 to 2025.1"),
+        ("dataclass", "2025.2 to 2026.2"),
+        ("modern", "2026.3 onwards"),
+    ):
+        data = lovelace(shape=shape)
+        run(Hass({"lovelace": data}))
+        resources = data["resources"] if isinstance(data, dict) else data.resources
+        check(
+            resources.created == [{"res_type": "module", "url": URL}],
+            f"registers the module when absent, on {era}",
+        )
 
     # Runs on every setup, so it must not add a second copy.
     ll = lovelace(items=[{"res_type": "module", "url": URL}])
@@ -136,11 +166,41 @@ def main() -> int:
     run(Hass({"lovelace": ll}))
     check(len(ll.resources.created) == 1, "unrelated resources are ignored")
 
-    # YAML mode is read-only: warn, never write.
-    ll = lovelace(mode="yaml")
-    run(Hass({"lovelace": ll}))
-    check(ll.resources.created == [], "YAML mode does not attempt a write")
-    check(ll.resources.info_calls == 0, "YAML mode does not even load resources")
+    # YAML mode is read-only: warn, never write. Also in all three shapes,
+    # or an older core would be written to and raise where it is only logged.
+    for shape, era in (
+        ("dict", "2024.6 to 2025.1"),
+        ("dataclass", "2025.2 to 2026.2"),
+        ("modern", "2026.3 onwards"),
+    ):
+        data = lovelace(mode="yaml", shape=shape)
+        run(Hass({"lovelace": data}))
+        resources = data["resources"] if isinstance(data, dict) else data.resources
+        check(resources.created == [], f"YAML mode does not write, on {era}")
+        check(resources.info_calls == 0, f"YAML mode loads nothing, on {era}")
+
+    # A shape with no mode at all is not assumed writable.
+    unknown = type("LovelaceData", (), {})()
+    unknown.resources = Resources()
+    run(Hass({"lovelace": unknown}))
+    check(unknown.resources.created == [], "an unreported mode is never written to")
+
+    print("\nreading Lovelace across its three shapes")
+    read = lovelace_module.resource_mode
+    check(read({"mode": "storage"}) == "storage", "the 2024.6 dict reports its mode")
+    check(read(lovelace(shape="dataclass")) == "storage",
+          "the 2025.2 dataclass reports mode when it has no resource_mode")
+    # From 2026.3 a storage-mode dashboard can still take resources from YAML,
+    # and resource_mode is the only field that says so.
+    split = lovelace(shape="modern")
+    split.resource_mode = "yaml"
+    check(read(split) == "yaml", "resource_mode wins over mode where both exist")
+    check(read(None) is None and read(object()) is None,
+          "an unreadable Lovelace reports no mode rather than guessing one")
+    check(lovelace_module.resource_collection({"resources": 1}) == 1,
+          "the dict's resource collection is reachable")
+
+    print("\n_async_register_frontend_resource, continued")
 
     # A failure to create must not propagate and break setup.
     ll = lovelace(create_raises=True)

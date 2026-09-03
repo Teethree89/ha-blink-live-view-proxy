@@ -8,6 +8,46 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.6.1] — 2026-09-03
+
+Nothing about how the proxy is used changes. The dashboard says more about the
+install it is running on.
+
+- **Overview checks the prerequisites and says what to do about each one.**
+  Seven rows: the Home Assistant version, the official Blink integration, the
+  proxy's blinkpy and ffmpeg, the Lovelace dialog resource, and the two HACS
+  frontend cards. The three that matter most fail silently today — a missing
+  dialog resource makes every tile inert with no console error, no log line and
+  no failed request; a blinkpy a few releases back reports a failed login while
+  Blink texts the code anyway; a missing official Blink integration shows up
+  only as one button returning a 404.
+- **The setup steps are attached to each check, not to its failure.** Every row
+  carries the same accordion whether it passes or not, because the reference
+  for rebuilding this on a new host is worth having before anything breaks.
+  Unmet checks open theirs on the first paint, and a background poll no longer
+  closes one that is being read.
+- **A check that cannot be answered says so instead of guessing.** A proxy
+  older than 0.6.1 does not report its environment and Lovelace may not have
+  started yet; both are ordinary states of a working install, and calling them
+  failures would send people to repair something already correct.
+- **The proxy reports its Python, blinkpy and resolved ffmpeg path on
+  `/status`.** Behind the same token as the version field, for the same reason:
+  library versions and binary paths are what someone probing the host wants.
+- **The dialog resource is registered on every supported Home Assistant, not
+  just the newest.** `hass.data["lovelace"]` was a plain dict up to 2025.1, a
+  dataclass with `mode` from 2025.2, and only from 2026.3 does it carry
+  `resource_mode` — which is what the registration read. Below 2026.3 it found
+  nothing, concluded YAML mode and returned, so the resource was never added
+  and every live view, clips and snapshot button stayed silently inert. All
+  three shapes are now read, and each is covered by a test.
+- **The dashboard wears the wordmark**, and the direct player and clip viewer
+  have a browser-tab icon. Home Assistant only serves an integration's own
+  `brand/` images from 2026.3.0, and the floor here is 2024.6.0, so the
+  integration serves them itself. The header picks the light or dark wordmark
+  from the theme's actual background rather than `prefers-color-scheme`: a
+  light OS runs a dark theme perfectly happily, and the navy wordmark measures
+  1.28:1 there.
+
 ## [0.6.0] — 2026-09-03
 
 - **Updates can be started from Home Assistant.** When the integration is

@@ -20,17 +20,32 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceNotFound
 from homeassistant.helpers.http import KEY_AUTHENTICATED
 
+from . import prerequisites
 from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
 from .failures import failure_payload
 from .dashboard_yaml import render_dashboard_yaml
+from .lovelace import resource_collection, resource_mode
 from .playlist import tokenise_playlist
-from .const import CONF_BASE_URL, DEFAULT_STREAM_SECONDS, DOMAIN
+from .const import (
+    CONF_BASE_URL,
+    DEFAULT_STREAM_SECONDS,
+    DOMAIN,
+    ENVIRONMENT_PROXY_VERSION,
+    FRONTEND_RESOURCE_URL,
+    MINIMUM_HA_VERSION,
+    REQUIRED_BLINKPY_VERSION,
+)
 from .updates import UpdateAborted, async_start_update
 from .version_check import can_start_update, infer_version, is_behind, update_blocker
 
 LOGGER = logging.getLogger(__name__)
 
 STATIC_ROOT = Path(__file__).parent / "frontend"
+# The wordmarks and icon live in brand/, beside manifest.json, where Home
+# Assistant 2026.3.0 and newer serve them itself at /api/brands. This project
+# still supports 2024.6.0, where that route does not exist, so the panel gets
+# them from here instead and looks the same on every supported core.
+BRAND_ROOT = Path(__file__).parent / "brand"
 PLAYER_LIBRARY_URL = "/api/blink_liveview_proxy/static/mpegts.min.js"
 BROWSER_TOKEN_TTL_SECONDS = 10 * 60
 BROWSER_TOKEN_MAX_COUNT = 128
@@ -76,17 +91,27 @@ class BlinkLiveviewProxyStaticView(HomeAssistantView):
         "blink-liveview-dialog.js": "application/javascript",
         "blink-proxy-auth-panel.js": "application/javascript",
         "mpegts.min.js": "application/javascript",
+        "logo.png": "image/png",
+        "dark_logo.png": "image/png",
+        "icon.png": "image/png",
+    }
+    # An allow-list keyed by name, so no filename from the URL ever reaches a
+    # path join and the two source folders stay an implementation detail.
+    _roots: ClassVar[dict[str, Path]] = {
+        "logo.png": BRAND_ROOT,
+        "dark_logo.png": BRAND_ROOT,
+        "icon.png": BRAND_ROOT,
     }
 
     def __init__(self, hass: HomeAssistant) -> None:
         self.hass = hass
 
     async def get(self, _request: web.Request, filename: str) -> web.FileResponse:
-        """Return one bundled JavaScript asset."""
+        """Return one bundled frontend asset."""
         if filename not in self._content_types:
             raise web.HTTPNotFound()
 
-        path = STATIC_ROOT / filename
+        path = self._roots.get(filename, STATIC_ROOT) / filename
         if not path.exists():
             raise web.HTTPNotFound(text=f"Missing static asset: {filename}\n")
 
@@ -382,6 +407,7 @@ def _player_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Blink Live {name}</title>
+<link rel="icon" href="/api/blink_liveview_proxy/static/icon.png">
 <style>
 html,body {{
   margin:0;
@@ -1439,6 +1465,7 @@ def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Blink Local Clips</title>
+<link rel="icon" href="/api/blink_liveview_proxy/static/icon.png">
 <style>
 html,body {
   margin:0;
@@ -2034,6 +2061,64 @@ def _panel_cameras(hass: HomeAssistant, runtime: dict[str, Any]) -> list[dict[st
     return sorted(result, key=lambda item: item.get("name") or item.get("slug"))
 
 
+def _blink_integration_facts(hass: HomeAssistant) -> dict[str, Any]:
+    """What the official Blink integration is doing, if it is here at all.
+
+    Three separate questions, because they fail separately: an entry can exist
+    while sitting in setup_retry, and a loaded entry is still no use to
+    snapshot refresh until blink.trigger_camera is actually registered.
+    """
+    from homeassistant.config_entries import ConfigEntryState
+
+    entries = hass.config_entries.async_entries("blink")
+    return {
+        "blink_entries": len(entries),
+        "blink_loaded": sum(
+            1 for entry in entries if entry.state is ConfigEntryState.LOADED
+        ),
+        "blink_service": hass.services.has_service("blink", "trigger_camera"),
+    }
+
+
+async def _lovelace_resource_urls(hass: HomeAssistant) -> list[str] | None:
+    """Every registered Lovelace resource URL, or None when it cannot be read.
+
+    None is a real answer here and not an error: Lovelace may not have started,
+    and a readout that reported "missing" in that window would send people to
+    fix something that was already correct.
+    """
+    resources = resource_collection(hass.data.get("lovelace"))
+    if resources is None:
+        return None
+    try:
+        # Storage-backed resources are lazy; async_get_info loads them.
+        await resources.async_get_info()
+        return [str(item.get("url", "")) for item in resources.async_items() or []]
+    except Exception:  # noqa: BLE001 - a readout must never break the panel
+        LOGGER.debug("Could not read the Lovelace resource list", exc_info=True)
+        return None
+
+
+async def _prerequisite_facts(
+    hass: HomeAssistant, status: dict[str, Any], proxy_version: str | None
+) -> dict[str, Any]:
+    """Collect everything prerequisites.build() decides from, and nothing else."""
+    from homeassistant.const import __version__ as HA_VERSION
+
+    return {
+        "ha_version": HA_VERSION,
+        "minimum_ha": MINIMUM_HA_VERSION,
+        "required_blinkpy": REQUIRED_BLINKPY_VERSION,
+        "environment_proxy_version": ENVIRONMENT_PROXY_VERSION,
+        "proxy_version": proxy_version,
+        "environment": status.get("environment"),
+        "resource_url": FRONTEND_RESOURCE_URL,
+        "resource_urls": await _lovelace_resource_urls(hass),
+        "lovelace_mode": resource_mode(hass.data.get("lovelace")),
+        **_blink_integration_facts(hass),
+    }
+
+
 async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
     """Build the admin panel's redacted, read-only snapshot."""
     from homeassistant.loader import async_get_integration
@@ -2046,6 +2131,9 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
     own_version = str(integration.version or "")
     proxy_version = infer_version(status)
     entry = hass.config_entries.async_get_entry(entry_id)
+    checks = prerequisites.build(
+        await _prerequisite_facts(hass, status, proxy_version)
+    )
     return {
         "entry_id": entry_id,
         "title": entry.title if entry else "Blink Liveview Proxy",
@@ -2061,6 +2149,11 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
             "available": can_start_update(status),
             "blocker": update_blocker(status),
             "method": (status.get("update") or {}).get("method"),
+        },
+        "environment": status.get("environment") or {},
+        "prerequisites": {
+            "checks": checks,
+            "summary": prerequisites.summarize(checks),
         },
         "cameras": _panel_cameras(hass, runtime),
     }

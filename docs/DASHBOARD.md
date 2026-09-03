@@ -18,6 +18,17 @@ Home Assistant entities. Select an entity to open its native More Info dialog.
 
 ## Requirements at a glance
 
+The **Blink Proxy** panel's Overview tab checks all of this against the running
+install and says what to do about anything it finds — the Home Assistant
+version, the official Blink integration, the proxy's blinkpy and ffmpeg, the
+dialog resource below, and both frontend cards. Each row keeps its setup steps
+in an accordion whether or not the check passes, so it doubles as the reference
+for rebuilding this on another host.
+
+A row can also say **Not checked**, which is not a failure: a proxy older than
+0.6.1 does not report what it is running on, and Lovelace may not have started
+when the panel is first opened.
+
 The custom frontend cards below are dependencies, not optional enhancements.
 Install them from **HACS → Frontend** before pasting the matching dashboard:
 
