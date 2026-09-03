@@ -43,13 +43,13 @@ curl http://127.0.0.1:8088/clips?source=local&hours=24&limit=5
 The player loads:
 
 ```text
-/api/blink_liveview_proxy/static/mpegts.min.js
+/api/blink_liveview_proxy/assets/mpegts.min.js
 ```
 
 Dashboards should load:
 
 ```text
-/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+/api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 ```
 
 That keeps the frontend helper inside the custom integration instead of

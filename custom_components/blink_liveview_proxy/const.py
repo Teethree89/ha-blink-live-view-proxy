@@ -32,10 +32,32 @@ ENVIRONMENT_PROXY_VERSION = "0.6.1"
 REQUIRED_BLINKPY_VERSION = "0.25.9"
 # The Home Assistant floor, the same number hacs.json enforces at install time.
 MINIMUM_HA_VERSION = "2024.6.0"
+REPOSITORY_URL = "https://github.com/Teethree89/ha-blink-live-view-proxy"
+
+# Where this integration's own frontend files are served from, and why the path
+# does not say "static".
+#
+# Home Assistant's service worker registers, before its /api rule and therefore
+# ahead of it, a CacheFirst route for /(static|frontend_latest|frontend_es5)/.+
+# — and Workbox matches a RegExp anywhere in a same-origin URL, not only at the
+# start. A path containing /static/ anywhere therefore matched, so the browser
+# served these files from Cache Storage without ever asking the server again.
+# That route also sets ignoreSearch, so a ?v= cache-buster is stripped from the
+# key and changes nothing. Only the path itself can move.
+#
+# It only ever bit HTTPS, because a service worker needs a secure context —
+# which is exactly how it stayed hidden: over plain HTTP everything was fresh.
+ASSET_URL_BASE = "/api/blink_liveview_proxy/assets"
+# The pre-0.6.2 path, still served. Dashboards, YAML configs and hand-written
+# resource lists in the wild point at it, and a 404 there is the silent failure
+# this whole area exists to avoid.
+LEGACY_ASSET_URL_BASE = "/api/blink_liveview_proxy/static"
+
 # The dashboard helper module. Every live view, clips and snapshot button in a
 # generated dashboard fires an event this resource listens for, so without it
 # they are silently inert. __init__.py registers it and the panel reports it.
-FRONTEND_RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
+FRONTEND_RESOURCE_URL = f"{ASSET_URL_BASE}/blink-liveview-dialog.js"
+LEGACY_FRONTEND_RESOURCE_URL = f"{LEGACY_ASSET_URL_BASE}/blink-liveview-dialog.js"
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
 DEFAULT_STREAM_SECONDS = 60
 

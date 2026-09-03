@@ -27,12 +27,16 @@ from .dashboard_yaml import render_dashboard_yaml
 from .lovelace import resource_collection, resource_mode
 from .playlist import tokenise_playlist
 from .const import (
+    ASSET_URL_BASE,
     CONF_BASE_URL,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
     ENVIRONMENT_PROXY_VERSION,
     FRONTEND_RESOURCE_URL,
+    LEGACY_ASSET_URL_BASE,
+    LEGACY_FRONTEND_RESOURCE_URL,
     MINIMUM_HA_VERSION,
+    REPOSITORY_URL,
     REQUIRED_BLINKPY_VERSION,
 )
 from .updates import UpdateAborted, async_start_update
@@ -46,7 +50,7 @@ STATIC_ROOT = Path(__file__).parent / "frontend"
 # still supports 2024.6.0, where that route does not exist, so the panel gets
 # them from here instead and looks the same on every supported core.
 BRAND_ROOT = Path(__file__).parent / "brand"
-PLAYER_LIBRARY_URL = "/api/blink_liveview_proxy/static/mpegts.min.js"
+PLAYER_LIBRARY_URL = f"{ASSET_URL_BASE}/mpegts.min.js"
 BROWSER_TOKEN_TTL_SECONDS = 10 * 60
 BROWSER_TOKEN_MAX_COUNT = 128
 
@@ -56,7 +60,8 @@ def async_register_views(hass: HomeAssistant) -> None:
     if hass.data.setdefault(DOMAIN, {}).get("_views_registered"):
         return
 
-    hass.http.register_view(BlinkLiveviewProxyStaticView(hass))
+    hass.http.register_view(BlinkLiveviewProxyAssetView(hass))
+    hass.http.register_view(BlinkLiveviewProxyLegacyAssetView(hass))
     hass.http.register_view(BlinkLiveviewProxyPlayerView(hass))
     hass.http.register_view(BlinkLiveviewProxyBrowserTokenView(hass))
     hass.http.register_view(BlinkLiveviewProxyMpegtsView(hass))
@@ -80,12 +85,17 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.data[DOMAIN]["_views_registered"] = True
 
 
-class BlinkLiveviewProxyStaticView(HomeAssistantView):
-    """Serve package frontend assets used by dashboards and the player."""
+class BlinkLiveviewProxyAssetView(HomeAssistantView):
+    """Serve package frontend assets used by dashboards and the player.
+
+    Not "/static/": Home Assistant's service worker CacheFirsts any same-origin
+    URL containing that segment, which pinned these files to whatever the
+    browser saw first. See ASSET_URL_BASE in const.py.
+    """
 
     requires_auth = False
-    url = "/api/blink_liveview_proxy/static/{filename}"
-    name = "api:blink_liveview_proxy:static"
+    url = f"{ASSET_URL_BASE}/{{filename}}"
+    name = "api:blink_liveview_proxy:assets"
 
     _content_types: ClassVar[dict[str, str]] = {
         "blink-liveview-dialog.js": "application/javascript",
@@ -122,6 +132,22 @@ class BlinkLiveviewProxyStaticView(HomeAssistantView):
                 "Content-Type": self._content_types[filename],
             },
         )
+
+
+class BlinkLiveviewProxyLegacyAssetView(BlinkLiveviewProxyAssetView):
+    """The pre-0.6.2 asset path, still answered.
+
+    Every dashboard, YAML resource list and hand-written config in the wild
+    points here, and this project's worst failure mode is a frontend module
+    that does not load. Serving both costs one route; breaking this one costs
+    people a silently dead dashboard they cannot debug.
+
+    Files fetched through this path stay subject to the service worker's
+    CacheFirst rule. That is the reason to move, not a reason to 404.
+    """
+
+    url = f"{LEGACY_ASSET_URL_BASE}/{{filename}}"
+    name = "api:blink_liveview_proxy:static"
 
 
 def _runtime(hass: HomeAssistant) -> dict[str, Any]:
@@ -407,7 +433,7 @@ def _player_html(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Blink Live {name}</title>
-<link rel="icon" href="/api/blink_liveview_proxy/static/icon.png">
+<link rel="icon" href="{ASSET_URL_BASE}/icon.png">
 <style>
 html,body {{
   margin:0;
@@ -1465,7 +1491,7 @@ def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Blink Local Clips</title>
-<link rel="icon" href="/api/blink_liveview_proxy/static/icon.png">
+<link rel="icon" href="__ASSET_BASE__/icon.png">
 <style>
 html,body {
   margin:0;
@@ -1773,6 +1799,7 @@ loadClips();
 </html>"""
     return (
         html_text.replace("__CAMERA_JSON__", camera_json)
+        .replace("__ASSET_BASE__", ASSET_URL_BASE)
         .replace("__TOKEN_JSON__", token_json)
     )
 
@@ -2099,8 +2126,32 @@ async def _lovelace_resource_urls(hass: HomeAssistant) -> list[str] | None:
         return None
 
 
+def _hacs_update_facts(hass: HomeAssistant) -> dict[str, Any]:
+    """What HACS says about this integration's own version, if it tracks it.
+
+    Matched on release_url, which HACS builds from the repository's full name.
+    Its unique id is a GitHub repository id this code cannot know, and its
+    name is renameable by the user, so neither identifies it reliably.
+    """
+    prefix = REPOSITORY_URL.lower()
+    for state in hass.states.async_all("update"):
+        url = str(state.attributes.get("release_url") or "").lower()
+        if not url.startswith(prefix):
+            continue
+        return {
+            "found": True,
+            "update_available": state.state == "on",
+            "installed": str(state.attributes.get("installed_version") or ""),
+            "latest": str(state.attributes.get("latest_version") or ""),
+        }
+    return {"found": False}
+
+
 async def _prerequisite_facts(
-    hass: HomeAssistant, status: dict[str, Any], proxy_version: str | None
+    hass: HomeAssistant,
+    status: dict[str, Any],
+    proxy_version: str | None,
+    own_version: str,
 ) -> dict[str, Any]:
     """Collect everything prerequisites.build() decides from, and nothing else."""
     from homeassistant.const import __version__ as HA_VERSION
@@ -2113,8 +2164,11 @@ async def _prerequisite_facts(
         "proxy_version": proxy_version,
         "environment": status.get("environment"),
         "resource_url": FRONTEND_RESOURCE_URL,
+        "legacy_resource_url": LEGACY_FRONTEND_RESOURCE_URL,
         "resource_urls": await _lovelace_resource_urls(hass),
         "lovelace_mode": resource_mode(hass.data.get("lovelace")),
+        "integration_version": own_version,
+        "hacs_update": _hacs_update_facts(hass),
         **_blink_integration_facts(hass),
     }
 
@@ -2132,7 +2186,7 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
     proxy_version = infer_version(status)
     entry = hass.config_entries.async_get_entry(entry_id)
     checks = prerequisites.build(
-        await _prerequisite_facts(hass, status, proxy_version)
+        await _prerequisite_facts(hass, status, proxy_version, own_version)
     )
     return {
         "entry_id": entry_id,

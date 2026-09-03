@@ -690,6 +690,70 @@ def test_requirements_are_stated_once_and_true() -> None:
         check(tool in readme, f"the host dependency {tool} is named")
 
 
+def test_asset_paths_avoid_the_service_worker() -> None:
+    """Nothing this project serves may sit under a path Home Assistant caches.
+
+    Home Assistant's service worker registers a CacheFirst route for
+    /(static|frontend_latest|frontend_es5)/.+ before its /api rule, and Workbox
+    matches a RegExp anywhere in a same-origin URL rather than only at the
+    start. A path with any of those segments in it was therefore served out of
+    Cache Storage forever, and the route sets ignoreSearch, so a ?v= buster is
+    stripped from the key and changes nothing. Only the path can move.
+
+    It bit HTTPS alone, because a service worker needs a secure context, which
+    is why it survived so long: over plain HTTP everything looked fine.
+    """
+    print("\nserved paths steer clear of the service worker's cache")
+
+    captured = {"static", "frontend_latest", "frontend_es5"}
+    const_source = (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text()
+    base = re.search(r'ASSET_URL_BASE = "([^"]+)"', const_source)
+    legacy = re.search(r'LEGACY_ASSET_URL_BASE = "([^"]+)"', const_source)
+    check(base is not None, "the asset base is declared in one place")
+    check(legacy is not None, "the superseded path is named, so it stays served")
+    if not (base and legacy):
+        return
+
+    check(
+        not (set(base.group(1).split("/")) & captured),
+        f"the asset base has no cached segment ({base.group(1)})",
+    )
+    # The legacy path is meant to contain one. It exists to keep answering.
+    check(
+        bool(set(legacy.group(1).split("/")) & captured),
+        "the superseded path is the cached one, kept only for compatibility",
+    )
+
+    # The panel repeats the base in JavaScript, where it cannot import it.
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend"
+             / "blink-proxy-auth-panel.js").read_text()
+    urls = set(re.findall(r"/api/blink_liveview_proxy/[a-z_]+/", panel))
+    check(
+        urls == {f"{base.group(1)}/"},
+        f"the panel's own URLs all use that base ({sorted(urls)})",
+    )
+
+    # Code and config must have moved: an example or generator still emitting
+    # the old URL would hand new installs the cached path on purpose. Prose is
+    # not scanned - the documentation has to be able to say what moved and
+    # that the old path still answers.
+    allowed = {
+        "custom_components/blink_liveview_proxy/const.py",
+        "tests/test_assets.py",
+        "tests/test_frontend_resource.py",
+        "tests/test_prerequisites.py",
+    }
+    stale = [
+        path.relative_to(ROOT).as_posix()
+        for path in tracked("*.py", "*.js", "*.yaml", "*.yml")
+        if legacy.group(1) in path.read_text()
+        and path.relative_to(ROOT).as_posix() not in allowed
+    ]
+    for entry in stale:
+        print(f"        {entry}")
+    check(not stale, f"nothing else still points at the superseded path ({len(stale)})")
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -706,6 +770,7 @@ def main() -> int:
         test_bootstrap_and_autoupdate,
         test_standalone_image,
         test_requirements_are_stated_once_and_true,
+        test_asset_paths_avoid_the_service_worker,
     ):
         test()
 

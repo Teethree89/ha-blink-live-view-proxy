@@ -370,7 +370,7 @@ def reindent(block: str, shift: int) -> str:
 HEADER_COMMON = """\
 # Needs button-card, and this dashboard resource registered under
 # Settings -> Dashboards -> Resources, as a JavaScript module:
-#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js
+#   /api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 #
 # The motion-detection button assumes the official Blink integration named its
 # switch after the slug. Fix or delete any that show as unavailable.

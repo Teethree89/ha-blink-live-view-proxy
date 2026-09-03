@@ -21,5 +21,5 @@
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Teethree89/ha-blink-live-view-proxy/issues",
-  "version": "0.6.1"
+  "version": "0.6.2"
 }

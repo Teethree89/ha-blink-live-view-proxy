@@ -398,7 +398,7 @@ and it is worth reading before adding automations that reload either one.
 Add a JavaScript module resource in your dashboard:
 
 ```text
-/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+/api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 ```
 
 This helper opens live view and clips in dashboard dialogs.
@@ -428,4 +428,4 @@ Also confirm:
 - The proxy health endpoint works.
 - Home Assistant can reach the proxy URL.
 - Dashboard resources point at
-  `/api/blink_liveview_proxy/static/blink-liveview-dialog.js`.
+  `/api/blink_liveview_proxy/assets/blink-liveview-dialog.js`.

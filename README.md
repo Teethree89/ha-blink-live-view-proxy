@@ -176,7 +176,7 @@ session. The Lovelace helper resource is registered for you; add it by hand
 only in YAML-mode dashboards:
 
 ```text
-/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+/api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 ```
 
 Full step-by-step in the [install guide](docs/INSTALL.md), and what to do when
@@ -278,7 +278,7 @@ is a native, confirmation-gated Home Assistant restart button for admins.
 Register this dashboard resource first or every tap silently does nothing:
 
 ```text
-/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+/api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 ```
 
 ## Dashboard Helper

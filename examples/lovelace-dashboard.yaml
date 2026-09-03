@@ -13,7 +13,7 @@
 #   - card-mod             rounded corners on the tiles below
 #
 # Required once, in Settings → Dashboards → Resources:
-#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js   (JavaScript module)
+#   /api/blink_liveview_proxy/assets/blink-liveview-dialog.js   (JavaScript module)
 # Nothing works without that resource and it fails silently, so check it first.
 #
 # ---------------------------------------------------------------------------

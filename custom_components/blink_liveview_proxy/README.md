@@ -129,12 +129,12 @@ the native Home Assistant camera dialog. The player proxies raw MPEG-TS through
 Home Assistant from the local proxy and uses a browser MSE player, avoiding HA's
 stream worker and its generated `/api/hls/...` playlists.
 The MSE player library is served from the custom integration itself:
-`/api/blink_liveview_proxy/static/mpegts.min.js`.
+`/api/blink_liveview_proxy/assets/mpegts.min.js`.
 
 For a dashboard modal, load this as a Lovelace module resource:
 
 ```text
-/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+/api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 ```
 
 Then use `fire-dom-event` from `custom:button-card`:

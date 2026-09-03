@@ -25,7 +25,8 @@ from prerequisites import MISSING, OK, UNKNOWN, build, summarize  # noqa: E402
 FAILURES: list[str] = []
 CHECKS = 0
 
-RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
+RESOURCE_URL = "/api/blink_liveview_proxy/assets/blink-liveview-dialog.js"
+LEGACY_RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
 
 
 def check(condition: bool, label: str) -> None:
@@ -50,6 +51,14 @@ def facts(**overrides) -> dict:
             "ffmpeg": "/usr/bin/ffmpeg",
         },
         "resource_url": RESOURCE_URL,
+        "legacy_resource_url": LEGACY_RESOURCE_URL,
+        "integration_version": "0.6.2",
+        "hacs_update": {
+            "found": True,
+            "update_available": False,
+            "installed": "0.6.2",
+            "latest": "0.6.2",
+        },
         "resource_urls": [
             RESOURCE_URL,
             "/hacsfiles/button-card/button-card.js",
@@ -72,6 +81,7 @@ def test_shape() -> None:
     print("\nevery row is renderable")
     keys = {
         "home_assistant",
+        "integration_update",
         "blink_integration",
         "blinkpy",
         "ffmpeg",
@@ -80,7 +90,7 @@ def test_shape() -> None:
         "auto_entities",
     }
     result = build(facts())
-    check(set(row["key"] for row in result) == keys, "all seven checks are present")
+    check(set(row["key"] for row in result) == keys, "all eight checks are present")
     check(
         len({row["key"] for row in result}) == len(result),
         "no two checks share a key",
@@ -107,7 +117,7 @@ def test_all_green() -> None:
     result = build(facts())
     check(all(row["state"] == OK for row in result), "every check passes")
     summary = summarize(result)
-    check(summary == {"total": 7, "ok": 7, "missing": 0, "unknown": 0, "blocking": 0},
+    check(summary == {"total": 8, "ok": 8, "missing": 0, "unknown": 0, "blocking": 0},
           f"the summary counts them all as ready ({summary})")
 
 
@@ -179,6 +189,30 @@ def test_old_proxy_is_not_a_failure() -> None:
           "a proxy that reports no version at all is described honestly")
 
 
+def test_integration_update() -> None:
+    print("\nintegration currency, read from HACS")
+    check(rows()["integration_update"]["state"] == OK, "matching versions pass")
+
+    behind = rows(hacs_update={"found": True, "update_available": True,
+                               "installed": "0.6.1", "latest": "0.6.2"})
+    check(behind["integration_update"]["state"] == MISSING, "an available update is reported")
+    check("0.6.2" in behind["integration_update"]["detail"]
+          and "0.6.1" in behind["integration_update"]["detail"],
+          "and the detail names both versions")
+    # An out-of-date integration still works. Blocking is for things that stop
+    # live view, and this does not.
+    check(behind["integration_update"]["required"] is False, "it never blocks")
+
+    # A hand-copied install has no HACS update entity. That is unknown, not
+    # out of date - the integration cannot see any version but its own.
+    manual = rows(hacs_update={"found": False})
+    check(manual["integration_update"]["state"] == UNKNOWN, "no HACS entity is unknown")
+    check("0.6.2" in manual["integration_update"]["detail"],
+          "and it still names the version that is installed")
+    check(summarize(build(facts(hacs_update={"found": False})))["blocking"] == 0,
+          "unknown never blocks")
+
+
 def test_dashboard_resource() -> None:
     print("\nthe Lovelace dialog resource")
     check(rows()["dashboard_resource"]["state"] == OK, "a registered resource passes")
@@ -188,6 +222,12 @@ def test_dashboard_resource() -> None:
           "a cache-busting query string is still the same resource")
     check(rows(resource_urls=["/local/other.js"])["dashboard_resource"]["state"] == MISSING,
           "an unrelated resource is not mistaken for it")
+    # The pre-0.6.2 path is still served, so it is registered and working.
+    # Reporting it as missing would send people to fix a dashboard that works.
+    legacy = rows(resource_urls=[LEGACY_RESOURCE_URL])
+    check(legacy["dashboard_resource"]["state"] == OK, "the pre-0.6.2 path still counts")
+    check("0.6.2" in legacy["dashboard_resource"]["detail"],
+          "and the detail says which path it is on")
     check(rows(resource_urls=None)["dashboard_resource"]["state"] == UNKNOWN,
           "an unreadable resource list is unknown, not missing")
 
@@ -223,6 +263,7 @@ def main() -> int:
         test_shape,
         test_all_green,
         test_home_assistant,
+        test_integration_update,
         test_blink_integration,
         test_blinkpy,
         test_ffmpeg,
