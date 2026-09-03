@@ -22,10 +22,14 @@ process uptime, and the watchdog's last restart and attempt count. It is
 unauthenticated like `/health`, so it deliberately exposes no camera names,
 serials, tokens, usernames, or challenge identifiers.
 
-`version` is the exception: it is included only when the request carries the
-proxy token, because a version number is a shopping list for whoever is asking.
-The integration's version check sends the token, so it sees it; anything else on
-the LAN gets the rest of the payload unchanged.
+`version` and `update` are the exceptions: when a token is configured, they are
+included only for an authorized request, because a version number and install
+method are a shopping list for whoever is asking. A tokenless proxy keeps the
+legacy public `version`, but omits `update` because `/update` must refuse that
+configuration. The integration's version check sends the token when it has
+one. `update` names one of `systemd`, `supervisor`, `container`, or `manual`,
+says whether the proxy can start an update itself, and includes a human-readable
+reason when it cannot.
 
 A negative `token_seconds_remaining` is normal and is not a fault. BlinkPy
 refreshes lazily: `Auth.query()` checks `need_refresh()` and renews the token
@@ -36,6 +40,24 @@ the result through the auth-file callback.
 Treat `ready` and `cameras_discovered` as the liveness signals. What matters
 is not whether the token has expired but whether a *refresh* can still
 succeed — a different question, and the one worth alerting on.
+
+## Self-update
+
+- `POST /update`
+
+This route exists so the integration's repair flow can start the updater on a
+systemd proxy host. It requires the proxy token in an `Authorization: Bearer`
+header; `?token=` is deliberately rejected. The request body is ignored and
+cannot select a tag, branch, or repository. The updater installed on the host
+always follows the newest release tag configured there.
+
+The proxy answers `202` once
+`blink-liveview-proxy-update.service` has been started with `--no-block`. That
+separate systemd unit survives the proxy restart the upgrade causes. `409`
+means the updater is already running, `501` means this install cannot update
+itself, and `503` means no proxy token is configured. Add-on updates do not use
+this route: Home Assistant asks Supervisor directly. Standalone containers
+must be pulled and recreated by their owner.
 
 ## Authentication Control
 
@@ -112,6 +134,23 @@ plus `require_admin`), forward only the JSON body, add the bearer token
 server-side, and return the proxy's redacted status object. Upstream failures
 are collapsed into a generic `502` so proxy URLs and library error text are not
 reflected back to the browser.
+
+### Home Assistant admin dashboard
+
+The tabbed **Blink Proxy** sidebar panel uses three additional Home Assistant
+routes. They require an authenticated administrator and never return the proxy
+API token or Blink credentials:
+
+- `GET /api/blink_liveview_proxy/panel` — health, versions, update capability,
+  discovered cameras, and related Home Assistant entity summaries
+- `POST /api/blink_liveview_proxy/panel/update` — starts the same systemd or
+  Supervisor update used by a Repairs Fix button; the body chooses nothing
+- `GET /api/blink_liveview_proxy/panel/yaml?format=dashboard|view|card` — emits
+  copy-ready Lovelace YAML; optional `camera=slug` limits it to one camera
+
+Entity summaries contain IDs, display names, current string states, units, and
+device classes so the panel can link to Home Assistant's native More Info
+dialog. They do not duplicate service calls or expose arbitrary attributes.
 
 ## Live View
 

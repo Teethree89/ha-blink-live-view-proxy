@@ -8,6 +8,26 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.6.0] — 2026-09-03
+
+- **Updates can be started from Home Assistant.** When the integration is
+  newer than the proxy, Repairs offers a confirmation-gated Fix button. A
+  systemd install starts its separately installed updater unit; an add-on asks
+  Supervisor to update it. Standalone containers and hand-built installs stay
+  manual, and unattended timer updates remain opt-in.
+- **The sidebar entry is now a full admin dashboard.** Overview shows proxy
+  health, integration/proxy versions, and an update action when one is needed.
+  Cameras & entities shows the discovered inventory, model/serial/network
+  details, live view, clips, snapshot refresh, push-to-talk availability, and
+  links to every related native Home Assistant entity. The existing secure
+  browser login is retained as the Authentication tab.
+- **Dashboard YAML can be generated in the browser.** The YAML tab produces a
+  complete dashboard, one view, or a paste-ready card for all cameras or one
+  selected camera, with a clipboard action and no proxy token in its output.
+- **An open direct player can recover after its short-lived browser token
+  expires.** A Home Assistant-authenticated refresh route mints a new scoped
+  token; expired or rotated-out tokens cannot mint their own replacements.
+
 ## [0.5.1] — 2026-09-02
 
 Icons, and only icons. Nothing about how the proxy is used changes.

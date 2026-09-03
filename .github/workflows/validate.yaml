@@ -78,6 +78,15 @@ jobs:
       - name: Browser authentication tests
         run: python tests/test_authentication.py
 
+      - name: Browser token refresh tests
+        run: python tests/test_browser_token.py
+
+      - name: Self-update tests
+        run: python tests/test_self_update.py
+
+      - name: Admin dashboard tests
+        run: python tests/test_panel_dashboard.py
+
       - name: ffmpeg logging tests
         run: python tests/test_ffmpeg_log.py
 

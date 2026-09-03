@@ -14,9 +14,11 @@ from typing import Any
 
 from aiohttp import web
 
+from . import selfupdate
 from .auth import (
     check_auth_control_authorized,
     check_authorized,
+    check_header_authorized,
     is_authorized,
     rewrite_playlist_for_token,
 )
@@ -180,12 +182,22 @@ async def status_handler(request: web.Request) -> web.Response:
     watchdog = _read_watchdog_state()
     now = time.time()
     expiration = client_status["token_expiration"]
+    authorized = is_authorized(request)
+    token_configured = bool(request.app.get("proxy_token"))
     return web.json_response(
         {
             **client_status,
-            # Only for callers holding the token. The integration's version
-            # check has it; a stranger on the LAN gets everything else.
-            **({"version": PROXY_VERSION} if is_authorized(request) else {}),
+            # A configured token hides these from strangers on the LAN. A
+            # tokenless proxy has no private caller, so version keeps its
+            # legacy public behavior. Update capability does not: /update
+            # refuses to run without a bearer token, so advertising a Fix
+            # button in that state would promise an action that cannot work.
+            **({"version": PROXY_VERSION} if authorized else {}),
+            **(
+                {"update": selfupdate.describe()}
+                if token_configured and authorized
+                else {}
+            ),
             "token_seconds_remaining": (expiration - now) if expiration else None,
             "process_started_at": PROCESS_STARTED_AT,
             "process_uptime_seconds": now - PROCESS_STARTED_AT,
@@ -194,6 +206,25 @@ async def status_handler(request: web.Request) -> web.Response:
             "auth_state": controller.state,
         }
     )
+
+async def update_handler(request: web.Request) -> web.Response:
+    """Start this install's own updater. Header-authenticated, and body-free.
+
+    check_header_authorized, not check_authorized: a URL that upgrades and
+    restarts the proxy must not be something a query token can carry into
+    browser history, a proxy log, or a pasted link.
+
+    The request body is never read. What gets installed is fixed on this host,
+    so there is nothing here for a caller to choose - see selfupdate.start().
+    """
+    check_header_authorized(request, "Self-update")
+    try:
+        started = await selfupdate.start()
+    except selfupdate.UpdateBusyError as err:
+        raise web.HTTPConflict(text=f"{err}\n") from err
+    except selfupdate.UpdateUnavailableError as err:
+        raise web.HTTPNotImplemented(text=f"{err}\n") from err
+    return web.json_response(started, status=202, headers=AUTH_RESPONSE_HEADERS)
 
 async def cameras_handler(request: web.Request) -> web.Response:
     check_authorized(request)
@@ -578,6 +609,7 @@ async def make_app(
     app.router.add_post("/auth/login", auth_login_handler)
     app.router.add_post("/auth/pin", auth_pin_handler)
     app.router.add_post("/auth/cancel", auth_cancel_handler)
+    app.router.add_post("/update", update_handler)
     app.router.add_get("/cameras", cameras_handler)
     app.router.add_get("/clips", clips_handler)
     app.router.add_get("/clips/{clip_id}.mp4", clip_download_handler)

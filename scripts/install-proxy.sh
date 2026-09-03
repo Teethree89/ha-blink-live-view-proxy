@@ -102,21 +102,27 @@ if [ "${INSTALL_WATCHDOG:-1}" = "1" ]; then
     /etc/systemd/system/blink-liveview-proxy-watchdog.timer
 fi
 
-# Unattended updates: off unless asked for. This restarts the camera proxy on
-# its own schedule, which is a choice to make deliberately, not a default to
-# discover. INSTALL_AUTOUPDATE=1 turns it on; it stays on across re-runs.
+# The updater itself is always installed. Installing it is not the same as
+# scheduling it: on its own it never runs, and it is what lets Home Assistant
+# offer an Update button when it notices the proxy has fallen behind. Without
+# it here, that button could only exist for people who had already opted into
+# unattended updates - which are exactly the people who least need one.
+install -m 0755 "$ROOT/scripts/bootstrap.sh" \
+  /usr/local/sbin/blink-liveview-proxy-update.sh
+install -m 0644 "$ROOT/systemd/blink-liveview-proxy-update.service" \
+  /etc/systemd/system/blink-liveview-proxy-update.service
+install -m 0644 "$ROOT/systemd/blink-liveview-proxy-update.timer" \
+  /etc/systemd/system/blink-liveview-proxy-update.timer
+# The updater has to find the checkout this install came from.
+( umask 077; printf 'SRC_DIR=%s\n' "$ROOT" > "$ETC_DIR/update.env" )
+
+# The *schedule* stays off unless asked for. That is what restarts the camera
+# proxy on its own at 4am, which is a choice to make deliberately rather than
+# to discover. INSTALL_AUTOUPDATE=1 turns it on; it stays on across re-runs.
 if [ "${INSTALL_AUTOUPDATE:-0}" = "1" ]; then
-  install -m 0755 "$ROOT/scripts/bootstrap.sh" \
-    /usr/local/sbin/blink-liveview-proxy-update.sh
-  install -m 0644 "$ROOT/systemd/blink-liveview-proxy-update.service" \
-    /etc/systemd/system/blink-liveview-proxy-update.service
-  install -m 0644 "$ROOT/systemd/blink-liveview-proxy-update.timer" \
-    /etc/systemd/system/blink-liveview-proxy-update.timer
-  # The updater has to find the checkout this install came from.
-  ( umask 077; printf 'SRC_DIR=%s\n' "$ROOT" > "$ETC_DIR/update.env" )
   AUTOUPDATE_NOTE="on - daily, from the newest tag"
 else
-  AUTOUPDATE_NOTE="off - re-run this script, or set INSTALL_AUTOUPDATE=1"
+  AUTOUPDATE_NOTE="on demand; nightly schedule unchanged (set INSTALL_AUTOUPDATE=1 to enable)"
 fi
 
 systemctl daemon-reload

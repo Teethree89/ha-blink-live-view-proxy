@@ -250,7 +250,7 @@ environment:
 | `BLINK_PROXY_TOKEN` | generated | Use a token of your own |
 | `INSTALL_DEPS` | `1` | `0` skips the apt prerequisite install |
 | `INSTALL_WATCHDOG` | `1` | `0` skips the stuck-refresh watchdog |
-| `INSTALL_AUTOUPDATE` | `0` | `1` installs the nightly update timer |
+| `INSTALL_AUTOUPDATE` | `0` | `1` enables the nightly update timer; the on-demand updater is installed either way |
 
 ## Blink Account Authentication
 
@@ -262,7 +262,7 @@ Three ways to authenticate, all documented step by step in
 
 | Where | How the PIN is delivered |
 |---|---|
-| **Blink Authentication** panel | Typed into the page that started the login |
+| **Blink Proxy → Authentication** tab | Typed into the page that started the login |
 | Add-on without a browser | `blink_2fa_code` option, saved while it runs |
 | Linux CLI | Answered at the interactive `Blink 2FA code:` prompt |
 

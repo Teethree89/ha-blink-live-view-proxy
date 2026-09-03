@@ -4,12 +4,18 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._state = { state: "idle", message: "Loading authentication state…" };
+    this._panelData = null;
+    this._panelError = "";
+    this._notice = "";
+    this._tab = "overview";
     this._showLogin = false;
     this._busy = false;
+    this._yaml = "";
+    this._yamlFormat = "dashboard";
+    this._yamlCamera = "";
     this._timer = null;
-    // Polling runs while the PIN is being typed, so the DOM is only rebuilt
-    // when something a user can see actually changed. Rebuilding on every tick
-    // would clear the field and steal focus mid-entry.
+    // Polling runs while the PIN is being typed. Only rebuild when something
+    // visible changed, or the focused credential field would be erased.
     this._signature = null;
   }
 
@@ -18,23 +24,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._hass = value;
     if (first) {
       this._render();
-      this._refresh().then(() => this._schedule());
+      Promise.all([this._refresh(), this._refreshPanel()]).then(() => this._schedule());
     }
   }
 
-  // A live challenge has a countdown and a state that changes under you, so it
-  // is worth two seconds. Idle or finished, this page is a wall poster, and
-  // every tick is a round trip through Home Assistant to the proxy. An open tab
-  // used to make one every two seconds, forever.
-  _schedule() {
-    window.clearTimeout(this._timer);
-    const live = ["authenticating", "waiting_for_pin"].includes(this._state.state);
-    this._timer = window.setTimeout(
-      () => this._refresh().then(() => this._schedule()),
-      live ? 2000 : 15000,
-    );
-  }
-
+  get hass() { return this._hass; }
   set narrow(_value) {}
   set panel(_value) {}
   set route(_value) {}
@@ -55,32 +49,51 @@ class BlinkProxyAuthPanel extends HTMLElement {
     window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
   }
 
+  _schedule() {
+    window.clearTimeout(this._timer);
+    const live = ["authenticating", "waiting_for_pin"].includes(this._state.state);
+    this._timer = window.setTimeout(
+      () => (live || this._tab === "auth" ? this._refresh() : Promise.all([this._refresh(), this._refreshPanel()])).then(() => this._schedule()),
+      live ? 2000 : 15000,
+    );
+  }
+
   async _api(method, path, body) {
     if (!this._hass) throw new Error("Home Assistant is not ready");
     return this._hass.callApi(method, `blink_liveview_proxy/auth/${path}`, body);
+  }
+
+  async _panelApi(method, path = "", body) {
+    if (!this._hass) throw new Error("Home Assistant is not ready");
+    return this._hass.callApi(method, `blink_liveview_proxy/panel${path}`, body);
   }
 
   async _refresh(force = false) {
     if ((this._busy && !force) || !this._hass) return;
     try {
       this._state = await this._api("GET", "status");
-      if (["authenticating", "waiting_for_pin"].includes(this._state.state)) {
-        this._showLogin = false;
-      }
-      this._render();
+      if (["authenticating", "waiting_for_pin"].includes(this._state.state)) this._showLogin = false;
     } catch (error) {
-      // The status route reports proxy problems as a state, so reaching this
-      // means Home Assistant itself did not answer.
       this._state = this._failureFrom(error, {
         state: "failure",
         message: "Home Assistant did not answer the authentication status request. Reload the page, and check the Home Assistant log.",
       });
-      this._render();
     }
+    this._render();
+  }
+
+  async _refreshPanel() {
+    if (!this._hass) return;
+    try {
+      this._panelData = await this._panelApi("GET");
+      this._panelError = "";
+    } catch (_error) {
+      this._panelError = "Home Assistant could not load proxy details. The integration may still be starting or need reauthentication.";
+    }
+    this._render();
   }
 
   _failureFrom(error, fallback) {
-    // Action routes answer with an error status but a classified body.
     const body = error && error.body;
     if (body && typeof body === "object" && body.message) return body;
     return fallback;
@@ -90,7 +103,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._busy = true;
     this._render();
     try {
-      await this._refresh(true);
+      await Promise.all([this._refresh(true), this._refreshPanel()]);
     } finally {
       this._busy = false;
       this._render();
@@ -164,102 +177,191 @@ class BlinkProxyAuthPanel extends HTMLElement {
     }
   }
 
+  async _startUpdate() {
+    if (!window.confirm("Start the Blink Liveview Proxy update now? Live views may pause while it restarts.")) return;
+    this._busy = true;
+    this._notice = "Starting update…";
+    this._render();
+    try {
+      const result = await this._panelApi("POST", "/update", {});
+      this._notice = result.message || "Update started.";
+    } catch (error) {
+      this._notice = this._failureFrom(error, { message: "The update could not be started." }).message;
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _loadYaml() {
+    const query = new URLSearchParams({ format: this._yamlFormat });
+    if (this._yamlCamera) query.set("camera", this._yamlCamera);
+    this._busy = true;
+    this._render();
+    try {
+      const result = await this._panelApi("GET", `/yaml?${query}`);
+      this._yaml = result.yaml || "";
+      this._notice = "YAML generated from the current camera inventory.";
+    } catch (_error) {
+      this._notice = "Home Assistant could not generate the dashboard YAML.";
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _copyYaml() {
+    if (!this._yaml) return;
+    try {
+      await navigator.clipboard.writeText(this._yaml);
+      this._notice = "YAML copied to the clipboard.";
+    } catch (_error) {
+      this._notice = "Clipboard access was denied. Select the YAML and copy it manually.";
+    }
+    this._render();
+  }
+
+  _openEntity(entityId) {
+    this.dispatchEvent(new CustomEvent("hass-more-info", {
+      detail: { entityId }, bubbles: true, composed: true,
+    }));
+  }
+
+  _openLive(camera) {
+    this.dispatchEvent(new CustomEvent("ll-custom", {
+      detail: { blink_liveview_proxy: {
+        slug: camera.slug, entity_id: camera.live_entity_id, title: camera.name,
+      } },
+      bubbles: true, composed: true,
+    }));
+  }
+
+  _openClips(camera) {
+    this.dispatchEvent(new CustomEvent("ll-custom", {
+      detail: { blink_liveview_proxy_clips: { slug: camera.slug, title: `${camera.name} Clips` } },
+      bubbles: true, composed: true,
+    }));
+  }
+
+  _refreshSnapshot(camera) {
+    this.dispatchEvent(new CustomEvent("ll-custom", {
+      detail: { blink_snapshot_refresh: {
+        slug: camera.slug, source_entity_id: camera.entity_id,
+      } },
+      bubbles: true, composed: true,
+    }));
+  }
+
   _renderExpiry() {
     const node = this.shadowRoot.getElementById("expires");
     if (!node) return;
     node.textContent = Number.isFinite(this._state.expires_in)
-      ? `Challenge expires in about ${Math.max(0, this._state.expires_in)} seconds.`
-      : "";
+      ? `Challenge expires in about ${Math.max(0, this._state.expires_in)} seconds.` : "";
   }
 
-  _render() {
+  _overviewHtml() {
+    if (!this._panelData) return `<ha-card><p>${this._escape(this._panelError || "Loading proxy details…")}</p></ha-card>`;
+    const data = this._panelData;
+    const healthy = data.health && (data.health.ok === true || data.health.status === "ok");
+    const behind = data.versions.behind;
+    return `
+      <section class="metrics">
+        <ha-card><span>Proxy</span><strong class="${healthy ? "good" : "warn"}">${healthy ? "Healthy" : "Check status"}</strong></ha-card>
+        <ha-card><span>Cameras</span><strong>${data.cameras.length}</strong></ha-card>
+        <ha-card><span>Integration</span><strong>${this._escape(data.versions.integration)}</strong></ha-card>
+        <ha-card><span>Proxy version</span><strong class="${behind ? "warn" : "good"}">${this._escape(data.versions.proxy)}</strong></ha-card>
+      </section>
+      <ha-card>
+        <h2>${this._escape(data.title)}</h2>
+        <dl><dt>Proxy URL</dt><dd><code>${this._escape(data.base_url)}</code></dd><dt>Authentication</dt><dd>${this._escape(data.status.auth_state || "unknown")}</dd><dt>Update method</dt><dd>${this._escape(data.update.method || "manual")}</dd></dl>
+        ${behind ? `<p class="warn">The proxy is behind integration ${this._escape(data.versions.integration)}.</p>` : `<p class="good">The integration and proxy versions are aligned.</p>`}
+        ${behind && data.update.available ? `<button id="update" ${this._busy ? "disabled" : ""}>Update proxy</button>` : !data.update.available ? `<p class="muted">Updates are manual for this installation${data.update.blocker ? `: ${this._escape(data.update.blocker)}` : "."}</p>` : ""}
+        <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Refresh details</button>
+      </ha-card>`;
+  }
+
+  _camerasHtml() {
+    if (!this._panelData) return `<ha-card><p>${this._escape(this._panelError || "Loading cameras…")}</p></ha-card>`;
+    if (!this._panelData.cameras.length) return `<ha-card><p>No configured cameras were reported.</p></ha-card>`;
+    return `<section class="camera-grid">${this._panelData.cameras.map((camera, index) => `
+      <ha-card class="camera-card">
+        <div class="camera-head"><div><h2>${this._escape(camera.name)}</h2><p class="muted">${this._escape(camera.camera_type || "camera")} · ${this._escape(camera.product_type || "unknown model")}</p></div><span class="badge">${camera.ptt_supported ? "PTT" : "view only"}</span></div>
+        <dl><dt>Serial</dt><dd>${this._escape(camera.serial || "—")}</dd><dt>Network</dt><dd>${this._escape(camera.network_id || "—")}</dd><dt>Source</dt><dd><code>${this._escape(camera.entity_id || "—")}</code></dd></dl>
+        <p class="capabilities">${camera.capabilities.map((item) => `<span class="badge">${this._escape(item.replaceAll("_", " "))}</span>`).join("")}</p>
+        <div class="actions"><button data-live="${index}" ${camera.live_entity_id ? "" : "disabled"}>Live view</button><button class="secondary" data-clips="${index}">Clips</button><button class="secondary" data-snapshot="${index}">Refresh snapshot</button></div>
+        <h3>Home Assistant entities</h3>
+        <div class="entities">${camera.entities.map((entity) => `<button class="entity ${entity.disabled ? "disabled" : ""}" data-entity="${this._escape(entity.entity_id)}"><span>${this._escape(entity.name)}</span><small>${this._escape(entity.entity_id)} · ${entity.disabled ? "disabled" : this._escape(entity.state)}${entity.unit ? ` ${this._escape(entity.unit)}` : ""}</small></button>`).join("") || `<p class="muted">No related entities found.</p>`}</div>
+      </ha-card>`).join("")}</section>`;
+  }
+
+  _authHtml() {
     const state = this._state.state || "idle";
     const waiting = state === "waiting_for_pin";
     const active = state === "authenticating" || waiting;
     const showLogin = this._showLogin || ["idle", "expired", "failure"].includes(state);
+    return `<ha-card>
+      <h2>Blink Authentication</h2>
+      <p class="muted">Credentials and PINs pass through Home Assistant in request bodies and are never stored by this page.</p>
+      <div class="state ${state}" role="status"><strong>${this._escape(state.replaceAll("_", " "))}</strong><br>${this._escape(this._state.message || "")}</div>
+      <p class="muted" id="expires"></p>
+      <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Check proxy</button>
+      ${this._state.remedy ? `<div class="remedy"><h3>How to fix it</h3><p class="muted">This install needs a manual repair before dashboard authentication can reach it.</p><pre>${this._escape(this._state.remedy)}</pre></div>` : ""}
+      ${waiting ? `<form id="pin-form"><h3>Enter the new Blink PIN</h3><label for="pin">2FA PIN</label><input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,10}" minlength="4" maxlength="10" autocomplete="off" required><button type="submit" ${this._busy ? "disabled" : ""}>Verify PIN</button><button type="button" class="secondary" id="cancel" ${this._busy ? "disabled" : ""}>Cancel</button></form>` : ""}
+      ${active && !waiting ? `<p>Please wait. Do not restart the proxy while its OAuth session is open.</p><button type="button" class="secondary" id="cancel" ${this._busy ? "disabled" : ""}>Cancel</button>` : ""}
+      ${showLogin ? `<form id="login-form"><h3>${this._state.authenticated ? "Reauthenticate deliberately" : "Start Blink login"}</h3><label for="username">Blink email</label><input id="username" name="username" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="320" required><label for="password">Blink password</label><input id="password" name="password" type="password" autocomplete="off" maxlength="1024" required><button type="submit" ${this._busy ? "disabled" : ""}>Start login</button></form>` : ""}
+      ${state === "success" && !showLogin ? `<button type="button" id="reauth">Reauthenticate</button>` : ""}
+    </ha-card>`;
+  }
+
+  _yamlHtml() {
+    const cameras = this._panelData ? this._panelData.cameras : [];
+    return `<ha-card><h2>Dashboard YAML</h2><p class="muted">Build a whole dashboard, one view, or a paste-ready card from the cameras currently discovered by the proxy.</p>
+      <div class="yaml-controls"><label>Output<select id="yaml-format"><option value="dashboard" ${this._yamlFormat === "dashboard" ? "selected" : ""}>Whole dashboard</option><option value="view" ${this._yamlFormat === "view" ? "selected" : ""}>One view</option><option value="card" ${this._yamlFormat === "card" ? "selected" : ""}>Card</option></select></label><label>Camera<select id="yaml-camera"><option value="">All cameras</option>${cameras.map((camera) => `<option value="${this._escape(camera.slug)}" ${this._yamlCamera === camera.slug ? "selected" : ""}>${this._escape(camera.name)}</option>`).join("")}</select></label></div>
+      <button id="generate-yaml" ${this._busy || !cameras.length ? "disabled" : ""}>Generate YAML</button><button class="secondary" id="copy-yaml" ${!this._yaml ? "disabled" : ""}>Copy YAML</button>
+      ${this._yaml ? `<textarea readonly spellcheck="false">${this._escape(this._yaml)}</textarea>` : ""}
+    </ha-card>`;
+  }
+
+  _render() {
     const signature = JSON.stringify([
-      state,
+      this._tab,
+      this._state.state,
       this._state.message,
       this._state.reason,
       this._state.remedy,
       this._state.challenge_id,
       this._state.authenticated,
-      showLogin,
+      this._tab === "auth" ? null : this._panelData,
+      this._tab === "auth" ? "" : this._panelError,
+      this._notice,
+      this._showLogin,
       this._busy,
+      this._yaml,
+      this._yamlFormat,
+      this._yamlCamera,
     ]);
-    if (signature === this._signature) {
-      this._renderExpiry();
-      return;
-    }
+    if (signature === this._signature) { this._renderExpiry(); return; }
     this._signature = signature;
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        :host { display:block; min-height:100%; box-sizing:border-box; padding:24px; color:var(--primary-text-color); background:var(--primary-background-color); font-family:var(--paper-font-body1_-_font-family, sans-serif); }
-        main { max-width:640px; margin:0 auto; }
-        button.back { display:flex; width:48px; height:48px; margin:-12px 0 4px -12px; padding:12px; background:none; color:var(--primary-text-color); border-radius:50%; }
-        button.back svg { width:24px; height:24px; fill:currentColor; }
-        ha-card { display:block; padding:24px; }
-        h1 { font-size:24px; margin:0 0 8px; }
-        h2 { font-size:18px; margin:24px 0 12px; }
-        p { line-height:1.5; }
-        .state { border-left:4px solid var(--primary-color); padding:12px 16px; background:var(--secondary-background-color); border-radius:4px; }
-        .state.success { border-color:var(--success-color, #2e7d32); }
-        .state.failure, .state.expired { border-color:var(--error-color, #c62828); }
-        label { display:block; margin:14px 0 6px; font-weight:600; }
-        input { box-sizing:border-box; width:100%; padding:12px; font:inherit; color:var(--primary-text-color); background:var(--card-background-color); border:1px solid var(--divider-color); border-radius:4px; }
-        button { margin:16px 8px 0 0; padding:10px 16px; font:inherit; border:0; border-radius:4px; cursor:pointer; background:var(--primary-color); color:var(--text-primary-color, white); }
-        button.secondary { background:var(--secondary-background-color); color:var(--primary-text-color); border:1px solid var(--divider-color); }
-        button:disabled { opacity:.55; cursor:default; }
-        .muted { color:var(--secondary-text-color); font-size:14px; }
-        code { overflow-wrap:anywhere; }
-        pre { margin:12px 0 0; padding:12px; overflow-x:auto; border-radius:4px; background:var(--secondary-background-color); border:1px solid var(--divider-color); font-size:13px; line-height:1.45; }
-        .remedy { margin-top:16px; }
-        .remedy h3 { font-size:15px; margin:0; }
-      </style>
-      <main>
-        <button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button>
-        <ha-card>
-          <h1>Blink Authentication</h1>
-          <p class="muted">Admin-only. Credentials and PINs are sent in request bodies through Home Assistant and are never stored by this page.</p>
-          <div class="state ${state}" role="status"><strong>${this._escape(state.replaceAll("_", " "))}</strong><br>${this._escape(this._state.message || "")}</div>
-          <p class="muted" id="expires"></p>
-          <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Check proxy</button>
-          ${this._state.remedy ? `
-            <div class="remedy">
-              <h3>How to fix it</h3>
-              <p class="muted">Home Assistant cannot run this for you: the proxy is a separate service, on a host it has no shell on.</p>
-              <pre>${this._escape(this._state.remedy)}</pre>
-            </div>` : ""}
-          ${waiting ? `
-            <form id="pin-form">
-              <h2>Enter the new Blink PIN</h2>
-              <p>Use only the PIN Blink issued for this attempt. Keep the proxy running.</p>
-              <label for="pin">2FA PIN</label>
-              <input id="pin" name="pin" type="password" inputmode="numeric" pattern="[0-9]{4,10}" minlength="4" maxlength="10" autocomplete="off" required>
-              <button type="submit" ${this._busy ? "disabled" : ""}>Verify PIN</button>
-              <button type="button" class="secondary" id="cancel" ${this._busy ? "disabled" : ""}>Cancel</button>
-            </form>` : ""}
-          ${active && !waiting ? `<p>Please wait. Do not restart the proxy; the OAuth session must remain open.</p><button type="button" class="secondary" id="cancel" ${this._busy ? "disabled" : ""}>Cancel</button>` : ""}
-          ${showLogin ? `
-            <form id="login-form">
-              <h2>${this._state.authenticated ? "Reauthenticate deliberately" : "Start Blink login"}</h2>
-              <label for="username">Blink email</label>
-              <input id="username" name="username" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="320" required>
-              <label for="password">Blink password</label>
-              <input id="password" name="password" type="password" autocomplete="off" maxlength="1024" required>
-              <button type="submit" ${this._busy ? "disabled" : ""}>Start login</button>
-            </form>` : ""}
-          ${state === "success" && !showLogin ? `<button type="button" id="reauth">Reauthenticate</button>` : ""}
-        </ha-card>
-      </main>`;
-
+    const content = { overview: this._overviewHtml(), cameras: this._camerasHtml(), auth: this._authHtml(), yaml: this._yamlHtml() }[this._tab];
+    this.shadowRoot.innerHTML = `<style>
+      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}}
+    </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>Blink Liveview Proxy</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
     this._renderExpiry();
+    this.shadowRoot.querySelectorAll("[data-tab]").forEach((node) => node.addEventListener("click", () => { this._tab = node.dataset.tab; this._notice = ""; this._render(); }));
     this.shadowRoot.getElementById("login-form")?.addEventListener("submit", (event) => this._startLogin(event));
     this.shadowRoot.getElementById("pin-form")?.addEventListener("submit", (event) => this._submitPin(event));
     this.shadowRoot.getElementById("cancel")?.addEventListener("click", () => this._cancel());
     this.shadowRoot.getElementById("reauth")?.addEventListener("click", () => { this._showLogin = true; this._render(); });
     this.shadowRoot.getElementById("recheck")?.addEventListener("click", () => this._recheck());
+    this.shadowRoot.getElementById("update")?.addEventListener("click", () => this._startUpdate());
+    this.shadowRoot.querySelectorAll("[data-entity]").forEach((node) => node.addEventListener("click", () => this._openEntity(node.dataset.entity)));
+    this.shadowRoot.querySelectorAll("[data-live]").forEach((node) => node.addEventListener("click", () => this._openLive(this._panelData.cameras[Number(node.dataset.live)])));
+    this.shadowRoot.querySelectorAll("[data-clips]").forEach((node) => node.addEventListener("click", () => this._openClips(this._panelData.cameras[Number(node.dataset.clips)])));
+    this.shadowRoot.querySelectorAll("[data-snapshot]").forEach((node) => node.addEventListener("click", () => this._refreshSnapshot(this._panelData.cameras[Number(node.dataset.snapshot)])));
+    this.shadowRoot.getElementById("yaml-format")?.addEventListener("change", (event) => { this._yamlFormat = event.target.value; this._yaml = ""; this._render(); });
+    this.shadowRoot.getElementById("yaml-camera")?.addEventListener("change", (event) => { this._yamlCamera = event.target.value; this._yaml = ""; this._render(); });
+    this.shadowRoot.getElementById("generate-yaml")?.addEventListener("click", () => this._loadYaml());
+    this.shadowRoot.getElementById("copy-yaml")?.addEventListener("click", () => this._copyYaml());
     this.shadowRoot.getElementById("back")?.addEventListener("click", () => this._back());
   }
 

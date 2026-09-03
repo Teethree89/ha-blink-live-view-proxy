@@ -10,7 +10,7 @@
 - The repository should not include Blink app binaries, copied app code,
   captures, account tokens, client secrets, or Amazon/Blink brand assets.
 - The HA custom integration does not perform Blink login. The proxy owns Blink
-  auth and stores the refresh token. The integration's **Blink Authentication**
+  auth and stores the refresh token. The integration's **Blink Proxy → Authentication**
   panel is a front end for the proxy's authentication routes; it needs a proxy
   API token configured on both sides, and it is restricted to Home Assistant
   administrators.

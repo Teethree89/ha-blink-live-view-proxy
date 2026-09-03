@@ -533,8 +533,8 @@ def test_failure_classification() -> None:
     panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
     check('id="recheck"' in panel and "_recheck()" in panel, "the panel offers a re-check button")
     check(
-        "cannot run this for you" in panel,
-        "the panel says plainly that it cannot apply the fix itself",
+        "manual repair before dashboard authentication" in panel,
+        "an unreachable auth route still explains that its bootstrap fix is manual",
     )
 
 

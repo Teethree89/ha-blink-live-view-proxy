@@ -11,6 +11,7 @@ It only talks to the local proxy HTTP API:
 - `GET /clips?source=local`
 - `GET /clips/{clip_id}.mp4?source=local`
 - `GET /auth/status`, `POST /auth/login`, `POST /auth/pin`, `POST /auth/cancel`
+- authenticated `GET /status` version/update capability and `POST /update`
 
 The proxy remains responsible for Blink OAuth, two-factor login, token refresh,
 the `immis://` bridge, and HLS generation. The `/auth/*` routes are only
@@ -30,7 +31,8 @@ Blink. It is an interoperability layer for cameras you own.
 |---|---|
 | Home Assistant **2024.6.0+** | Enforced by `hacs.json`; the panel and repair notices rely on it |
 | A running proxy, **0.3.0 or newer** | This integration is only a client. Older proxies work for live view but have no `/auth` routes, and the integration says so rather than failing quietly |
-| A proxy API token | Required for the **Blink Authentication** panel, and for any proxy not bound to loopback. Both installers generate one |
+| A proxy API token | Required for **Blink Proxy → Authentication**, and for any proxy not bound to loopback. Both installers generate one |
+| Matching proxy and integration releases | A newer integration raises a repair issue and offers **Fix** when systemd or Supervisor can perform the update |
 | `button-card` (HACS → Frontend) | Every example dashboard fires `fire-dom-event` through it |
 | `auto-entities` (HACS → Frontend) | Only for the self-populating dashboard |
 | The official Blink integration | Optional. Snapshots behind the loading frame, the snapshot-refresh button, and motion switches come from it |
@@ -66,7 +68,7 @@ refresh token in `secrets/blink-auth.json`; this integration only sees the local
 proxy URL.
 
 Once a proxy token is configured on both sides, later logins can be done from
-the browser instead — see **Blink Authentication panel** below.
+the browser instead — see **Blink Proxy panel** below.
 
 ## Home Assistant Setup
 
@@ -88,10 +90,19 @@ After the custom component is present under Home Assistant's
 
 The integration creates:
 
-- an admin-only **Blink Authentication** panel at `/blink-liveview-proxy-auth`
+- an admin-only, tabbed **Blink Proxy** panel at `/blink-liveview-proxy-auth`
+  with health/version details, camera capabilities, links to each related
+  native Home Assistant entity, browser authentication, and YAML export
 - one `camera.blink_live_*` stream entity per proxy camera
 - authenticated direct browser player URLs at
   `/api/blink_liveview_proxy/cameras/{slug}/player`
+- a token refresh route at `/api/blink_liveview_proxy/cameras/{slug}/token`,
+  which mints a fresh short-lived browser token for one camera. A player left
+  open outlives its token — Home Assistant rotates camera access tokens on a
+  timer — so restarting the stream needs a new one rather than a replay of the
+  dead one. Callers must present Home Assistant auth or the camera's *current*
+  access token: an expired token deliberately cannot mint its own successor, so
+  a page that has gone stale needs a credentialed caller to refresh it
 - an authenticated local Sync Module clip viewer at
   `/api/blink_liveview_proxy/clips/viewer`
 - authenticated local Sync Module clip metadata/download routes under
@@ -159,13 +170,22 @@ tap_action:
     slug: driveway
 ```
 
-## Blink Authentication Panel
+## Blink Proxy Panel
 
-The sidebar panel drives the proxy's login state machine from the browser. It
-requires a proxy API token configured on the proxy and entered in this
-integration; without one the proxy refuses the routes entirely.
+The sidebar panel has four tabs: **Overview**, **Cameras & entities**,
+**Authentication**, and **YAML**. Overview shows proxy health and versions and,
+for systemd or add-on installs, offers the same confirmation-gated update as a
+Repairs Fix button. Cameras & entities shows model, serial, network, live view,
+clips, snapshot refresh, push-to-talk availability, and every entity attached
+to the official Blink device. Selecting an entity opens Home Assistant's native
+More Info control. YAML generates a whole dashboard, one view, or a card from
+the current inventory and copies it without exposing the proxy token.
 
-1. Open **Blink Authentication** as a Home Assistant administrator.
+The Authentication tab drives the proxy's login state machine from the
+browser. It requires a proxy API token configured on the proxy and entered in
+this integration; without one the proxy refuses the routes entirely.
+
+1. Open **Blink Proxy → Authentication** as a Home Assistant administrator.
 2. Select **Reauthenticate** when a working session already exists.
 3. Enter the Blink email and password, then start the login.
 4. When the page shows **waiting for PIN**, enter the PIN Blink just issued.

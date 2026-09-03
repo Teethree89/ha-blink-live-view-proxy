@@ -89,7 +89,7 @@ breaks.
 
 ## Deliberately not doing
 
-- **Logging in to Blink from the integration.** The **Blink Authentication**
+- **Logging in to Blink from the integration.** The **Blink Proxy → Authentication**
   panel does not change this: the integration forwards an authenticated
   administrator's form straight to the proxy's `/auth/*` routes and shows the
   redacted state that comes back. It never contacts Blink, never stores the

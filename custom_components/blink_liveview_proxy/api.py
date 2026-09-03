@@ -71,6 +71,20 @@ class BlinkLiveviewProxyClient:
         """Fetch the proxy's unauthenticated status, including its version."""
         return await self._request_json("/status")
 
+    async def async_start_proxy_update(self) -> dict[str, Any]:
+        """Ask the proxy to run its own updater, and return once it has begun.
+
+        No body, because there is nothing to choose: what gets installed is
+        fixed on the proxy host. The proxy answers 202 as it starts the update
+        and then restarts itself, so success is confirmed by the version on
+        /status changing a poll or two later, never by this response.
+
+        409 means an update is already running and 501 that this install has no
+        way to update itself; both arrive as ProxyConnectionError carrying the
+        status.
+        """
+        return await self._request_json("/update", method="POST")
+
     async def async_get_auth_status(self) -> dict[str, Any]:
         """Fetch the proxy's public browser-authentication state."""
         return await self._request_json("/auth/status")

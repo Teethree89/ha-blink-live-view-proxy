@@ -1,0 +1,151 @@
+"""Render copy-ready Lovelace YAML from the discovered camera inventory."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def _scalar(value: Any) -> str:
+    """Quote a YAML scalar conservatively without taking a PyYAML dependency."""
+    text = str(value or "")
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _camera_card(camera: dict[str, Any], indent: int = 6) -> str:
+    """Return one camera tile with live view, clips, snapshot, and motion."""
+    slug = str(camera.get("slug") or "camera")
+    name = str(camera.get("name") or slug.replace("_", " ").title())
+    source = str(camera.get("entity_id") or f"camera.{slug}")
+    live = str(camera.get("live_entity_id") or f"camera.blink_live_{slug}")
+    motion = next(
+        (
+            str(item.get("entity_id"))
+            for item in camera.get("entities", [])
+            if item.get("domain") in {"switch", "binary_sensor"}
+            and "motion" in str(item.get("entity_id", ""))
+        ),
+        f"switch.{slug}_camera_motion_detection",
+    )
+    style_anchor = "round_" + "".join(
+        character if character.isalnum() else "_" for character in slug
+    )
+    pad = " " * indent
+    lines = [
+        f"{pad}- type: picture-elements",
+        f"{pad}  camera_image: {_scalar(source)}",
+        f"{pad}  camera_view: auto",
+        f"{pad}  aspect_ratio: 16x9",
+        f"{pad}  elements:",
+        f"{pad}    - type: custom:button-card",
+        f"{pad}      entity: {_scalar(live)}",
+        f"{pad}      show_icon: false",
+        f"{pad}      show_name: false",
+        f"{pad}      tap_action:",
+        f"{pad}        action: fire-dom-event",
+        f"{pad}        blink_liveview_proxy:",
+        f"{pad}          slug: {_scalar(slug)}",
+        f"{pad}          entity_id: {_scalar(live)}",
+        f"{pad}          title: {_scalar(name)}",
+        f"{pad}      styles:",
+        f"{pad}        card:",
+        f"{pad}          - height: 100%",
+        f"{pad}          - padding: 0",
+        f"{pad}          - border: 0",
+        f"{pad}          - box-shadow: none",
+        f"{pad}          - background: rgba(0, 0, 0, 0)",
+        f"{pad}      style:",
+        f"{pad}        top: 0",
+        f"{pad}        left: 0",
+        f"{pad}        width: 100%",
+        f"{pad}        height: 100%",
+        f"{pad}        transform: none",
+        f"{pad}        z-index: 1",
+        f"{pad}    - type: state-label",
+        f"{pad}      entity: {_scalar(live)}",
+        f"{pad}      prefix: {_scalar(name + ' · ')}",
+        f"{pad}      style:",
+        f"{pad}        left: 12px",
+        f"{pad}        bottom: 12px",
+        f"{pad}        transform: none",
+        f"{pad}        color: white",
+        f"{pad}        text-shadow: 0 1px 4px black",
+        f"{pad}        z-index: 2",
+        f"{pad}    - type: custom:button-card",
+        f"{pad}      icon: mdi:filmstrip",
+        f"{pad}      show_name: false",
+        f"{pad}      tap_action:",
+        f"{pad}        action: fire-dom-event",
+        f"{pad}        blink_liveview_proxy_clips:",
+        f"{pad}          slug: {_scalar(slug)}",
+        f"{pad}          title: {_scalar(name + ' Clips')}",
+        f"{pad}      styles: &{style_anchor}",
+        f"{pad}        card:",
+        f"{pad}          - background: rgba(2, 6, 23, 0.55)",
+        f"{pad}          - border-radius: 999px",
+        f"{pad}          - border: 0",
+        f"{pad}          - width: 36px",
+        f"{pad}          - height: 36px",
+        f"{pad}          - padding: 0",
+        f"{pad}        icon:",
+        f"{pad}          - color: white",
+        f"{pad}          - width: 20px",
+        f"{pad}      style:",
+        f"{pad}        right: 100px",
+        f"{pad}        bottom: 8px",
+        f"{pad}        transform: none",
+        f"{pad}        z-index: 2",
+        f"{pad}    - type: custom:button-card",
+        f"{pad}      icon: mdi:image-refresh",
+        f"{pad}      show_name: false",
+        f"{pad}      tap_action:",
+        f"{pad}        action: fire-dom-event",
+        f"{pad}        blink_snapshot_refresh:",
+        f"{pad}          slug: {_scalar(slug)}",
+        f"{pad}          source_entity_id: {_scalar(source)}",
+        f"{pad}      styles: *{style_anchor}",
+        f"{pad}      style:",
+        f"{pad}        right: 54px",
+        f"{pad}        bottom: 8px",
+        f"{pad}        transform: none",
+        f"{pad}        z-index: 2",
+        f"{pad}    - type: custom:button-card",
+        f"{pad}      entity: {_scalar(motion)}",
+        f"{pad}      icon: mdi:motion-sensor",
+        f"{pad}      show_name: false",
+        f"{pad}      tap_action:",
+        f"{pad}        action: toggle",
+        f"{pad}      styles: *{style_anchor}",
+        f"{pad}      style:",
+        f"{pad}        right: 8px",
+        f"{pad}        bottom: 8px",
+        f"{pad}        transform: none",
+        f"{pad}        z-index: 2",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_dashboard_yaml(
+    cameras: list[dict[str, Any]], output_format: str = "dashboard"
+) -> str:
+    """Render a dashboard, one view, or a card for the supplied cameras."""
+    if output_format not in {"dashboard", "view", "card"}:
+        raise ValueError("format must be dashboard, view, or card")
+    cameras = sorted(cameras, key=lambda item: item.get("name") or item.get("slug"))
+    header = (
+        "# Generated by Blink Liveview Proxy. Requires custom:button-card.\n"
+        "# The integration registers blink-liveview-dialog.js automatically in "
+        "storage-mode Lovelace.\n"
+    )
+    if output_format == "dashboard":
+        body = "views:\n  - title: Cameras\n    path: cameras\n    cards:\n"
+        return header + body + "".join(_camera_card(camera, 6) for camera in cameras)
+    if output_format == "view":
+        body = "  - title: Cameras\n    path: cameras\n    cards:\n"
+        return header + body + "".join(_camera_card(camera, 6) for camera in cameras)
+    if len(cameras) == 1:
+        raw = _camera_card(cameras[0], 0).splitlines()
+        raw[0] = raw[0].replace("- ", "", 1)
+        raw[1:] = [line[2:] if line.startswith("  ") else line for line in raw[1:]]
+        return header + "\n".join(raw) + "\n"
+    body = "type: grid\ncolumns: 2\nsquare: false\ncards:\n"
+    return header + body + "".join(_camera_card(camera, 2) for camera in cameras)
