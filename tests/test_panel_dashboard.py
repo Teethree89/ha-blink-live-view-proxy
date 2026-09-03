@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 import sys
 
 import yaml
@@ -121,9 +122,36 @@ def test_backend_contract() -> None:
     check("resource_collection(lovelace)" in init and "is_writable(lovelace)" in init,
           "registration reads Lovelace the same way the readout does")
 
+    # Every asset URL in the wild points at the old path, and a 404 there is
+    # exactly the silent dead dashboard this area exists to prevent.
+    check("BlinkLiveviewProxyLegacyAssetView" in source,
+          "the superseded asset path is still answered")
+    check("_hacs_update_facts" in source, "the readout can see HACS's update entity")
+    check("release_url" in source,
+          "HACS's entity is matched on the repository URL, not a renameable name")
+
     check("BRAND_ROOT" in source, "the panel serves its own brand images")
     for name in ("logo.png", "dark_logo.png"):
         check(f'"{name}"' in source, f"{name} is on the static allow-list")
+
+
+def test_placeholder_substitution() -> None:
+    """Every __PLACEHOLDER__ in views.py must actually be substituted.
+
+    The clip viewer's HTML is a plain string, not an f-string - its CSS is full
+    of unescaped braces - so it fills in values with .replace() instead. A
+    placeholder added without its replace ships to the browser verbatim, and an
+    f-string brace added to that template does nothing at all. Neither raises.
+    """
+    print("\ntemplate placeholders")
+    source = (COMPONENT / "views.py").read_text()
+    names = sorted(set(re.findall(r"__[A-Z][A-Z0-9_]*__", source)))
+    check(bool(names), "the plain-string templates still use placeholders")
+    for name in names:
+        check(
+            f'.replace("{name}"' in source,
+            f"{name} is substituted rather than shipped literally",
+        )
 
 
 def test_frontend_contract() -> None:
@@ -153,6 +181,20 @@ def test_frontend_contract() -> None:
     )
     check("this._openHelp" in panel, "an open accordion survives a background poll")
 
+    # Home Assistant loads Lovelace resources only on a Lovelace dashboard, so
+    # a session that came straight to this panel has nothing listening for the
+    # events the Cameras tab fires.
+    check("_ensureDialog()" in panel, "the panel loads the dialog helper itself")
+    check("__blinkLiveviewDialogLoaded" in panel,
+          "and defers to a dashboard that already loaded it")
+
+    check("_updateBannerHtml()" in panel, "a started update reports its progress")
+    check("UPDATE_TIMEOUT_MS" in panel, "and gives up rather than spinning forever")
+    check('id="update-reload"' in panel and "window.location.reload()" in panel,
+          "the reload after an update is offered, not forced")
+    check("window.location.reload();\n" not in panel.split("_updateStatus()")[0],
+          "nothing reloads the page on its own")
+
     # The navy wordmark is close to invisible on Home Assistant's dark theme,
     # and a theme is not the same thing as prefers-color-scheme.
     check("_darkTheme()" in panel, "the wordmark follows the active theme")
@@ -166,6 +208,7 @@ def test_frontend_contract() -> None:
 def main() -> int:
     test_yaml()
     test_backend_contract()
+    test_placeholder_substitution()
     test_frontend_contract()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:

@@ -4,19 +4,25 @@ from __future__ import annotations
 
 import logging
 
+from typing import Any
+
 from homeassistant.components import panel_custom
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_call_later
 
 from .api import BlinkLiveviewProxyClient
 from .const import (
+    ASSET_URL_BASE,
     CONF_BASE_URL,
     CONF_STREAM_SECONDS,
     CONF_TOKEN,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
     FRONTEND_RESOURCE_URL,
+    LEGACY_FRONTEND_RESOURCE_URL,
     PLATFORMS,
 )
 from .coordinator import BlinkLiveviewProxyCoordinator
@@ -25,7 +31,12 @@ from .views import async_register_views
 
 LOGGER = logging.getLogger(__name__)
 
-AUTH_PANEL_MODULE_URL = "/api/blink_liveview_proxy/static/blink-proxy-auth-panel.js"
+# How long to wait before a second registration attempt when Lovelace was not
+# reachable on a running instance. Long enough for a slow start, short enough
+# that nobody is staring at a dead dashboard while it elapses.
+RESOURCE_RETRY_SECONDS = 30
+
+AUTH_PANEL_MODULE_URL = f"{ASSET_URL_BASE}/blink-proxy-auth-panel.js"
 AUTH_PANEL_PATH = "blink-liveview-proxy-auth"
 
 
@@ -47,47 +58,65 @@ async def _async_register_auth_panel(hass: HomeAssistant) -> None:
     domain_data["_auth_panel_registered"] = True
 
 
-async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
-    """Add the dialog module to Lovelace's resources if it is not there.
+async def _async_try_register_resource(hass: HomeAssistant) -> bool:
+    """Put the dialog module in Lovelace's resources. False if it could not.
 
     Without this the card's fire-dom-event payload goes out and nothing is
     listening: no console error, no log line, no failed request in the network
     tab. The tile just sits there. Registering it by hand was the entire fix,
     and more than one person lost a day to finding that out.
 
-    Only storage-mode Lovelace can be written to. In YAML mode the resource
-    list comes from configuration.yaml and is read-only, so say what to add
-    rather than failing.
+    False means only "Lovelace could not be reached", which is a retryable
+    state, not a failure. Everything else - YAML mode, an existing entry, a
+    write that raised - is a final answer and returns True.
 
-    Both questions go through lovelace.py because the answers moved twice:
-    reading them directly found nothing below 2026.3, so this returned early
-    every time and the registration it promises never happened.
+    Both Lovelace questions go through lovelace.py because the answers moved
+    twice: reading them directly found nothing below 2026.3, so this returned
+    early every time and the registration it promises never happened.
     """
     lovelace = hass.data.get("lovelace")
-    if lovelace is None:
-        LOGGER.debug("Lovelace is not set up; skipping resource registration")
-        return
-
     resources = resource_collection(lovelace)
     if resources is None:
-        return
+        return False
 
     if not is_writable(lovelace):
+        # YAML mode's resource list comes from configuration.yaml and cannot be
+        # written to. Say what to add rather than failing. The legacy path is
+        # still served, so anyone already pointing at it needs to do nothing.
         LOGGER.warning(
             "Lovelace is in YAML mode, so the dialog resource cannot be added "
             "automatically. Add this to your resources, or live view, clips "
             "and snapshot buttons will do nothing when tapped: %s",
             FRONTEND_RESOURCE_URL,
         )
-        return
+        return True
 
     try:
         # Storage-backed resources are lazy; async_get_info loads them.
         await resources.async_get_info()
+        legacy: dict | None = None
         for item in resources.async_items() or []:
             # Existing entries may carry a cache-busting query string.
-            if str(item.get("url", "")).split("?", 1)[0] == FRONTEND_RESOURCE_URL:
-                return
+            url = str(item.get("url", "")).split("?", 1)[0]
+            if url == FRONTEND_RESOURCE_URL:
+                return True
+            if url == LEGACY_FRONTEND_RESOURCE_URL:
+                legacy = item
+
+        if legacy is not None and legacy.get("id"):
+            # Rewrite in place. Adding the new URL alongside would load the
+            # module twice and leave a stale entry nobody knows to remove -
+            # and the stale one is the one the service worker holds forever.
+            await resources.async_update_item(
+                legacy["id"], {"url": FRONTEND_RESOURCE_URL}
+            )
+            LOGGER.info(
+                "Moved the Lovelace resource off the cached path: %s -> %s",
+                LEGACY_FRONTEND_RESOURCE_URL,
+                FRONTEND_RESOURCE_URL,
+            )
+            return True
+
         await resources.async_create_item(
             {"res_type": "module", "url": FRONTEND_RESOURCE_URL}
         )
@@ -98,9 +127,47 @@ async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
             "module: %s",
             FRONTEND_RESOURCE_URL,
         )
-        return
+        return True
 
     LOGGER.info("Registered the Lovelace resource %s", FRONTEND_RESOURCE_URL)
+    return True
+
+
+async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
+    """Register the dialog resource, and try again if Lovelace is not up yet.
+
+    after_dependencies lists lovelace, which orders this correctly in the
+    common case but does not guarantee it. Giving up after one attempt meant a
+    boot that lost the race registered nothing at all, and said so only at
+    debug level - so the symptom was a dashboard whose buttons did nothing and
+    a log with no clue in it.
+    """
+    if await _async_try_register_resource(hass):
+        return
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("_resource_retry_armed"):
+        return
+    domain_data["_resource_retry_armed"] = True
+
+    async def _retry(_now: Any) -> None:
+        domain_data["_resource_retry_armed"] = False
+        if not await _async_try_register_resource(hass):
+            LOGGER.warning(
+                "Lovelace never became reachable, so the dialog resource could "
+                "not be registered. Add it by hand under Settings > Dashboards "
+                "> Resources as a JavaScript module, or live view, clips and "
+                "snapshot buttons will do nothing when tapped: %s",
+                FRONTEND_RESOURCE_URL,
+            )
+
+    if hass.is_running:
+        # Added or reloaded on a running instance, so there is no start event
+        # left to wait for. Lovelace is almost certainly up and the first
+        # attempt succeeded; this covers the case where it is still loading.
+        async_call_later(hass, RESOURCE_RETRY_SECONDS, _retry)
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _retry)
 
 
 async def async_setup(hass: HomeAssistant, _config: dict) -> bool:

@@ -8,6 +8,50 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.6.2] — 2026-09-03
+
+Four ways the frontend could silently do nothing, and the update button now
+shows its work.
+
+- **Frontend files moved off `/static/`, because Home Assistant was caching
+  them forever.** Its service worker registers a `CacheFirst` route for
+  `/(static|frontend_latest|frontend_es5)/.+` *before* its `/api` rule, and
+  Workbox matches a regular expression anywhere in a same-origin URL rather
+  than only at the start — so `/api/blink_liveview_proxy/static/...` matched.
+  The browser served those files out of Cache Storage without ever asking the
+  server again, and `ignoreSearch` on that route means a `?v=` cache-buster is
+  stripped from the key and cannot help. Only the path could move, so it did:
+  `/api/blink_liveview_proxy/assets/...`. This only ever affected HTTPS, since
+  a service worker needs a secure context — which is exactly why it survived
+  so long, because over plain HTTP everything looked correct.
+- **The old path is still served.** Every dashboard, YAML resource list and
+  hand-written config in the wild points at it, and a 404 there is the silent
+  dead dashboard all of this exists to prevent. Where Lovelace can be written
+  to, the registered resource is rewritten in place rather than duplicated.
+- **The panel loads the dialog helper itself.** Home Assistant loads Lovelace
+  resources on a Lovelace dashboard and nowhere else, so a session that opened
+  the sidebar panel directly had nothing listening for the events the Cameras
+  tab fires — every Live view, Clips and Refresh snapshot button in the panel
+  did nothing at all. The helper guards itself, so a dashboard that already
+  loaded it is unaffected.
+- **Resource registration retries instead of giving up once.** It ran during
+  config-entry setup and returned silently when Lovelace had not started yet;
+  `after_dependencies` makes that ordering usual but not certain, so a boot
+  that lost the race registered nothing and said so only at debug level. It
+  now waits for Home Assistant to finish starting and tries again, and says so
+  at warning level when it finally cannot.
+- **A started proxy update shows a progress bar.** It follows the restart
+  through health and the reported version, offers a reload when the new
+  version arrives rather than forcing one, and gives up after five minutes
+  with a pointer to the logs — an update that fails leaves the proxy on its
+  old version and says nothing, so a bar that span forever would read as
+  progress.
+- **Overview reports whether the integration itself is up to date**, read from
+  the update entity HACS already publishes — no network call, no rate limit,
+  and it honours the release channel configured in HACS. An integration copied
+  into `custom_components/` by hand has no such entity, and the row says so
+  rather than guessing.
+
 ## [0.6.1] — 2026-09-03
 
 Nothing about how the proxy is used changes. The dashboard says more about the

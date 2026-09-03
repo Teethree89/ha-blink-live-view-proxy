@@ -29,7 +29,8 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 COMPONENT = ROOT / "custom_components/blink_liveview_proxy"
 SOURCE = COMPONENT / "__init__.py"
-URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
+URL = "/api/blink_liveview_proxy/assets/blink-liveview-dialog.js"
+LEGACY_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
 
 sys.path.insert(0, str(COMPONENT))
 import lovelace as lovelace_module  # noqa: E402
@@ -58,16 +59,17 @@ def load_function():
             n
             for n in tree.body
             if isinstance(n, ast.AsyncFunctionDef)
-            and n.name == "_async_register_frontend_resource"
+            and n.name == "_async_try_register_resource"
         ),
         None,
     )
     if node is None:
-        sys.exit("_async_register_frontend_resource not found in __init__.py")
+        sys.exit("_async_try_register_resource not found in __init__.py")
     module = ast.Module(body=[node], type_ignores=[])
     namespace: dict = {
         "LOGGER": logging.getLogger("test"),
         "FRONTEND_RESOURCE_URL": URL,
+        "LEGACY_FRONTEND_RESOURCE_URL": LEGACY_URL,
         "HomeAssistant": object,
         # The real accessors, not stand-ins: reading Lovelace across its three
         # shapes is the half of this that was broken.
@@ -75,7 +77,7 @@ def load_function():
         "is_writable": lovelace_module.is_writable,
     }
     exec(compile(ast.fix_missing_locations(module), "__init__.py", "exec"), namespace)
-    return namespace["_async_register_frontend_resource"]
+    return namespace["_async_try_register_resource"]
 
 
 register = load_function()
@@ -87,6 +89,7 @@ class Resources:
     def __init__(self, items=None, create_raises=False):
         self.items = list(items or [])
         self.created: list[dict] = []
+        self.updated: list[tuple] = []
         self.create_raises = create_raises
         self.info_calls = 0
 
@@ -103,6 +106,14 @@ class Resources:
         self.created.append(data)
         self.items.append(data)
         return data
+
+    async def async_update_item(self, item_id, updates):
+        self.updated.append((item_id, updates))
+        for item in self.items:
+            if item.get("id") == item_id:
+                item.update(updates)
+                return item
+        return None
 
 
 class Hass:
@@ -126,15 +137,21 @@ def lovelace(mode="storage", shape="modern", **kwargs):
 
 
 def run(hass):
-    asyncio.run(register(hass))
+    """Run one attempt, returning whether Lovelace could be reached at all."""
+    return asyncio.run(register(hass))
 
 
 def main() -> int:
     print("\n_async_register_frontend_resource")
 
-    # Lovelace missing entirely — must not raise.
-    run(Hass({}))
-    check(True, "no lovelace present is survivable")
+    # Lovelace missing entirely — must not raise, and must report that it did
+    # not get an answer, so the caller knows to try again. Returning "done"
+    # here is what left installs with no resource and nothing in the log.
+    check(run(Hass({})) is False, "an absent Lovelace is retryable, not final")
+
+    # A shape whose resources cannot be reached is the same retryable case.
+    empty = type("LovelaceData", (), {})()
+    check(run(Hass({"lovelace": empty})) is False, "no resource collection is retryable")
 
     # Storage mode, nothing registered yet - in all three shapes, because a
     # shape this cannot read is a shape where nothing is ever registered.
@@ -184,6 +201,39 @@ def main() -> int:
     unknown.resources = Resources()
     run(Hass({"lovelace": unknown}))
     check(unknown.resources.created == [], "an unreported mode is never written to")
+
+    print("\nmigrating off the service-worker-cached path")
+
+    # The pre-0.6.2 URL is rewritten in place. Creating the new one alongside
+    # would load the module twice and leave a stale entry nobody knows to
+    # remove — and the stale one is the copy the service worker holds forever.
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": LEGACY_URL}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.created == [], "no second entry is added")
+    check(ll.resources.updated == [("abc", {"url": URL})], "the old entry is rewritten")
+    check(
+        [item["url"] for item in ll.resources.items] == [URL],
+        "the resource list ends up with exactly one, on the new path",
+    )
+
+    # Already migrated: nothing to do, and nothing to churn.
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": URL}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.created == [] and ll.resources.updated == [],
+          "an already-migrated list is left alone")
+
+    # HACS-style cache-buster on the legacy entry is still the legacy entry.
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": f"{LEGACY_URL}?hacstag=1"}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.updated == [("abc", {"url": URL})],
+          "a legacy entry with a query string is migrated too")
+
+    # An entry with no id cannot be updated; fall back to creating the new one
+    # rather than raising through config entry setup.
+    ll = lovelace(items=[{"res_type": "module", "url": LEGACY_URL}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.created == [{"res_type": "module", "url": URL}],
+          "an un-updatable legacy entry still gets the new resource added")
 
     print("\nreading Lovelace across its three shapes")
     read = lovelace_module.resource_mode

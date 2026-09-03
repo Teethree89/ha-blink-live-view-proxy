@@ -26,8 +26,14 @@ in an accordion whether or not the check passes, so it doubles as the reference
 for rebuilding this on another host.
 
 A row can also say **Not checked**, which is not a failure: a proxy older than
-0.6.1 does not report what it is running on, and Lovelace may not have started
-when the panel is first opened.
+0.6.1 does not report what it is running on, Lovelace may not have started when
+the panel is first opened, and an integration copied in by hand rather than
+installed through HACS has no update entity to read.
+
+The dialog resource row reports whether the resource is **registered**, not
+whether it is loaded on the page you are reading. Home Assistant loads Lovelace
+resources on a Lovelace dashboard and nowhere else, so it is never loaded on
+the panel itself — the panel loads its own copy instead.
 
 The custom frontend cards below are dependencies, not optional enhancements.
 Install them from **HACS → Frontend** before pasting the matching dashboard:
@@ -52,7 +58,7 @@ below. The integration normally registers it automatically.
 The integration registers this for you when the config entry is set up:
 
 ```
-/api/blink_liveview_proxy/static/blink-liveview-dialog.js
+/api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 ```
 
 Nothing below works without it, and when it is missing it fails **silently** —
@@ -60,6 +66,13 @@ the tile is there, the tap does nothing, and there is no console error, no log
 line, and no failed request to point you at the cause. So if a tap does nothing
 at all, check this before anything else, under
 Settings → Dashboards → ⋮ → Resources.
+
+Before 0.6.2 this was served from `/api/blink_liveview_proxy/static/...`. That
+path is **still served and still works**, so nothing needs changing by hand.
+It moved because Home Assistant's service worker caches any URL containing
+`/static/` indefinitely over HTTPS, which pinned the file to whatever version
+the browser happened to see first. Where Lovelace can be written to, the
+integration rewrites the registered resource in place.
 
 Two cases still need it added by hand, as a **JavaScript module**:
 

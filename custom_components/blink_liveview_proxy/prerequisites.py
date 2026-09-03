@@ -253,16 +253,27 @@ def _dashboard_resource(facts: dict[str, Any]) -> dict[str, Any]:
     exactly why it earns a row of its own.
     """
     url = str(facts.get("resource_url") or "")
+    legacy_url = str(facts.get("legacy_resource_url") or "")
     urls = facts.get("resource_urls")
     mode = str(facts.get("lovelace_mode") or "")
+    # Registered entries may carry a cache-busting query string from HACS.
+    registered = [str(item).split("?", 1)[0] for item in urls or []]
 
     if not isinstance(urls, list):
         state, detail = UNKNOWN, (
             "Lovelace has not started, or its resource list cannot be read "
             "from here."
         )
-    elif any(str(item).split("?", 1)[0] == url for item in urls):
+    elif url in registered:
         state, detail = OK, "Registered as a JavaScript module."
+    elif legacy_url and legacy_url in registered:
+        # Working, but on the path Home Assistant's service worker caches
+        # forever. Not a fault to report; a move to make where we are allowed.
+        state, detail = OK, (
+            "Registered, on the path used before 0.6.2. It is still served, "
+            "but Home Assistant caches that one indefinitely over HTTPS. The "
+            "integration moves it wherever Lovelace can be written to."
+        )
     elif mode == "yaml":
         state, detail = MISSING, (
             "Not registered, and Lovelace is in YAML mode, so the integration "
@@ -291,6 +302,9 @@ def _dashboard_resource(facts: dict[str, Any]) -> dict[str, Any]:
             "When it is missing the failure is silent — no console error, no "
             "log line, no failed request. If a tap does nothing at all, check "
             "this before anything else.",
+            "Home Assistant only loads Lovelace resources on a dashboard, "
+            "never on this panel, so this row says whether it is registered — "
+            "not whether it is loaded on the page you are reading.",
         ],
         f"{DOCS_BASE}/DASHBOARD.md#the-dashboard-resource",
     )
@@ -342,15 +356,69 @@ def _frontend_card(facts: dict[str, Any], name: str) -> dict[str, Any]:
     )
 
 
+def _integration_update(facts: dict[str, Any]) -> dict[str, Any]:
+    """Whether HACS is holding a newer release of this integration.
+
+    The one question the integration cannot answer about itself: the only
+    version it can see is the one it is running. HACS already tracks the
+    repository and publishes an update entity, so this reads that rather than
+    polling GitHub — no network call here, no rate limit to share, and it
+    honours whatever release channel the user configured in HACS.
+
+    A copy installed by hand into custom_components/ has no such entity. That
+    is unknown, not out of date.
+    """
+    hacs = facts.get("hacs_update") or {}
+    installed = str(facts.get("integration_version") or "")
+
+    if not hacs.get("found"):
+        state, detail = UNKNOWN, (
+            f"{installed or 'This release'} is installed. HACS is not tracking "
+            "this integration here, so there is nothing to compare against."
+        )
+    elif hacs.get("update_available"):
+        state, detail = MISSING, (
+            f"HACS has {hacs.get('latest') or 'a newer release'}; "
+            f"{hacs.get('installed') or installed} is installed."
+        )
+    else:
+        state, detail = OK, (
+            f"{hacs.get('installed') or installed} is the newest release HACS "
+            "offers."
+        )
+
+    return _row(
+        "integration_update",
+        "Integration up to date",
+        state,
+        detail,
+        "Fixes and new checks in this panel",
+        False,
+        [
+            "HACS → Integrations → Blink Liveview Proxy → Update, then "
+            "restart Home Assistant.",
+            "The two halves move separately: HACS updates the integration, and "
+            "nothing updates the proxy. Use the Update proxy action above "
+            "where this install supports it.",
+            "This reads the update entity HACS publishes. An integration "
+            "copied into custom_components/ by hand has no such entity, and "
+            "this row says so rather than guessing.",
+        ],
+        f"{DOCS_BASE}/INSTALL.md",
+    )
+
+
 def build(facts: dict[str, Any]) -> list[dict[str, Any]]:
     """The whole readout, in the order it is worth reading.
 
-    Home Assistant first because everything sits on it, then the two halves of
-    the account story, then the proxy host, then the dashboard layer — roughly
-    outward from the thing least likely to be the problem.
+    Home Assistant first because everything sits on it, then this integration's
+    own currency, then the two halves of the account story, then the proxy
+    host, then the dashboard layer — roughly outward from the thing least
+    likely to be the problem.
     """
     return [
         _home_assistant(facts),
+        _integration_update(facts),
         _blink_integration(facts),
         _blinkpy(facts),
         _ffmpeg(facts),

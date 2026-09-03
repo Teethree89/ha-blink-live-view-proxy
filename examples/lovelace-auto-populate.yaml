@@ -19,7 +19,7 @@
 #   - button-card          the tap targets; fire-dom-event needs it
 #
 # And, once, in Settings → Dashboards → Resources:
-#   /api/blink_liveview_proxy/static/blink-liveview-dialog.js   (JavaScript module)
+#   /api/blink_liveview_proxy/assets/blink-liveview-dialog.js   (JavaScript module)
 #
 # If you would rather not install auto-entities, run
 # `python3 scripts/generate-dashboard.py` instead — it queries the proxy and
