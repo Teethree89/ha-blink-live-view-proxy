@@ -1,7 +1,20 @@
 # Dashboard Guide
 
-Three ways to build a camera wall, from most manual to fully automatic. All
-three give you the same four actions per camera.
+Four ways to build a camera wall, from the sidebar to fully automatic. All
+four give you the same live-view, clips, snapshot-refresh, and motion actions
+per camera.
+
+## Generate YAML in Home Assistant
+
+Open the admin-only **Blink Proxy** sidebar panel and select **YAML**. Choose a
+whole dashboard, one view, or a card; optionally select one camera; then select
+**Generate YAML** and **Copy YAML**. This uses the integration's current camera
+inventory, so it does not ask for a proxy URL or put the proxy token in the
+browser. The output needs `button-card`, like the command-line generator.
+
+The panel's **Cameras & entities** tab is also a live inventory: it shows each
+camera's type, model, serial, network, push-to-talk availability, and related
+Home Assistant entities. Select an entity to open its native More Info dialog.
 
 ## Requirements at a glance
 
@@ -10,6 +23,7 @@ Install them from **HACS → Frontend** before pasting the matching dashboard:
 
 | Option | Required frontend cards | Updates when cameras change? |
 |---|---|---|
+| Blink Proxy YAML tab | **button-card** | No — generate again |
 | Hand-edited example | **button-card** | No — copy/edit a tile |
 | Generated dashboard, view, or card | **button-card** | No — rerun the generator |
 | Self-populating dashboard | **auto-entities** and **button-card** | Yes |

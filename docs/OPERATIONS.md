@@ -42,9 +42,9 @@ attempts rather than replacing them.
 |---|---|---|---|
 | Tap does nothing, no error anywhere | Dashboard resource not registered | Register `blink-liveview-dialog.js` | Anything else — check this first |
 | Some cameras stale, others fine | Integration stuck | Guarded reload | — |
-| Every Blink entity unavailable | Credentials expired | Re-auth in the **Blink Authentication** panel | Reload, repeatedly |
+| Every Blink entity unavailable | Credentials expired | Re-auth in **Blink Proxy → Authentication** | Reload, repeatedly |
 | `/health` not answering | Proxy wedged | Restart the proxy | Re-auth |
-| Watchdog attempts stuck at 3 | Refresh token rejected | Re-auth in the **Blink Authentication** panel | More restarts |
+| Watchdog attempts stuck at 3 | Refresh token rejected | Re-auth in **Blink Proxy → Authentication** | More restarts |
 | iPhone shows E-001b | Browser has no Media Source Extensions | Native HLS playback | — |
 | `ffmpeg exited with 1` | Could be anything; stderr is discarded | Check the proxy log first | Guessing |
 
@@ -93,7 +93,7 @@ PIN before a login has started — Blink has not issued one yet.
 
 ### Browser (recommended)
 
-The custom integration adds an admin-only **Blink Authentication** panel to the
+The custom integration adds an admin-only **Blink Proxy** panel to the
 Home Assistant sidebar. It needs the proxy API token set on both sides, which
 both install paths handle: `scripts/install-proxy.sh` writes one to the
 service's environment file, and the add-on generates one and shares it with the
@@ -155,6 +155,13 @@ that proxy has never had.
 `scripts/install-proxy.sh`, from a checkout on the proxy host — see
 [INSTALL.md](INSTALL.md#2b-1-upgrading-later). It keeps the token, config and
 Blink session, updates the virtualenv, and restarts the service.
+
+Once a systemd proxy has the on-demand updater, a newer integration raises a
+repair issue with a **Fix** button. The add-on gets the same button and hands
+the update to Supervisor. Standalone containers still need their image pulled
+and recreated. The first upgrade from a proxy that predates the `/update`
+endpoint remains manual; after that, the proxy advertises the method it can use
+and Home Assistant only offers a button when that method is available.
 
 The virtualenv part matters: the blinkpy pin moves between releases, and a
 proxy running new code against an old blinkpy looks completely healthy until

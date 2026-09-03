@@ -29,7 +29,7 @@ AUTH_PANEL_PATH = "blink-liveview-proxy-auth"
 
 
 async def _async_register_auth_panel(hass: HomeAssistant) -> None:
-    """Register an admin-only panel that receives the authenticated HA object."""
+    """Register the admin dashboard while preserving its original URL."""
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get("_auth_panel_registered"):
         return
@@ -37,8 +37,8 @@ async def _async_register_auth_panel(hass: HomeAssistant) -> None:
         hass,
         frontend_url_path=AUTH_PANEL_PATH,
         webcomponent_name="blink-proxy-auth-panel",
-        sidebar_title="Blink Authentication",
-        sidebar_icon="mdi:shield-key",
+        sidebar_title="Blink Proxy",
+        sidebar_icon="mdi:cctv",
         module_url=AUTH_PANEL_MODULE_URL,
         require_admin=True,
         config_panel_domain=DOMAIN,

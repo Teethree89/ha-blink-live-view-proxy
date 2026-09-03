@@ -22,8 +22,11 @@ from homeassistant.helpers.http import KEY_AUTHENTICATED
 
 from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
 from .failures import failure_payload
+from .dashboard_yaml import render_dashboard_yaml
 from .playlist import tokenise_playlist
-from .const import DEFAULT_STREAM_SECONDS, DOMAIN
+from .const import CONF_BASE_URL, DEFAULT_STREAM_SECONDS, DOMAIN
+from .updates import UpdateAborted, async_start_update
+from .version_check import can_start_update, infer_version, is_behind, update_blocker
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +43,7 @@ def async_register_views(hass: HomeAssistant) -> None:
 
     hass.http.register_view(BlinkLiveviewProxyStaticView(hass))
     hass.http.register_view(BlinkLiveviewProxyPlayerView(hass))
+    hass.http.register_view(BlinkLiveviewProxyBrowserTokenView(hass))
     hass.http.register_view(BlinkLiveviewProxyMpegtsView(hass))
     # Order matters: index.m3u8 must be registered before the {filename}
     # catch-all or the playlist would be served as a segment.
@@ -55,6 +59,9 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyClipsViewerView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthStatusView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthActionView(hass))
+    hass.http.register_view(BlinkLiveviewProxyPanelView(hass))
+    hass.http.register_view(BlinkLiveviewProxyPanelUpdateView(hass))
+    hass.http.register_view(BlinkLiveviewProxyPanelYamlView(hass))
     hass.data[DOMAIN]["_views_registered"] = True
 
 
@@ -97,6 +104,14 @@ def _runtime(hass: HomeAssistant) -> dict[str, Any]:
     for key, value in hass.data.get(DOMAIN, {}).items():
         if not str(key).startswith("_") and isinstance(value, dict):
             return value
+    raise web.HTTPServiceUnavailable(text="Blink live-view proxy is not configured\n")
+
+
+def _runtime_entry(hass: HomeAssistant) -> tuple[str, dict[str, Any]]:
+    """Return the first configured entry id and runtime."""
+    for key, value in hass.data.get(DOMAIN, {}).items():
+        if not str(key).startswith("_") and isinstance(value, dict):
+            return str(key), value
     raise web.HTTPServiceUnavailable(text="Blink live-view proxy is not configured\n")
 
 
@@ -1044,6 +1059,40 @@ class BlinkLiveviewProxyPlayerView(HomeAssistantView):
         )
 
 
+class BlinkLiveviewProxyBrowserTokenView(HomeAssistantView):
+    """Mint a fresh browser token for a player page that has gone stale.
+
+    A player left open outlives its token: Home Assistant rotates camera access
+    tokens on a timer, and the browser tokens issued here expire on their own
+    TTL. Nothing in the page noticed, so Restart replayed the dead token and
+    every retry came back 403. A caller that can still prove it may watch this
+    camera trades that proof for a new token here.
+
+    Deliberately no self-service refresh: an expired token is not proof of
+    anything, so it cannot mint its successor. The caller needs Home Assistant
+    auth or the camera's current access token, which in practice means a
+    credentialed server doing it on the page's behalf.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/token"
+    name = "api:blink_liveview_proxy:token"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request: web.Request, slug: str) -> web.Response:
+        """Issue a short-lived browser token scoped to one camera."""
+        _camera(self.hass, slug)
+        token = _authorize_browser_request(
+            self.hass, request, slug, issue_browser_token=True
+        )
+        return web.json_response(
+            {"token": token, "expires_in": BROWSER_TOKEN_TTL_SECONDS},
+            headers={"Cache-Control": "no-store"},
+        )
+
+
 class BlinkLiveviewProxyMpegtsView(HomeAssistantView):
     """Proxy a raw MPEG-TS stream from the local proxy."""
 
@@ -1899,3 +1948,213 @@ class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
                 headers=AUTH_VIEW_HEADERS,
             ) from err
         return web.json_response(payload, status=202, headers=AUTH_VIEW_HEADERS)
+
+
+def _entity_summary(hass: HomeAssistant, entity_entry: Any) -> dict[str, Any]:
+    """Return only safe, useful fields for one native HA entity."""
+    entity_id = str(entity_entry.entity_id)
+    state = hass.states.get(entity_id)
+    attributes = state.attributes if state else {}
+    return {
+        "entity_id": entity_id,
+        "domain": entity_id.partition(".")[0],
+        "name": str(
+            attributes.get("friendly_name")
+            or getattr(entity_entry, "original_name", None)
+            or entity_id
+        ),
+        "state": str(state.state) if state else "unavailable",
+        "device_class": str(attributes.get("device_class") or ""),
+        "unit": str(attributes.get("unit_of_measurement") or ""),
+        "icon": str(attributes.get("icon") or ""),
+        "disabled": getattr(entity_entry, "disabled_by", None) is not None,
+    }
+
+
+def _panel_cameras(hass: HomeAssistant, runtime: dict[str, Any]) -> list[dict[str, Any]]:
+    """Join proxy cameras to their official Blink device entities."""
+    from homeassistant.helpers import entity_registry as er
+
+    coordinator = runtime["coordinator"]
+    registry = er.async_get(hass)
+    result: list[dict[str, Any]] = []
+    for source in (coordinator.data or {}).get("cameras", []):
+        camera = {
+            key: source.get(key)
+            for key in (
+                "slug",
+                "name",
+                "id",
+                "serial",
+                "network_id",
+                "camera_type",
+                "product_type",
+                "ptt_supported",
+                "entity_id",
+            )
+        }
+        slug = str(camera.get("slug") or "")
+        live_state = next(
+            (
+                item
+                for item in hass.states.async_all("camera")
+                if item.attributes.get("proxy_slug") == slug
+            ),
+            None,
+        )
+        camera["live_entity_id"] = live_state.entity_id if live_state else ""
+
+        source_entry = registry.async_get(str(camera.get("entity_id") or ""))
+        device_id = source_entry.device_id if source_entry else None
+        entries = (
+            er.async_entries_for_device(
+                registry, device_id, include_disabled_entities=True
+            )
+            if device_id
+            else ([source_entry] if source_entry else [])
+        )
+        camera["entities"] = sorted(
+            (_entity_summary(hass, item) for item in entries),
+            key=lambda item: (item["domain"], item["name"]),
+        )
+        camera["capabilities"] = [
+            "live_view",
+            "local_clips",
+            "snapshot_refresh",
+            *(["push_to_talk"] if camera.get("ptt_supported") else []),
+            *(
+                ["motion_detection"]
+                if any(
+                    "motion" in item["entity_id"] for item in camera["entities"]
+                )
+                else []
+            ),
+        ]
+        result.append(camera)
+    return sorted(result, key=lambda item: item.get("name") or item.get("slug"))
+
+
+async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
+    """Build the admin panel's redacted, read-only snapshot."""
+    from homeassistant.loader import async_get_integration
+
+    entry_id, runtime = _runtime_entry(hass)
+    coordinator = runtime["coordinator"]
+    data = coordinator.data or {}
+    status = data.get("status") if isinstance(data.get("status"), dict) else {}
+    integration = await async_get_integration(hass, DOMAIN)
+    own_version = str(integration.version or "")
+    proxy_version = infer_version(status)
+    entry = hass.config_entries.async_get_entry(entry_id)
+    return {
+        "entry_id": entry_id,
+        "title": entry.title if entry else "Blink Liveview Proxy",
+        "base_url": str(entry.data.get(CONF_BASE_URL, "")) if entry else "",
+        "health": data.get("health") or {},
+        "status": status,
+        "versions": {
+            "integration": own_version,
+            "proxy": proxy_version or "unknown",
+            "behind": is_behind(proxy_version, own_version),
+        },
+        "update": {
+            "available": can_start_update(status),
+            "blocker": update_blocker(status),
+            "method": (status.get("update") or {}).get("method"),
+        },
+        "cameras": _panel_cameras(hass, runtime),
+    }
+
+
+PANEL_UPDATE_MESSAGES = {
+    "already_running": "An update is already running. Check again in a few minutes.",
+    "entry_gone": "The integration entry is no longer loaded.",
+    "no_addon": "Supervisor could not find the Blink Liveview Proxy add-on.",
+    "not_supported": "This proxy installation cannot update itself.",
+    "update_failed": "The update could not be started. Check the Home Assistant and proxy logs.",
+}
+
+
+class BlinkLiveviewProxyPanelView(HomeAssistantView):
+    """Return cameras, versions, health, and related native entities."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel"
+    name = "api:blink_liveview_proxy:panel"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def get(self, _request: web.Request) -> web.Response:
+        return web.json_response(
+            await _panel_payload(self.hass), headers=AUTH_VIEW_HEADERS
+        )
+
+
+class BlinkLiveviewProxyPanelUpdateView(HomeAssistantView):
+    """Start the same guarded update offered by a Repairs Fix button."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel/update"
+    name = "api:blink_liveview_proxy:panel_update"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def post(self, _request: web.Request) -> web.Response:
+        entry_id, _runtime_value = _runtime_entry(self.hass)
+        try:
+            await async_start_update(self.hass, entry_id)
+        except UpdateAborted as err:
+            status_code = {
+                "already_running": 409,
+                "not_supported": 501,
+            }.get(err.reason, 503)
+            return web.json_response(
+                {
+                    "started": False,
+                    "reason": err.reason,
+                    "message": PANEL_UPDATE_MESSAGES.get(
+                        err.reason, PANEL_UPDATE_MESSAGES["update_failed"]
+                    ),
+                },
+                status=status_code,
+                headers=AUTH_VIEW_HEADERS,
+            )
+        return web.json_response(
+            {
+                "started": True,
+                "message": "Update started. The proxy may be unavailable while it restarts.",
+            },
+            status=202,
+            headers=AUTH_VIEW_HEADERS,
+        )
+
+
+class BlinkLiveviewProxyPanelYamlView(HomeAssistantView):
+    """Render copy-ready dashboard YAML without exposing the proxy token."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel/yaml"
+    name = "api:blink_liveview_proxy:panel_yaml"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        output_format = request.query.get("format", "dashboard")
+        if output_format not in {"dashboard", "view", "card"}:
+            raise web.HTTPBadRequest(text="Unknown YAML format\n")
+        cameras = (await _panel_payload(self.hass))["cameras"]
+        camera_slug = request.query.get("camera", "")
+        if camera_slug:
+            cameras = [item for item in cameras if item.get("slug") == camera_slug]
+            if not cameras:
+                raise web.HTTPNotFound(text="Unknown camera slug\n")
+        return web.json_response(
+            {"yaml": render_dashboard_yaml(cameras, output_format)},
+            headers=AUTH_VIEW_HEADERS,
+        )

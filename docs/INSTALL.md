@@ -82,11 +82,12 @@ sudo scripts/install-proxy.sh
 
 It installs the code and a venv, writes `/etc/blink-liveview-proxy/config.json`
 with camera discovery and no sample entries, generates a proxy API token into
-the service's environment file, installs the optional watchdog, then enables and
-starts the service and waits for `/health`. It ends by printing the URL and the
-command that reads the token back, which are the only two things Home Assistant
-asks for. Re-run it to upgrade: code is replaced and the service restarted,
-while the token, config, and Blink session are left alone.
+the service's environment file, installs the on-demand updater and optional
+watchdog, then enables and starts the service and waits for `/health`. It ends
+by printing the URL and the command that reads the token back, which are the
+only two things Home Assistant asks for. Re-run it to upgrade: code is replaced
+and the service restarted, while the token, config, and Blink session are left
+alone.
 
 Environment overrides: `BIND_HOST=127.0.0.1` keeps the proxy on loopback,
 `PROXY_PORT` changes the port, `BLINK_PROXY_TOKEN` supplies your own token, and
@@ -175,17 +176,25 @@ It exits with `Already on vX.Y.Z - nothing to do` when there is nothing to do,
 so it is safe to run whenever. `VERSION=v0.3.0` pins a tag, `FORCE=1`
 reinstalls the current one.
 
-To let it run itself, install the timer once:
+The installer also places `blink-liveview-proxy-update.service` on the host.
+When the Home Assistant integration is newer than the proxy, its repair notice
+offers a **Fix** button that starts this unit. The request chooses no tag,
+branch, or repository: the host-side updater always selects the newest release
+tag. A proxy from before on-demand update support cannot expose that button, so
+run the bootstrap line above once to seed the updater and endpoint.
+
+To let it run on a schedule too, enable the timer once:
 
 ```bash
 INSTALL_AUTOUPDATE=1 sudo scripts/install-proxy.sh
 ```
 
-That adds `blink-liveview-proxy-update.timer`, which runs the same check nightly
-with an hour of jitter and installs a new tag when there is one. It is off by
-default: it restarts the camera proxy when it fires, and that should be a
-decision, not a surprise. `systemctl disable --now blink-liveview-proxy-update.timer`
-turns it back off.
+That enables `blink-liveview-proxy-update.timer`, which runs the same check
+nightly with an hour of jitter and installs a new tag when there is one. It is
+off by default: it restarts the camera proxy when it fires, and that should be
+a decision, not a surprise. Disabling the timer does not remove the on-demand
+Fix button. `systemctl disable --now blink-liveview-proxy-update.timer` turns
+the schedule back off.
 
 Doing it by hand instead needs a checkout of the repository *on the proxy host*
 — a fresh install usually does not have one, so the first upgrade starts by
@@ -291,7 +300,7 @@ Upgrading is `docker compose pull && docker compose up -d`, or `docker pull` and
 recreate. Your `/data` survives.
 
 **The 2FA PIN, in a container.** There is no terminal to prompt on, so use the
-**Blink Authentication** panel once the integration is installed. If you would
+**Blink Proxy → Authentication** tab once the integration is installed. If you would
 rather not wait for that, drop the PIN into the volume while the container is
 waiting for it:
 
@@ -338,13 +347,13 @@ already; the other paths printed where to read it.
 
 The integration can be added while a new proxy is waiting for Blink login as
 long as the proxy API token is configured. It adds an admin-only **Blink
-Authentication** sidebar panel — that panel is the only browser entry point,
+Proxy → Authentication** sidebar tab — that panel is the only browser entry point,
 including for a systemd install: the proxy itself never serves a login page.
 Home Assistant must be able to reach the proxy URL you entered, so a proxy bound
 to `127.0.0.1` on another machine has no panel. For browser login or deliberate
 reauthentication:
 
-1. Open **Blink Authentication** as a Home Assistant administrator.
+1. Open **Blink Proxy → Authentication** as a Home Assistant administrator.
 2. Enter the Blink email and password; select **Start login**.
 3. Leave the proxy running while Blink sends a new PIN.
 4. Enter that PIN on the same page before the challenge expires.

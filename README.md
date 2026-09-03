@@ -144,17 +144,20 @@ See [addon/DOCS.md](addon/DOCS.md) for the full add-on setup guide.
 ### Option B — Linux Service (systemd)
 
 One command on the proxy host — it installs the code and venv, writes a config
-that discovers cameras, generates a proxy API token, installs the watchdog, and
-starts the service:
+that discovers cameras, generates a proxy API token, installs the on-demand
+updater and watchdog, and starts the service:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/scripts/bootstrap.sh | sudo bash
 ```
 
-That keeps a checkout on the host and installs the newest **tag** — re-run the
-same line to upgrade. `VERSION=v0.3.0` pins one, and `INSTALL_AUTOUPDATE=1`
-installs a daily timer that runs the same check for you. From a checkout you
-already have, `sudo scripts/install-proxy.sh` does the same thing.
+That keeps a checkout on the host and installs the newest **tag**. The Home
+Assistant integration can then offer a repair **Fix** button when it is newer
+than the proxy; the button starts the updater installed on this host. Re-run
+the line yourself to upgrade a proxy that predates that endpoint.
+`VERSION=v0.3.0` pins one, and `INSTALL_AUTOUPDATE=1` enables a daily timer that
+runs the same check without being asked. From a checkout you already have,
+`sudo scripts/install-proxy.sh` does the same thing.
 
 It prints the URL to give Home Assistant and the one command that reads the
 token back. Then, in Home Assistant:
@@ -162,7 +165,7 @@ token back. Then, in Home Assistant:
 1. Install the integration through HACS (see below) and restart HA.
 2. Add `Blink Liveview Proxy` from `Settings → Devices & services`, using the
    printed URL and token.
-3. Open **Blink Authentication** in the sidebar and sign in to Blink.
+3. Open **Blink Proxy** in the sidebar, select **Authentication**, and sign in.
 
 Re-running the script upgrades in place, keeping the token, config, and Blink
 session. The Lovelace helper resource is registered for you; add it by hand
@@ -177,13 +180,13 @@ it misbehaves in the [operations guide](docs/OPERATIONS.md).
 
 ### Browser authentication and reauthentication
 
-The custom integration registers an admin-only **Blink Authentication** panel
-in the Home Assistant sidebar. It needs a proxy API token on both sides, which
+The custom integration registers an admin-only **Blink Proxy** dashboard in the
+Home Assistant sidebar. Its Authentication tab needs a proxy API token on both sides, which
 both install paths now provision for you: the installer writes one to the
 service's environment file, and the add-on generates one and shares it with the
 integration's setup form.
 
-1. Open **Blink Authentication** as a Home Assistant administrator.
+1. Open **Blink Proxy → Authentication** as a Home Assistant administrator.
 2. Select **Reauthenticate** if a working cached session already exists.
 3. Enter the Blink email and password and start login.
 4. Wait for Blink to issue a new PIN, then enter it on the same page before the
@@ -240,6 +243,13 @@ behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 
 Three ready-made options, from hand-edited to self-populating, are in the
 [dashboard guide](docs/DASHBOARD.md):
+
+The admin-only **Blink Proxy → YAML** tab is the quickest option: it discovers
+the current cameras and produces a whole dashboard, one view, or a paste-ready
+card without asking you for the proxy URL or token. The Cameras & entities tab
+also shows every entity Home Assistant associates with each Blink device and
+opens native More Info controls for motion, battery, temperature, and related
+features.
 
 > [!IMPORTANT]
 > The self-populating dashboard is **not standalone**. Install

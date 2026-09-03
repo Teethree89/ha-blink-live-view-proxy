@@ -46,16 +46,21 @@ def check_authorized(request: web.Request) -> None:
     if not tokens_match(token, provided):
         raise web.HTTPUnauthorized(text="Missing or invalid proxy token\n")
 
-def check_auth_control_authorized(request: web.Request) -> None:
-    """Require a configured bearer header for credential-handling routes.
+def check_header_authorized(request: web.Request, purpose: str) -> None:
+    """Require a configured bearer header, never a query token.
 
-    Unlike media routes, authentication control never accepts a query token:
-    URLs are copied, logged, cached, and placed in browser history too easily.
+    For routes where the URL itself must not be the credential. Unlike media
+    routes, these never accept ?token=: URLs are copied, logged, cached, and
+    placed in browser history too easily, and each of these routes does
+    something that should not follow from a pasted link.
+
+    `purpose` names the route in the 503 a tokenless proxy answers with, so the
+    reader learns which feature needs the token they have not set.
     """
     token = request.app.get("proxy_token")
     if not token:
         raise web.HTTPServiceUnavailable(
-            text="Browser authentication requires a configured proxy token\n"
+            text=f"{purpose} requires a configured proxy token\n"
         )
 
     auth_header = request.headers.get("Authorization", "")
@@ -64,6 +69,10 @@ def check_auth_control_authorized(request: web.Request) -> None:
         provided = auth_header.split(" ", 1)[1]
     if not tokens_match(token, provided):
         raise web.HTTPUnauthorized(text="Missing or invalid proxy token\n")
+
+def check_auth_control_authorized(request: web.Request) -> None:
+    """Require a bearer header for credential-handling routes."""
+    check_header_authorized(request, "Browser authentication")
 
 def rewrite_playlist_for_token(text: str, token: str | None) -> str:
     if not token:
