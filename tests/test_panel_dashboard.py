@@ -114,6 +114,13 @@ def test_backend_contract() -> None:
 
     # The brand images live beside manifest.json, not in frontend/, and Home
     # Assistant only serves them itself from 2026.3.0. The floor is 2024.6.0.
+    # hass.data["lovelace"] has had three shapes; reading it directly saw only
+    # the newest, which is why both callers go through the same accessor.
+    check("resource_collection(" in source, "Lovelace is read through the shared accessor")
+    init = (COMPONENT / "__init__.py").read_text()
+    check("resource_collection(lovelace)" in init and "is_writable(lovelace)" in init,
+          "registration reads Lovelace the same way the readout does")
+
     check("BRAND_ROOT" in source, "the panel serves its own brand images")
     for name in ("logo.png", "dark_logo.png"):
         check(f'"{name}"' in source, f"{name} is on the static allow-list")

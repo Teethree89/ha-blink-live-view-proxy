@@ -24,6 +24,7 @@ from . import prerequisites
 from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
 from .failures import failure_payload
 from .dashboard_yaml import render_dashboard_yaml
+from .lovelace import resource_collection, resource_mode
 from .playlist import tokenise_playlist
 from .const import (
     CONF_BASE_URL,
@@ -2086,8 +2087,7 @@ async def _lovelace_resource_urls(hass: HomeAssistant) -> list[str] | None:
     and a readout that reported "missing" in that window would send people to
     fix something that was already correct.
     """
-    lovelace = hass.data.get("lovelace")
-    resources = getattr(lovelace, "resources", None)
+    resources = resource_collection(hass.data.get("lovelace"))
     if resources is None:
         return None
     try:
@@ -2105,7 +2105,6 @@ async def _prerequisite_facts(
     """Collect everything prerequisites.build() decides from, and nothing else."""
     from homeassistant.const import __version__ as HA_VERSION
 
-    lovelace = hass.data.get("lovelace")
     return {
         "ha_version": HA_VERSION,
         "minimum_ha": MINIMUM_HA_VERSION,
@@ -2115,7 +2114,7 @@ async def _prerequisite_facts(
         "environment": status.get("environment"),
         "resource_url": FRONTEND_RESOURCE_URL,
         "resource_urls": await _lovelace_resource_urls(hass),
-        "lovelace_mode": getattr(lovelace, "resource_mode", None),
+        "lovelace_mode": resource_mode(hass.data.get("lovelace")),
         **_blink_integration_facts(hass),
     }
 

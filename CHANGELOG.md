@@ -33,6 +33,13 @@ install it is running on.
 - **The proxy reports its Python, blinkpy and resolved ffmpeg path on
   `/status`.** Behind the same token as the version field, for the same reason:
   library versions and binary paths are what someone probing the host wants.
+- **The dialog resource is registered on every supported Home Assistant, not
+  just the newest.** `hass.data["lovelace"]` was a plain dict up to 2025.1, a
+  dataclass with `mode` from 2025.2, and only from 2026.3 does it carry
+  `resource_mode` — which is what the registration read. Below 2026.3 it found
+  nothing, concluded YAML mode and returned, so the resource was never added
+  and every live view, clips and snapshot button stayed silently inert. All
+  three shapes are now read, and each is covered by a test.
 - **The dashboard wears the wordmark**, and the direct player and clip viewer
   have a browser-tab icon. Home Assistant only serves an integration's own
   `brand/` images from 2026.3.0, and the floor here is 2024.6.0, so the
