@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## Repository Synchronization
+
+- Before beginning any task or modifying any files, run `git fetch origin main` and compare the current branch with `origin/main`.
+- If `origin/main` contains commits that are not in the current branch, rebase the current branch onto `origin/main` before making changes, then confirm the branch is zero commits behind `origin/main`.
+- Never discard or overwrite existing work to perform the rebase. If the worktree is not clean, the fetch fails, or the rebase cannot be completed safely, stop and tell the user before changing files.
+
 ## Attribution
 
 - Never add AI attribution to commits, pull requests, release notes, or other repository metadata.
