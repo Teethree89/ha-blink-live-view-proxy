@@ -105,6 +105,19 @@ def test_backend_contract() -> None:
     repairs = (COMPONENT / "repairs.py").read_text()
     check("async_start_update(self.hass, self._entry_id)" in repairs, "Repairs uses the shared updater")
 
+    check('"prerequisites"' in source, "the payload carries the prerequisite readout")
+    check("prerequisites.build(" in source, "the readout comes from the tested module")
+    # Lovelace may not have started when the panel is first opened. Reporting
+    # "missing" in that window would send people to fix a correct install.
+    check("return None" in source.split("async def _lovelace_resource_urls")[1].split("async def")[0],
+          "an unreadable Lovelace resource list is reported as unknown")
+
+    # The brand images live beside manifest.json, not in frontend/, and Home
+    # Assistant only serves them itself from 2026.3.0. The floor is 2024.6.0.
+    check("BRAND_ROOT" in source, "the panel serves its own brand images")
+    for name in ("logo.png", "dark_logo.png"):
+        check(f'"{name}"' in source, f"{name} is on the static allow-list")
+
 
 def test_frontend_contract() -> None:
     print("\npanel frontend")
@@ -122,6 +135,25 @@ def test_frontend_contract() -> None:
         and 'CustomEvent("location-changed"' in panel,
         "the merged mobile back-button behavior is preserved",
     )
+
+    check("Prerequisites" in panel, "the Overview tab carries the prerequisite readout")
+    check("_prerequisitesHtml()" in panel, "and Overview actually renders it")
+    # The whole point of the accordion: the steps are attached to the check,
+    # not to its failure, so a green install can still read how it was built.
+    check(
+        "check.instructions.map" in panel and "<details data-help=" in panel,
+        "every check carries its instructions, passing or not",
+    )
+    check("this._openHelp" in panel, "an open accordion survives a background poll")
+
+    # The navy wordmark is close to invisible on Home Assistant's dark theme,
+    # and a theme is not the same thing as prefers-color-scheme.
+    check("_darkTheme()" in panel, "the wordmark follows the active theme")
+    check(
+        "dark_logo.png" in panel and "logo.png" in panel,
+        "both wordmark variants are used",
+    )
+    check("_darkTheme()," in panel, "a theme change re-renders the header")
 
 
 def main() -> int:

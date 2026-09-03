@@ -414,10 +414,9 @@ def test_versions_agree() -> None:
         r'PROXY_VERSION = "([^"]+)"',
         (ROOT / "proxy/blink_proxy/constants.py").read_text(),
     )
-    minimum = re.search(
-        r'MINIMUM_PROXY_VERSION = "([^"]+)"',
-        (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text(),
-    )
+    const_source = (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text()
+    minimum = re.search(r'MINIMUM_PROXY_VERSION = "([^"]+)"', const_source)
+    environment = re.search(r'ENVIRONMENT_PROXY_VERSION = "([^"]+)"', const_source)
 
     check(proxy is not None, "the proxy declares a version")
     check(minimum is not None, "the integration declares the proxy version it needs")
@@ -438,6 +437,15 @@ def test_versions_agree() -> None:
         to_tuple(minimum.group(1)) <= to_tuple(manifest),
         f"the required proxy version is one that exists ({minimum.group(1)} <= {manifest})",
     )
+    # The panel tells people which release started reporting /status
+    # environment. Naming an unreleased one would ask them to install nothing.
+    check(environment is not None, "the integration names the environment-reporting proxy")
+    if environment:
+        check(
+            to_tuple(environment.group(1)) <= to_tuple(manifest),
+            "the environment-reporting proxy version is one that exists "
+            f"({environment.group(1)} <= {manifest})",
+        )
 
     changelog = (ROOT / "CHANGELOG.md").read_text()
     check(f"## [{manifest}]" in changelog, f"the changelog has an entry for {manifest}")
@@ -664,6 +672,17 @@ def test_requirements_are_stated_once_and_true() -> None:
     check(pin is not None, "blinkpy is pinned to an exact version, not a range")
     if pin:
         check(pin.group(1) in readme, f"the README names the pin it relies on ({pin.group(1)})")
+        # The dashboard compares the proxy's blinkpy against this copy of the
+        # pin. If the two drift, a correct install is told to fix itself.
+        declared = re.search(
+            r'REQUIRED_BLINKPY_VERSION = "([^"]+)"',
+            (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text(),
+        )
+        check(declared is not None, "the integration names the blinkpy it expects")
+        check(
+            bool(declared) and declared.group(1) == pin.group(1),
+            f"the dashboard checks for the version actually pinned ({pin.group(1)})",
+        )
 
     for card in ("button-card", "auto-entities"):
         check(card in readme, f"the dashboard dependency {card} is named")

@@ -16,6 +16,7 @@ from .const import (
     CONF_TOKEN,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
+    FRONTEND_RESOURCE_URL,
     PLATFORMS,
 )
 from .coordinator import BlinkLiveviewProxyCoordinator
@@ -23,7 +24,6 @@ from .views import async_register_views
 
 LOGGER = logging.getLogger(__name__)
 
-FRONTEND_RESOURCE_URL = "/api/blink_liveview_proxy/static/blink-liveview-dialog.js"
 AUTH_PANEL_MODULE_URL = "/api/blink_liveview_proxy/static/blink-proxy-auth-panel.js"
 AUTH_PANEL_PATH = "blink-liveview-proxy-auth"
 
