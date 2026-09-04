@@ -105,12 +105,16 @@ Found by testing it on a real install, and fixed here:
   showing a placeholder. A proxy that is merely still signing in answers 503
   now instead of being collapsed into a 502 — the difference between "try
   again" and "the gateway is broken".
-- **The clip rows are their own placeholder now, not a spinner.** The tile
-  reserves its 16:9 space from the start and shimmers until the picture fades
-  in over it, so a row never changes height and there is never an empty box
-  with nothing happening in it. The spinner it replaced was 22px on a 132px
-  tile — easy to miss even while a cold thumbnail took its full two and a half
-  seconds, which rather defeated the point of having one.
+- **The clip rows are their own placeholder now, not a spinner.** There is no
+  `<img>` in a row any more: the picture arrives as a background on a div of
+  fixed size, and a background image takes no part in layout, so a row cannot
+  change height when it loads. With an img the tile took its height from the
+  one child whose size is unknown until the network answers, and a list of
+  cold rows was a stack of squat rows that each jumped to full height as its
+  own picture landed. A shimmer runs over the tile until then. The spinner all
+  this replaced was 22px on a 132px tile, moving between two colours 1.21:1
+  apart — present, correct, and invisible, which for a loading state is the
+  whole failure.
 - **The live-view dialog was taller than an iPhone's screen.** `100dvh` is
   still not what the companion app's webview actually shows, so the bottom of
   the shell — where iOS puts the native video controls, AirPlay included — sat
