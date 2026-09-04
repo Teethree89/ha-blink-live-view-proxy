@@ -66,7 +66,7 @@ views:
                 icon: blink:logo
               - value: "off"
                 color: "#ef4444"
-                icon: mdi:cctv-off
+                icon: blink:logo
             styles:
               card:
                 - height: 74px

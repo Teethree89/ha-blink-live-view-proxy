@@ -127,7 +127,15 @@ def _camera_card(camera: dict[str, Any], indent: int = 6) -> str:
 
 
 def _proxy_pill(indent: int) -> str:
-    """The one status pill that works with the integration alone."""
+    """The one status pill that works with the integration alone.
+
+    The same mark in both states, coloured green or red rather than swapped for
+    a different glyph. A crossed-out camera reads as "off" faster in isolation,
+    but beside the live state it is a different object entirely, and the pill
+    stops looking like this integration exactly when someone is staring at it.
+    Nothing is lost by colouring instead: show_state prints the word underneath,
+    so the state does not rest on colour alone.
+    """
     pad = " " * indent
     lines = [
         f"{pad}- type: custom:button-card",
@@ -141,7 +149,7 @@ def _proxy_pill(indent: int) -> str:
         f"{pad}      icon: blink:logo",
         f'{pad}    - value: "off"',
         f'{pad}      color: "#ef4444"',
-        f"{pad}      icon: mdi:cctv-off",
+        f"{pad}      icon: blink:logo",
         f"{pad}  styles:",
         f"{pad}    card:",
         f"{pad}      - height: 74px",

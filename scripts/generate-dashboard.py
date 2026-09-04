@@ -38,6 +38,10 @@ DEFAULT_PROXY = "http://127.0.0.1:8088"
 # Reload's case, look fine and silently do nothing — so they are opt-in behind
 # --with-package rather than shipped broken.
 
+# The same mark in both states, coloured rather than swapped for a different
+# glyph: beside the live state a crossed-out camera is a different object, and
+# the pill stops looking like this integration just when it is being read.
+# show_state prints on/off underneath, so colour is not carrying it alone.
 PILL_PROXY = """\
           - type: custom:button-card
             entity: binary_sensor.blink_liveview_proxy
@@ -50,7 +54,7 @@ PILL_PROXY = """\
                 icon: blink:logo
               - value: "off"
                 color: "#ef4444"
-                icon: mdi:cctv-off
+                icon: blink:logo
             styles:
               card:
                 - height: 74px

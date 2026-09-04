@@ -26,7 +26,17 @@ default HACS listing are gone.
   integration and is loaded on every page the way HACS loads its own, so the
   one-colour mark from the wordmark is what the sidebar draws, and
   `blink:logo` works anywhere an icon name does. The generated dashboards use
-  it on the proxy pill.
+  it on the proxy pill, in both states: the pill used to swap to
+  `mdi:cctv-off` when the proxy was down, which is not a variant of the mark
+  but a different object, so the tile stopped looking like this integration
+  exactly when someone was reading it. Colour carries the state instead, which
+  is only safe because `show_state` prints the word underneath. A slashed
+  variant of the mark was drawn and rejected: with no knocked-out gap the
+  slash merges into the rings and is unreadable at the 24 and 40px the sidebar
+  and the pill actually draw.
+- **The add-on store entry says it is unofficial.** The README said so twice
+  and the add-on description did not, which is the one place someone sees this
+  next to Amazon's own listings with no other context.
 - **Every string in the config flow, the options flow and the three repair
   issues rendered as its raw key.** `strings.json` is a build-time file that
   Home Assistant compiles for core integrations and reads from nowhere at

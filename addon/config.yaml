@@ -1,6 +1,7 @@
 name: "Blink Live View Proxy"
 description: >-
-  Local MPEG-TS live-view proxy and clip archive for Blink cameras.
+  Unofficial local live-view proxy and clip archive for Blink cameras. Not
+  affiliated with, endorsed by, or supported by Amazon or Blink.
   Install the matching integration via HACS (or from custom_components/ in this repo).
 version: "0.7.0"
 slug: "blink_liveview_proxy"

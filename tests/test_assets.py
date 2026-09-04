@@ -153,6 +153,57 @@ def test_manifest() -> None:
     check("http" in data.get("dependencies", []), "declares the http dependency")
 
 
+def test_proxy_pill_keeps_its_mark() -> None:
+    """The proxy pill shows the same icon whether the proxy is up or down.
+
+    It used to swap to mdi:cctv-off, which is not a variant of the mark but a
+    different object - a dome camera beside a webcam - so the pill stopped
+    looking like this integration exactly when someone was reading it. A
+    slashed variant of the mark was tried and rejected: with no knocked-out
+    gap around the slash it merges into the rings and is unreadable at the 24
+    and 40px the sidebar and the pill actually draw.
+
+    So colour carries the state, and that is only safe because show_state
+    prints the word underneath. If show_state ever goes, this decision has to
+    be revisited - hence it is asserted here too.
+    """
+    print("\nthe proxy pill keeps its mark in both states")
+    for path in tracked("examples/*.yaml"):
+        try:
+            doc = yaml.safe_load(path.read_text())
+        except yaml.YAMLError:
+            continue
+        name = path.relative_to(ROOT).as_posix()
+        for _where, key, value in walk(doc, name):
+            # The pill is the button-card bound to the proxy health sensor.
+            if key != "entity" or value != "binary_sensor.blink_liveview_proxy":
+                continue
+            break
+        else:
+            continue
+
+        text = path.read_text()
+        check(
+            "mdi:cctv-off" not in text,
+            f"{name} does not swap the pill for a foreign glyph",
+        )
+        # Both the base icon and every state override are the mark.
+        icons = {
+            value
+            for _where, key, value in walk(doc, name)
+            if key == "icon" and isinstance(value, str) and "cctv" in value
+        }
+        check(not icons, f"{name} has no leftover cctv icon ({sorted(icons)})")
+        check(
+            "icon: blink:logo" in text,
+            f"{name} uses the shipped mark on the pill",
+        )
+        check(
+            "show_state: true" in text,
+            f"{name} prints the state as words, so colour is not carrying it alone",
+        )
+
+
 def test_translations_shipped() -> None:
     """strings.json is a build-time file. Custom integrations must ship the
     translation Home Assistant actually reads, translations/en.json, or every
@@ -795,6 +846,7 @@ def main() -> int:
         test_hacs_json,
         test_manifest,
         test_translations_shipped,
+        test_proxy_pill_keeps_its_mark,
         test_generator_shapes,
         test_proxy_copies_match,
         test_install_token,
