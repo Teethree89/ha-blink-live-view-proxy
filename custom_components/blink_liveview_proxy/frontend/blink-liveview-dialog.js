@@ -62,22 +62,36 @@
         width: min(1120px, calc(100vw - 32px));
         height: min(760px, calc(100vh - 32px));
         height: min(760px, calc(100dvh - 32px));
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
+        position: relative;
+        display: block;
+        box-sizing: border-box;
         overflow: hidden;
         border-radius: 8px;
         background: var(--card-background-color, #111827);
         box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
       }
-      #${DIALOG_ID} .blink-liveview-header {
-        display: grid;
-        grid-template-columns: 48px 1fr auto;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-        min-height: 56px;
-        padding: 0 8px;
-        background: var(--app-header-background-color, #1f2937);
+      /* No header row.
+         It cost a fixed 56px of every screen to show a camera name the viewer
+         had just tapped and can see in the picture, and on a phone in
+         landscape that was most of the height the video needed - the bottom
+         of the picture, and the native controls with it, fell off the screen.
+         A floating button costs nothing and says the same thing. */
+      #${DIALOG_ID} .blink-liveview-close {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        z-index: 3;
+        width: 40px;
+        height: 40px;
+        border-radius: 999px;
+        background: rgba(2, 6, 23, 0.55);
+        color: #f8fafc;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+      }
+      #${DIALOG_ID} .blink-liveview-close:hover,
+      #${DIALOG_ID} .blink-liveview-close:focus-visible {
+        background: rgba(2, 6, 23, 0.78);
       }
       #${DIALOG_ID} button svg {
         width: 24px;
@@ -85,19 +99,11 @@
         fill: currentColor;
         vertical-align: middle;
       }
-      #${DIALOG_ID} .blink-liveview-title,
       #${DIALOG_ID} button {
         -webkit-user-select: none;
         user-select: none;
         -webkit-touch-callout: none;
         -webkit-tap-highlight-color: transparent;
-      }
-      #${DIALOG_ID} .blink-liveview-title {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 18px;
-        font-weight: 650;
       }
       #${DIALOG_ID} button {
         width: 40px;
@@ -109,17 +115,6 @@
         cursor: pointer;
         font-size: 28px;
         line-height: 40px;
-      }
-      #${DIALOG_ID} button.blink-liveview-header-action {
-        width: auto;
-        min-width: 40px;
-        border-radius: 6px;
-        padding: 0 12px;
-        font-size: 13px;
-        font-weight: 800;
-      }
-      #${DIALOG_ID} button:hover {
-        background: rgba(148, 163, 184, 0.16);
       }
       #${DIALOG_ID} iframe {
         width: 100%;
@@ -181,13 +176,12 @@
           width: 100%;
           height: 100%;
           border-radius: 0;
-          box-sizing: border-box;
-          padding-bottom: env(safe-area-inset-bottom, 0px);
-        }
-        #${DIALOG_ID} .blink-liveview-header {
+          /* The insets the header used to absorb. In landscape the top one is
+             zero, which is exactly where the height was needed. */
           padding-top: env(safe-area-inset-top, 0px);
-          padding-left: max(8px, env(safe-area-inset-left, 0px));
-          padding-right: max(8px, env(safe-area-inset-right, 0px));
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+          padding-left: env(safe-area-inset-left, 0px);
+          padding-right: env(safe-area-inset-right, 0px);
         }
       }
     `;
@@ -288,7 +282,7 @@
     return root && root.hass ? root.hass : null;
   }
 
-  function openFrameDialog({ title, src, headerAction }) {
+  function openFrameDialog({ title, src }) {
     ensureStyle();
     closeDialog();
 
@@ -301,27 +295,15 @@
     shell.setAttribute("aria-modal", "true");
     shell.setAttribute("aria-label", title);
 
-    const header = document.createElement("header");
-    header.className = "blink-liveview-header";
-
+    // The title survives as the accessible name of the dialog; it just is not
+    // drawn any more, because the picture underneath already says it.
     const close = document.createElement("button");
     close.type = "button";
-    close.setAttribute("aria-label", "Close");
+    close.className = "blink-liveview-close";
+    close.setAttribute("aria-label", `Close ${title}`);
     // The MDI "close" glyph, inline so this file stays self-contained.
     close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>';
     close.addEventListener("click", closeDialog);
-
-    const heading = document.createElement("div");
-    heading.className = "blink-liveview-title";
-    heading.textContent = title;
-
-    header.append(close, heading);
-    if (headerAction) {
-      header.append(headerAction);
-    } else {
-      header.append(document.createElement("span"));
-    }
-    shell.append(header);
 
     if (!src) {
       const error = document.createElement("div");
@@ -334,6 +316,8 @@
       iframe.src = src;
       shell.append(iframe);
     }
+    // Last, so it paints over whatever is behind it.
+    shell.append(close);
 
     root.append(shell);
     root.addEventListener("click", (event) => {

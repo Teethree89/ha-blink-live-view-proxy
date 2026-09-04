@@ -1623,6 +1623,10 @@ body{height:100vh;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1f
 .toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
 .toolbar h1{display:none;margin:0;font-size:17px;align-self:center}
 body.standalone .toolbar h1{display:block}
+/* Opened in the dialog there is a floating close button over the top-left
+   corner, so the first control has to start clear of it. Standalone there is
+   no such button and the heading takes that space instead. */
+body:not(.standalone) .toolbar{padding-left:60px}
 label{display:grid;gap:4px;color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 select,button,a.button{min-height:34px;border:1px solid rgba(148,163,184,.28);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:14px}
 select{min-width:128px;padding:0 10px}

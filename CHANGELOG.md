@@ -126,6 +126,15 @@ Found by testing it on a real install, and fixed here:
   which is a different module, so it cannot happen again. An entry from an
   older version — or from before the version existed — is moved to the
   current one rather than duplicated.
+- **The dialog has no header any more, just a floating close button.** It was
+  a fixed 56px of every screen, spent on a camera name the viewer had tapped
+  a moment earlier and can see in the picture. On a phone in landscape that
+  was most of the height the video needed, and the bottom of the picture —
+  along with iOS's native controls — fell off the screen because of it. The
+  name survives as the dialog's accessible name and in the player's own
+  loading panel; the button costs nothing and the safe-area insets it used to
+  absorb are now the shell's, which in landscape are zero exactly where the
+  height was wanted.
 - **The live-view dialog was taller than an iPhone's screen.** `100dvh` is
   still not what the companion app's webview actually shows, so the bottom of
   the shell — where iOS puts the native video controls, AirPlay included — sat
