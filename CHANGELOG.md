@@ -115,6 +115,17 @@ Found by testing it on a real install, and fixed here:
   this replaced was 22px on a 132px tile, moving between two colours 1.21:1
   apart — present, correct, and invisible, which for a loading state is the
   whole failure.
+- **Frontend files carry the version in their URL now**, the way HACS puts
+  `?hacstag=` on everything it registers — the dialog resource, the panel
+  module and the icon set. They were served `no-cache` with an ETag, which
+  makes a *browser* revalidate and is not the layer that matters: once a
+  document has imported a module it stays in that document's registry for as
+  long as the document lives, and the companion app keeps its webview alive
+  across app switches. So an upgrade could leave old frontend code resident
+  with no way to shift it but quitting the app. A new version is a new URL,
+  which is a different module, so it cannot happen again. An entry from an
+  older version — or from before the version existed — is moved to the
+  current one rather than duplicated.
 - **The live-view dialog was taller than an iPhone's screen.** `100dvh` is
   still not what the companion app's webview actually shows, so the bottom of
   the shell — where iOS puts the native video controls, AirPlay included — sat
