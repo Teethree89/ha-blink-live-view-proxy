@@ -195,22 +195,39 @@
   // keep it current; the CSS units stay as the fallback.
   function sizeDialog(root) {
     if (!root) return;
-    const height = `${window.innerHeight}px`;
+    // visualViewport is what is actually on screen; window.innerHeight is the
+    // fallback for anything without it.
+    const visual = window.visualViewport && window.visualViewport.height;
+    const height = `${Math.round(visual || window.innerHeight)}px`;
     root.style.height = height;
     root.style.maxHeight = height;
   }
 
   function watchViewport(root) {
     const apply = () => sizeDialog(root);
+    // orientationchange fires BEFORE iOS updates its viewport metrics, so
+    // reading the height in that handler returns the height of the
+    // orientation being left - which is how a portrait-sized dialog ended up
+    // in a landscape window with its bottom off the screen. Measure again as
+    // the rotation settles rather than trusting the first read.
+    const applyThroughRotation = () => {
+      apply();
+      for (const delay of [60, 180, 400, 800]) setTimeout(apply, delay);
+    };
     apply();
     window.addEventListener("resize", apply);
-    window.addEventListener("orientationchange", apply);
-    // Safari fires neither reliably while its toolbars slide.
-    if (window.visualViewport) window.visualViewport.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", applyThroughRotation);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", apply);
+      window.visualViewport.addEventListener("scroll", apply);
+    }
     root.__blinkStopWatching = () => {
       window.removeEventListener("resize", apply);
-      window.removeEventListener("orientationchange", apply);
-      if (window.visualViewport) window.visualViewport.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", applyThroughRotation);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", apply);
+        window.visualViewport.removeEventListener("scroll", apply);
+      }
     };
   }
 
@@ -219,8 +236,29 @@
     if (!existing) return;
     if (typeof existing.__blinkStopWatching === "function") existing.__blinkStopWatching();
     if (typeof existing.close === "function" && existing.open) existing.close();
+
+    // Tell the player to stop before the iframe goes.
+    //
+    // Dropping the src and removing the element is enough on a desktop, and
+    // is not on iOS: there the player runs native HLS, and a detached
+    // document's <video> was left fetching segments. The proxy therefore
+    // never saw the stream go idle, held the Blink live view open, and every
+    // later call that needs the Blink client - listing clips, above all -
+    // queued behind a session nobody was watching. Killing the app was the
+    // only thing that ended it, which is exactly the report.
+    //
+    // The player is same-origin, so ask it to shut down properly, then
+    // navigate the frame to about:blank so the document really does unload.
     const iframe = existing.querySelector("iframe");
-    if (iframe) iframe.removeAttribute("src");
+    if (iframe) {
+      try {
+        const frame = iframe.contentWindow;
+        if (frame && typeof frame.__blinkStopPlayer === "function") frame.__blinkStopPlayer();
+      } catch (err) {
+        /* a cross-origin or already-torn-down frame has nothing to stop */
+      }
+      iframe.src = "about:blank";
+    }
     existing.remove();
   }
 

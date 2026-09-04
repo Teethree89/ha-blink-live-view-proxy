@@ -1120,6 +1120,18 @@ window.addEventListener("beforeunload", () => {{
   stopTalk();
 }});
 talk.hidden = !pttSupported;
+
+// The dialog closes by removing this frame. On iOS that alone left the
+// <video> fetching HLS segments from a detached document, so the proxy never
+// saw the stream go idle and kept the Blink live view open behind it. The
+// parent calls this first; pagehide covers a normal navigation away.
+window.__blinkStopPlayer = () => {{
+  try {{ stopPlayer(); }} catch (err) {{}}
+}};
+window.addEventListener("pagehide", () => {{
+  window.__blinkStopPlayer();
+}});
+
 startPlayer();
 </script>
 </body>
