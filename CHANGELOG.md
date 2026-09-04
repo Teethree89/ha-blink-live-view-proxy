@@ -139,6 +139,19 @@ Found by testing it on a real install, and fixed here:
   view. A flex container has a definite height here, so the picture is
   letterboxed instead of overflowing.
 
+- **"End & Save" never worked on an iPhone, and "Save MP4" there was lying.**
+  The cached copy of a live view was written only by the MPEG-TS handler, and
+  iOS has no Media Source Extensions so it always takes the HLS path, which
+  wrote none. End & Save waited for a recording that was never going to
+  appear and gave up; Save MP4 then handed back whatever older session
+  happened to still be in the cache — the wrong clip, with nothing to say so.
+  The HLS session now writes the same cached copy as a second ffmpeg output,
+  always a straight copy even when low-latency mode is re-encoding the
+  playlist, finalized only once ffmpeg has actually written something.
+- **The live-view buttons are centred on a phone.** Hold Talk and End & Save
+  sat in the top-right corner, on top of the native mute and AirPlay controls
+  now that the picture reaches the edges.
+
 Two halves again: the thumbnails need proxy 0.7.0. The integration's repair
 notice and the Overview tab say so and offer the update where the install
 supports it.

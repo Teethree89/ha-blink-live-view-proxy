@@ -597,6 +597,13 @@ button.talk.active {{
    instead of overflowing. width and height stay auto so the element takes the
    video's own shape, and the two max- rules bound it on both axes. */
 @media (max-width: 720px), (max-height: 520px) {{
+  /* Centred, not tucked into the corner. On a phone the picture reaches the
+     edges and these sat on top of the native mute and AirPlay controls. */
+  .live-actions {{
+    left:50%;
+    right:auto;
+    transform:translateX(-50%);
+  }}
   .stage {{
     display:flex;
     align-items:center;

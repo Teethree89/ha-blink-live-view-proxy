@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import datetime
 import logging
+import os
 import shutil
 import time
 from pathlib import Path
@@ -12,6 +15,7 @@ from typing import Any
 from .blink import BlinkStreamBroker, LiveViewHandle
 from .config import resolve_path
 from .constants import LOGGER_NAME
+from .util import liveview_filename
 
 LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -26,6 +30,14 @@ class HlsSession:
         self.log_path = self.directory / "ffmpeg.log"
         self.liveview: LiveViewHandle | None = None
         self.process: asyncio.subprocess.Process | None = None
+        # The same cached copy the MPEG-TS path keeps, written as a second
+        # ffmpeg output. Without it "End & Save" had nothing to finalize on
+        # any client that plays HLS - which is every iPhone and iPad, since
+        # they have no Media Source Extensions and never take the MPEG-TS
+        # route. Worse than the error it showed: "Save MP4" would then hand
+        # back whatever older session happened to be in the cache.
+        self.cache_final: Path | None = None
+        self.cache_tmp: Path | None = None
         self.active_liveview_keys: set[str] = set()
         self.started_at = time.monotonic()
         self.last_touch = self.started_at
@@ -50,6 +62,25 @@ class HlsSession:
 
         self.liveview = await self.manager.broker.start_liveview(self.slug)
         segment_pattern = self.directory / "segment_%05d.ts"
+
+        cache_args: list[str] = []
+        if bool(self.manager.config.get("save_liveview_cache", True)):
+            cache_root = self.manager.liveview_cache_dir
+            cache_root.mkdir(parents=True, exist_ok=True)
+            self.cache_final = cache_root / liveview_filename(
+                self.slug, datetime.datetime.now(datetime.timezone.utc)
+            )
+            self.cache_tmp = self.cache_final.with_suffix(".ts.part")
+            # A second output on the same input, always a straight copy: the
+            # cache should hold what Blink sent, not the re-encode low-latency
+            # mode may be doing for the playlist.
+            cache_args = [
+                "-map", "0:v:0",
+                "-map", "0:a:0?",
+                "-c", "copy",
+                "-f", "mpegts",
+                str(self.cache_tmp),
+            ]
 
         # Blink's GOP is 4s, so copied segments are 4s. Re-encoding forces a
         # keyframe every second; it costs an encode per stream, hence opt-in.
@@ -110,6 +141,7 @@ class HlsSession:
                 "-hls_segment_filename",
                 str(segment_pattern),
                 str(self.playlist),
+                *cache_args,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=log_handle,
             )
@@ -178,9 +210,31 @@ class HlsSession:
                 await self.process.wait()
         if self.liveview is not None:
             await self.liveview.close()
+        self._finalize_cache()
         if self.directory.exists():
             shutil.rmtree(self.directory)
         LOGGER.info("Stopped HLS session for %s", self.slug)
+
+    def _finalize_cache(self) -> None:
+        """Publish the cached copy under the name find_last_liveview globs for.
+
+        Only on the way out, and only when ffmpeg actually wrote something: a
+        half-named file would be picked up as the newest live view and handed
+        to whoever asked to save one.
+        """
+        if self.cache_tmp is None or self.cache_final is None:
+            return
+        tmp, final = self.cache_tmp, self.cache_final
+        self.cache_tmp = self.cache_final = None
+        try:
+            if tmp.exists() and tmp.stat().st_size > 0:
+                os.replace(tmp, final)
+                LOGGER.info("Cached the HLS live view for %s at %s", self.slug, final)
+                return
+        except OSError:
+            LOGGER.warning("Could not finalize the cached live view for %s", self.slug)
+        with contextlib.suppress(FileNotFoundError):
+            tmp.unlink()
 
 class HlsManager:
     """Keeps HLS sessions warm while HA is actively polling them."""
@@ -195,6 +249,12 @@ class HlsManager:
         self.broker = broker
         self.config = config
         self.root_dir = resolve_path(config["hls_dir"], base)
+        # Tolerate a config that does not name it: the tests build a manager
+        # from a handful of keys, and a missing one must not be fatal here.
+        cache_dir = config.get("liveview_cache_dir")
+        self.liveview_cache_dir = (
+            resolve_path(cache_dir, base) if cache_dir else self.root_dir.parent / "liveviews"
+        )
         self.active_liveviews = active_liveviews if active_liveviews is not None else {}
         self.sessions: dict[str, HlsSession] = {}
         self.lock = asyncio.Lock()
