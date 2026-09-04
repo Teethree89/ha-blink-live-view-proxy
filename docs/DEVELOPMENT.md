@@ -116,7 +116,9 @@ Steps:
    `const.py` only when it genuinely needs the newer proxy — every bump shows a
    repair notice to people whose setup works.
 3. Commit that on its own, so the bump is easy to find later.
-4. Tag it: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
+4. Tag it: `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`. A
+   prerelease may use `X.Y.Z-rc.N`; the updater and image workflow recognize
+   both spellings, and prerelease images never replace `latest`.
 5. Publish a GitHub release on that tag. HACS only offers tagged releases, so
    an untagged commit reaches nobody, and a draft release reaches nobody either.
 

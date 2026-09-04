@@ -163,8 +163,10 @@ That keeps a checkout on the host and installs the newest **tag**. The Home
 Assistant integration can then offer a repair **Fix** button when it is newer
 than the proxy; the button starts the updater installed on this host. Re-run
 the line yourself to upgrade a proxy that predates that endpoint.
-`VERSION=v0.3.0` pins one, and `INSTALL_AUTOUPDATE=1` enables a daily timer that
-runs the same check without being asked. From a checkout you already have,
+`VERSION=0.7.0-rc.1` pins either a stable or prerelease tag, and
+`INSTALL_AUTOUPDATE=1` enables a daily timer that runs the same check without
+being asked. Stable releases win over their prereleases, and automatic checks
+never downgrade an installed version. From a checkout you already have,
 `sudo scripts/install-proxy.sh` does the same thing.
 
 It prints the URL to give Home Assistant and the one command that reads the

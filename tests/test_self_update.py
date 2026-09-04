@@ -357,6 +357,22 @@ def test_integration_decision() -> None:
     check(not version_check.is_behind("0.5", "0.5.0"), "omitted trailing zeroes compare equally")
     check(not version_check.is_behind("0.6.0", "0.5.1"), "a newer proxy is never called behind")
     check(
+        version_check.is_behind("0.6.2", "0.7.0-rc.1"),
+        "a stable proxy behind a prerelease integration is offered the prerelease",
+    )
+    check(
+        version_check.is_behind("0.7.0-rc.1", "0.7.0-rc.2"),
+        "prerelease iterations are ordered",
+    )
+    check(
+        version_check.is_behind("0.7.0-rc.2", "0.7.0"),
+        "the final release follows its prereleases",
+    )
+    check(
+        not version_check.is_behind("0.7.0", "0.7.0-rc.2"),
+        "a final proxy is newer than its prerelease integration",
+    )
+    check(
         not version_check.is_behind(None, "0.5.1") and not version_check.is_behind("0.4.0", None),
         "an unreadable version on either side is not a guess to act on",
     )

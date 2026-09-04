@@ -500,7 +500,7 @@ def test_versions_agree() -> None:
     # A minimum above the shipped version would put a repair notice in front of
     # everyone, including people running the matching proxy.
     def to_tuple(value: str) -> tuple[int, ...]:
-        return tuple(int(part) for part in value.split("."))
+        return tuple(int(part) for part in value.split("-", 1)[0].split("."))
 
     check(
         to_tuple(minimum.group(1)) <= to_tuple(manifest),
@@ -536,18 +536,23 @@ def test_bootstrap_and_autoupdate() -> None:
                    "commit", "-q", "--allow-empty", "-m", "x"],
             check=True,
         )
-        # v0.10.0 last, so an alphabetical sort would pick v0.9.0 and quietly
-        # stop upgrading anyone after the ninth release.
-        for tag in ("v0.2.0", "v0.9.0", "v0.10.0"):
+        # This mix catches three traps: alphabetical ordering, ignoring no-v
+        # prerelease tags, and treating an rc as newer than its final release.
+        for tag in ("v0.2.0", "v0.9.0", "v0.10.0", "0.11.0-rc.1"):
             subprocess.run(git + ["tag", tag], check=True)
 
         probe = f"""
         SRC_DIR={repo} OPT_DIR={opt}
         source {ROOT}/scripts/bootstrap.sh
-        echo "newest=$(newest_tag)"
+        echo "newest_rc=$(newest_tag)"
+        git -C {repo} tag v0.11.0
+        echo "newest_stable=$(newest_tag)"
         echo "installed=$(installed_version)"
         should_install 'v0.3.0' '0.3.0' && echo same=install || echo same=skip
         should_install 'v0.10.0' '0.3.0' && echo newer=install || echo newer=skip
+        should_install '0.11.0-rc.1' '0.10.0' && echo rc=install || echo rc=skip
+        should_install 'v0.10.0' '0.11.0-rc.1' && echo downgrade=install || echo downgrade=skip
+        should_install '0.11.0-rc.1' '0.11.0-rc.1' && echo same_rc=install || echo same_rc=skip
         should_install 'v0.3.0' '' && echo unknown=install || echo unknown=skip
         FORCE=1 should_install 'v0.3.0' '0.3.0' && echo forced=install || echo forced=skip
         """
@@ -557,10 +562,14 @@ def test_bootstrap_and_autoupdate() -> None:
         results = dict(
             line.split("=", 1) for line in out.strip().splitlines() if "=" in line
         )
-        check(results.get("newest") == "v0.10.0", "the newest tag is chosen by version, not alphabetically")
+        check(results.get("newest_rc") == "0.11.0-rc.1", "a prerelease tag is visible to the updater")
+        check(results.get("newest_stable") == "v0.11.0", "a final release wins over its prerelease")
         check(results.get("installed") == "0.3.0", "the installed version is read from the deployed proxy")
         check(results.get("same") == "skip", "an up-to-date host does nothing")
         check(results.get("newer") == "install", "a newer tag installs")
+        check(results.get("rc") == "install", "a newer prerelease installs")
+        check(results.get("downgrade") == "skip", "an automatic check never downgrades")
+        check(results.get("same_rc") == "skip", "a matching prerelease does nothing")
         check(results.get("unknown") == "install", "an install too old to report a version upgrades")
         check(results.get("forced") == "install", "FORCE reinstalls the same tag")
 
@@ -642,8 +651,8 @@ def test_standalone_image() -> None:
         if step.get("uses", "").startswith("docker/build-push-action")
     ]
     check(
-        push and "startsWith(github.ref, 'refs/tags/v')" in str(push[0]),
-        "every push builds the image, but only a tag publishes it",
+        push and "startsWith(github.ref, 'refs/tags/')" in str(push[0]),
+        "every push builds the image, but only a stable or prerelease tag publishes it",
     )
 
     # The entrypoint is what makes the image self-configuring; run it for real,

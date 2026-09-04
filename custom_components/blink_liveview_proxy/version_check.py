@@ -15,15 +15,24 @@ No Home Assistant imports: the comparison is the part worth testing.
 
 from __future__ import annotations
 
+import re
+
 # What a proxy that predates /status reporting a version is called in the UI.
 UNKNOWN_VERSION = "an unknown version"
 
 
 def parse_version(value: str | None) -> tuple[int, ...] | None:
-    """Parse a plain dotted version. Anything unexpected is None, not a guess."""
+    """Parse a dotted release or prerelease. Anything unexpected is None."""
     if not value or not isinstance(value, str):
         return None
-    parts = value.strip().split(".")
+    match = re.fullmatch(
+        r"v?(\d+(?:\.\d+){0,3})(?:-(dev|alpha|a|beta|b|rc)(?:[.-]?(\d+))?)?",
+        value.strip(),
+        re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    parts = match.group(1).split(".")
     if not 1 <= len(parts) <= 4:
         return None
     try:
@@ -32,9 +41,15 @@ def parse_version(value: str | None) -> tuple[int, ...] | None:
         return None
     if any(part < 0 for part in parsed):
         return None
-    # Dotted versions commonly omit trailing zeroes. Without normalizing,
-    # Python would sort 0.5 below 0.5.0 even though they name the same release.
-    return parsed + (0,) * (4 - len(parsed))
+    # Dotted versions commonly omit trailing zeroes. A final release sorts
+    # after every prerelease with the same numeric core.
+    release = parsed + (0,) * (4 - len(parsed))
+    label = (match.group(2) or "").lower()
+    if not label:
+        return release + (1, 0, 0)
+    stage = {"dev": 0, "a": 1, "alpha": 1, "b": 2, "beta": 2, "rc": 3}[label]
+    number = int(match.group(3) or 0)
+    return release + (0, stage, number)
 
 
 def is_outdated(reported: str | None, minimum: str) -> bool:

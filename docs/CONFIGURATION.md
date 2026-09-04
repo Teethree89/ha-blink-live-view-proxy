@@ -257,7 +257,7 @@ environment:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `VERSION` | newest tag | Install a specific tag instead |
+| `VERSION` | newest stable or prerelease tag | Install a specific tag instead |
 | `FORCE` | unset | Reinstall even when that tag is already installed |
 | `SRC_DIR` | `/opt/src/ha-blink-live-view-proxy` | Where the checkout lives |
 | `BIND_HOST` | `0.0.0.0` | `127.0.0.1` keeps the proxy on loopback |

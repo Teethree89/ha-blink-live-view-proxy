@@ -8,7 +8,16 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
-## [0.7.0] — 2026-09-04
+## [0.7.0-rc.2] — 2026-09-04
+
+- **Prereleases now identify and update themselves as prereleases.** The HACS
+  integration, Supervisor add-on and proxy all report `0.7.0-rc.2`, so the
+  dashboard no longer calls an RC the final `0.7.0`. Version comparisons order
+  RC iterations correctly, the host updater considers both stable and
+  prerelease tags without ever automatically downgrading, and tagged RC
+  container images publish under their version without replacing `latest`.
+
+## [0.7.0-rc.1] — 2026-09-04
 
 Release preparation ahead of 1.0: the product gets its proper name, the clip
 viewer gets thumbnails and a layout that holds still, phones get a live view

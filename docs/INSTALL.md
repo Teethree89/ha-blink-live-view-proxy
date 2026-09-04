@@ -172,8 +172,10 @@ moves it to the newest tag, and runs the installer from there:
 curl -fsSL https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/scripts/bootstrap.sh | sudo bash
 ```
 
-It exits with `Already on vX.Y.Z - nothing to do` when there is nothing to do,
-so it is safe to run whenever. `VERSION=v0.3.0` pins a tag, `FORCE=1`
+It exits with `Already on X.Y.Z - nothing to do` when there is nothing to do,
+so it is safe to run whenever. Stable and prerelease tags are both considered;
+a final release wins over its prereleases, and an automatic run never
+downgrades. `VERSION=0.7.0-rc.1` pins either kind of tag, while `FORCE=1`
 reinstalls the current one.
 
 The installer also places `blink-liveview-proxy-update.service` on the host.
