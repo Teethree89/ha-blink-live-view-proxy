@@ -86,6 +86,33 @@ default HACS listing are gone.
   Overview now lays out the three ways to run the proxy, offers to start
   the config flow, and runs the checks that do not need a proxy.
 
+Found by testing it on a real install, and fixed here:
+
+- **The sidebar icon was blank until a hard refresh** — and on the iOS
+  companion app there is no way to force one. `add_extra_js_url` puts the icon
+  set in `index.html`, which is right for a fresh page load and useless to a
+  tab that was already open when the integration was installed: Home Assistant
+  renames the sidebar entry over the websocket, so it looks updated, while the
+  script tag never arrives. The set is now loaded from the dialog resource and
+  the panel as well, and once it registers it repaints any `blink:` icon that
+  already gave up — `ha-icon` resolves a custom prefix once and never asks
+  again, so re-assigning the name is what makes it look a second time.
+- **A burst of thumbnails could come back 502, and stayed broken.** Every
+  visible row asked at once, all of it queued behind the proxy's one-at-a-time
+  Blink fetch, the last waited most of a minute, and Blink started throttling
+  the run of `prepare_download` calls. The viewer now keeps its own two-deep
+  queue so rows fill top-down, and retries a failed thumbnail twice before
+  showing a placeholder. A proxy that is merely still signing in answers 503
+  now instead of being collapsed into a 502 — the difference between "try
+  again" and "the gateway is broken".
+- **The live-view dialog was taller than an iPhone's screen.** `100dvh` is
+  still not what the companion app's webview actually shows, so the bottom of
+  the shell — where iOS puts the native video controls, AirPlay included — sat
+  below the fold. The dialog now takes its height from `window.innerHeight`
+  and follows it on resize, rotation and Safari's sliding toolbars. On a phone
+  the video element also shrink-wraps the picture rather than filling all that
+  black, so those controls sit under the video where they belong.
+
 Two halves again: the thumbnails need proxy 0.7.0. The integration's repair
 notice and the Overview tab say so and offer the update where the install
 supports it.

@@ -58,6 +58,8 @@ class BlinkProxyAuthPanel extends HTMLElement {
   _ensureDialog() {
     if (window.__blinkLiveviewDialogLoaded || this._dialogRequested) return;
     this._dialogRequested = true;
+    // The icon set too: this panel can be the first thing a session loads.
+    import("/api/blink_liveview_proxy/assets/blink-liveview-icons.js").catch(() => {});
     import("/api/blink_liveview_proxy/assets/blink-liveview-dialog.js").catch((error) => {
       this._dialogRequested = false;
       this._notice = "The live view dialog helper could not be loaded, so the buttons on the Cameras tab will not open anything. Check the Lovelace dialog resource below.";

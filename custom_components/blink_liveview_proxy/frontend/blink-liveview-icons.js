@@ -3,10 +3,20 @@
 // so once this runs "blink:logo" works anywhere an icon name does - the
 // sidebar entry, a button-card, a tile card, an entity's icon override.
 //
-// Home Assistant loads this on every page through frontend.add_extra_js_url
-// (see __init__.py), which is also how HACS gets its own sidebar icon. It is
-// not a Lovelace resource, so it does not depend on the dashboard helper
-// being registered, and it is safe to run twice.
+// It is loaded three ways on purpose, because one is not enough:
+//
+//   1. frontend.add_extra_js_url puts a <script> for it in index.html, which
+//      is the right primary path and covers every fresh page load.
+//   2. blink-liveview-dialog.js imports it, so any Lovelace dashboard pulls it
+//      in through the registered resource.
+//   3. the admin panel imports it too.
+//
+// (1) alone leaves a hole that bit a real upgrade: a browser tab or a
+// companion-app webview that was already open when the integration was
+// installed keeps its old index.html forever. Home Assistant pushes the new
+// panel title over the websocket, so the sidebar entry renames itself and
+// looks updated, but the script tag never arrives and the icon stays blank
+// until someone hard-refreshes - which on iOS is not a thing a user can do.
 //
 // One icon, one colour: the mark from the wordmark, traced as a filled 24x24
 // path in the MDI convention. Rings are drawn as disks with reversed inner
@@ -29,6 +39,37 @@
     ),
   };
 
+  const already = window.customIcons && window.customIcons.blink;
   window.customIcons = window.customIcons || {};
   window.customIcons.blink = set;
+  if (already) return;
+
+  // Repaint anything that already gave up on us.
+  //
+  // ha-icon resolves a custom prefix once, in willUpdate. If the set was not
+  // registered at that moment it sets an internal legacy flag, renders
+  // nothing, and never asks again - so on a page that rendered before this
+  // file loaded, the sidebar entry is blank until a reload. Re-assigning the
+  // same icon name is the supported way to make it resolve again: it is a
+  // reactive property, so the element re-runs the lookup, which now succeeds.
+  const repaint = (root, depth) => {
+    if (!root || !root.querySelectorAll || depth > 12) return;
+    for (const node of root.querySelectorAll("ha-icon")) {
+      const icon = node.icon;
+      if (typeof icon === "string" && icon.startsWith("blink:")) {
+        node.icon = "";
+        node.icon = icon;
+      }
+    }
+    for (const node of root.querySelectorAll("*")) {
+      if (node.shadowRoot) repaint(node.shadowRoot, depth + 1);
+    }
+  };
+  const heal = () => {
+    try { repaint(document, 0); } catch (err) { /* never break a page over an icon */ }
+  };
+  // Once now for anything already on screen, and once after the frame settles
+  // for the sidebar, which Home Assistant builds from a websocket round trip.
+  heal();
+  requestAnimationFrame(() => setTimeout(heal, 400));
 })();

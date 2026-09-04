@@ -357,6 +357,16 @@ async def _open_proxy_response(
     if response.status == 404:
         response.close()
         raise web.HTTPNotFound(text="Proxy resource not found\n")
+    if response.status == 503:
+        # The proxy is up but its Blink client is not ready - it is signing in,
+        # or reconnecting. Collapsing that into 502 told the browser the
+        # gateway was broken and left a permanent broken thumbnail; 503 is
+        # honest and is what the viewer retries on.
+        body = await response.text()
+        response.close()
+        raise web.HTTPServiceUnavailable(
+            text=body or "The proxy is not ready yet\n"
+        )
     if response.status == 429:
         retry_after = response.headers.get("Retry-After", "30")
         body = await response.text()
@@ -571,6 +581,18 @@ button.talk.pending {{
 }}
 button.talk.active {{
   background:#16a34a;
+}}
+/* On a phone the stage is far taller than a 16:9 picture, and a video element
+   that fills it puts iOS's native control bar - AirPlay and the rest - at the
+   bottom of all that black, below the fold. Letting the element shrink-wrap
+   the picture keeps those controls under the video where they belong. */
+@media (max-width: 720px), (max-height: 520px) {{
+  video {{
+    position:static;
+    width:100%;
+    height:auto;
+    max-height:100%;
+  }}
 }}
 </style>
 </head>
@@ -1663,18 +1685,63 @@ if (fixedCamera || initial.get("camera")) {
 }
 
 // Thumbnails are cut on the proxy from a clip it has to fetch from Blink
-// first, one at a time. Only ask for the rows that are on screen, so the
-// first few appear in seconds instead of the whole list queueing behind
-// clips nobody has scrolled to.
+// first, one at a time - each fetch makes the Sync Module upload the clip to
+// Blink's cloud and polls until it lands, about two and a half seconds.
+//
+// Asking for every visible row at once therefore put a dozen requests behind
+// that one queue. The last of them waited the better part of a minute, some
+// came back 502, and Blink began throttling the burst of prepare_download
+// calls. So the browser keeps its own queue two deep, rows fill top-down, and
+// a request that fails anyway is retried rather than left as a dead tile.
+const QUEUE = [];
+let inFlight = 0;
+const MAX_IN_FLIGHT = 2;
+
+function pump() {
+  while (inFlight < MAX_IN_FLIGHT && QUEUE.length) {
+    const job = QUEUE.shift();
+    inFlight += 1;
+    job().then(() => { inFlight -= 1; pump(); });
+  }
+}
+
+function loadThumbnail(box, image, url, attempt = 0) {
+  return new Promise((resolve) => {
+    image.onload = () => { box.classList.add("loaded"); resolve(); };
+    image.onerror = () => {
+      // Transient by nature: the proxy may still be signing in to Blink, or
+      // this clip lost its place behind a long queue. Both used to leave a
+      // placeholder that never recovered.
+      if (attempt < 2) {
+        setTimeout(
+          () => loadThumbnail(box, image, url, attempt + 1).then(resolve),
+          1200 * (attempt + 1),
+        );
+        return;
+      }
+      box.classList.add("failed");
+      resolve();
+    };
+    // A fresh query string per attempt: a browser will not re-request a src it
+    // has already failed on.
+    image.src = attempt ? `${url}${url.includes("?") ? "&" : "?"}retry=${attempt}` : url;
+  });
+}
+
+function queueThumbnail(box, image, url) {
+  QUEUE.push(() => loadThumbnail(box, image, url));
+  pump();
+}
+
 const visible = "IntersectionObserver" in window
   ? new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         const image = entry.target;
         visible.unobserve(image);
-        image.src = image.dataset.src;
+        queueThumbnail(image.closest(".thumb"), image, image.dataset.src);
       }
-    }, { root: list, rootMargin: "240px 0px" })
+    }, { root: list, rootMargin: "160px 0px" })
   : null;
 
 function formatTime(value) {
@@ -1726,14 +1793,12 @@ function thumbnail(clip) {
   image.alt = "";
   image.decoding = "async";
   image.dataset.src = clip.thumbnail_url;
-  image.addEventListener("load", () => box.classList.add("loaded"));
-  image.addEventListener("error", () => box.classList.add("failed"));
   const play = document.createElement("div");
   play.className = "play";
   play.innerHTML = PLAY_ICON;
   box.append(spinner, image, play);
   if (visible) visible.observe(image);
-  else image.src = clip.thumbnail_url;
+  else queueThumbnail(box, image, clip.thumbnail_url);
   return box;
 }
 
@@ -1757,6 +1822,7 @@ function render() {
   const selected = fixedCamera || camera.value;
   const shown = selected ? clips.filter((clip) => clip.slug === selected) : clips;
   summary.textContent = shown.length ? `${shown.length} clip${shown.length === 1 ? "" : "s"}` : "";
+  QUEUE.length = 0;
   list.replaceChildren();
   if (!shown.length) {
     const empty = document.createElement("div");

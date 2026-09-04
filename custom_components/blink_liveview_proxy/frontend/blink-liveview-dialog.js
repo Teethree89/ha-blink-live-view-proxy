@@ -2,6 +2,12 @@
   if (window.__blinkLiveviewDialogLoaded) return;
   window.__blinkLiveviewDialogLoaded = true;
 
+  // Pull in the icon set. index.html carries it too, but a tab that was open
+  // when the integration was installed never re-parses index.html, so the
+  // sidebar icon stays blank there. This resource loads on every Lovelace
+  // dashboard, and the module repaints icons that already gave up.
+  import("/api/blink_liveview_proxy/assets/blink-liveview-icons.js").catch(() => {});
+
   const STYLE_ID = "blink-liveview-dialog-style";
   const DIALOG_ID = "blink-liveview-dialog";
 
@@ -181,9 +187,37 @@
     document.head.appendChild(style);
   }
 
+  // iOS lies about height in more than one way. 100vh is the height with the
+  // browser toolbar hidden, and even 100dvh does not account for the chrome
+  // the Home Assistant companion app puts around its webview - so the bottom
+  // of the shell, where the video element's native controls live, sat below
+  // the fold. window.innerHeight is what is actually visible, so use it and
+  // keep it current; the CSS units stay as the fallback.
+  function sizeDialog(root) {
+    if (!root) return;
+    const height = `${window.innerHeight}px`;
+    root.style.height = height;
+    root.style.maxHeight = height;
+  }
+
+  function watchViewport(root) {
+    const apply = () => sizeDialog(root);
+    apply();
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", apply);
+    // Safari fires neither reliably while its toolbars slide.
+    if (window.visualViewport) window.visualViewport.addEventListener("resize", apply);
+    root.__blinkStopWatching = () => {
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", apply);
+      if (window.visualViewport) window.visualViewport.removeEventListener("resize", apply);
+    };
+  }
+
   function closeDialog() {
     const existing = document.getElementById(DIALOG_ID);
     if (!existing) return;
+    if (typeof existing.__blinkStopWatching === "function") existing.__blinkStopWatching();
     if (typeof existing.close === "function" && existing.open) existing.close();
     const iframe = existing.querySelector("iframe");
     if (iframe) iframe.removeAttribute("src");
@@ -251,6 +285,7 @@
       if (event.target === root) closeDialog();
     });
     document.body.append(root);
+    watchViewport(root);
 
     // showModal() promotes the element into the top layer, which is what
     // actually gets it painted in the iOS app's WKWebView. Fall back to leaving
