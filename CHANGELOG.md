@@ -88,6 +88,11 @@ default HACS listing are gone.
 
 Found by testing it on a real install, and fixed here:
 
+- **The phone's safe areas were white around a live view.** The full-screen
+  shell took the notch and home-indicator insets as padding, and that padding
+  exposed Home Assistant's light-theme card background: below the picture in
+  portrait, and beside and below it in landscape. The player now paints through
+  those insets while the floating controls carry their own safe-area offsets.
 - **The sidebar icon was blank until a hard refresh** — and on the iOS
   companion app there is no way to force one. `add_extra_js_url` puts the icon
   set in `index.html`, which is right for a fresh page load and useless to a

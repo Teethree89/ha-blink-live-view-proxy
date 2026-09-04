@@ -838,6 +838,33 @@ def test_asset_paths_avoid_the_service_worker() -> None:
     check(not stale, f"nothing else still points at the superseded path ({len(stale)})")
 
 
+def test_liveview_safe_areas_do_not_pad_the_player() -> None:
+    """The player must paint behind iOS's notch and home-indicator insets."""
+    print("\nlive-view safe areas belong to controls, not the player shell")
+    source = (
+        ROOT
+        / "custom_components/blink_liveview_proxy/frontend/blink-liveview-dialog.js"
+    ).read_text()
+
+    for edge in ("top", "right", "bottom", "left"):
+        check(
+            f"padding-{edge}: env(safe-area-inset-{edge}" not in source,
+            f"the outer shell has no {edge} safe-area padding",
+        )
+    check(
+        "top: calc(10px + env(safe-area-inset-top, 0px));" in source,
+        "the close button stays below the top safe area",
+    )
+    check(
+        "left: calc(10px + env(safe-area-inset-left, 0px));" in source,
+        "the close button stays clear of a landscape notch",
+    )
+    check(
+        "background: #05070a;" in source,
+        "the shell cannot inherit Home Assistant's white card background",
+    )
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -857,6 +884,7 @@ def main() -> int:
         test_standalone_image,
         test_requirements_are_stated_once_and_true,
         test_asset_paths_avoid_the_service_worker,
+        test_liveview_safe_areas_do_not_pad_the_player,
     ):
         test()
 

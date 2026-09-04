@@ -67,7 +67,10 @@
         box-sizing: border-box;
         overflow: hidden;
         border-radius: 8px;
-        background: var(--card-background-color, #111827);
+        /* The live player is dark in every theme. Keeping its containing block
+           dark too means a transient resize or an unavoidable letterbox never
+           exposes Home Assistant's white light-theme card background. */
+        background: #05070a;
         box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
       }
       /* No header row.
@@ -78,8 +81,8 @@
          A floating button costs nothing and says the same thing. */
       #${DIALOG_ID} .blink-liveview-close {
         position: absolute;
-        top: 10px;
-        left: 10px;
+        top: calc(10px + env(safe-area-inset-top, 0px));
+        left: calc(10px + env(safe-area-inset-left, 0px));
         z-index: 3;
         width: 40px;
         height: 40px;
@@ -176,12 +179,10 @@
           width: 100%;
           height: 100%;
           border-radius: 0;
-          /* The insets the header used to absorb. In landscape the top one is
-             zero, which is exactly where the height was needed. */
-          padding-top: env(safe-area-inset-top, 0px);
-          padding-bottom: env(safe-area-inset-bottom, 0px);
-          padding-left: env(safe-area-inset-left, 0px);
-          padding-right: env(safe-area-inset-right, 0px);
+          /* Fill the viewport through the safe-area edges. Padding the shell
+             itself left Home Assistant's card background visible beside the
+             notch in landscape and below the home indicator in both
+             orientations. Edge controls carry their own safe-area offsets. */
         }
       }
     `;
