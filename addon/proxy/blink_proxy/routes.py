@@ -33,13 +33,21 @@ from .auth_flow import (
     StaleChallengeError,
 )
 from .blink import BlinkStreamBroker, LiveViewHandle, _wait_for_pin
-from .clips import ClipManager, clip_download_url, clip_filename, clip_id, printable_clip
+from .clip_cache import ClipCache
+from .clips import (
+    ClipManager,
+    clip_download_url,
+    clip_filename,
+    clip_id,
+    clip_thumbnail_url,
+    printable_clip,
+)
 from .config import resolve_path
 from .constants import LOGGER_NAME, PROXY_VERSION
 from .hls import HlsManager
 from .liveview_cache import ensure_last_liveview_mp4, find_last_liveview
 from .ptt import liveview_session_key, ptt_handler
-from .util import liveview_filename
+from .util import liveview_filename, parse_blink_time
 
 LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -302,6 +310,9 @@ async def clips_handler(request: web.Request) -> web.Response:
         pages=pages,
         limit=limit,
     )
+    _remember_clips(request.app, clips)
+    cache: ClipCache = request.app["clip_cache"]
+    url_args = {"hours": hours, "pages": pages, "limit": max(limit, 100)}
     return web.json_response(
         {
             "count": len(clips),
@@ -309,70 +320,137 @@ async def clips_handler(request: web.Request) -> web.Response:
             "camera": camera_slug,
             "hours": hours,
             "clips": [
-                printable_clip(
-                    clip,
-                    download_url=clip_download_url(
+                {
+                    **printable_clip(
                         clip,
-                        hours=hours,
-                        pages=pages,
-                        limit=max(limit, 100),
+                        download_url=clip_download_url(clip, **url_args),
+                        thumbnail_url=clip_thumbnail_url(clip, **url_args),
                     ),
-                )
+                    # Already on disk, so Preview starts at once. The viewer
+                    # does nothing with it yet; it is here for the next one.
+                    "cached": cache.cached_thumbnail(clip_id(clip)) is not None,
+                }
                 for clip in clips
             ],
         }
     )
 
-async def clip_download_handler(request: web.Request) -> web.Response:
-    check_authorized(request)
-    clip_key = request.match_info["clip_id"]
+# How long a listing's clips stay resolvable by id without asking Blink for
+# the manifest again. Every thumbnail and download used to re-list, which on
+# local storage is a Sync Module manifest refresh per request - one per row
+# on screen. A stale entry is caught by the download itself failing, and a
+# miss falls back to the listing it always did.
+CLIP_INDEX_TTL_SECONDS = 15 * 60
+CLIP_INDEX_MAX = 2000
+
+def _remember_clips(app: web.Application, clips: list[dict[str, Any]]) -> None:
+    index: dict[str, tuple[float, dict[str, Any]]] = app["clip_index"]
+    now = time.monotonic()
+    for clip in clips:
+        index[clip_id(clip)] = (now + CLIP_INDEX_TTL_SECONDS, clip)
+    if len(index) > CLIP_INDEX_MAX:
+        for key, (expires, _clip) in list(index.items()):
+            if expires <= now:
+                index.pop(key, None)
+        for key in list(index)[: max(0, len(index) - CLIP_INDEX_MAX)]:
+            index.pop(key, None)
+
+async def _find_clip(
+    request: web.Request, clip_key: str
+) -> tuple[ClipManager, dict[str, Any]]:
+    """The clip behind an id: from the index a listing filled, else a fresh listing."""
+    manager = ClipManager(_require_client(request))
+    entry = request.app["clip_index"].get(clip_key)
+    if entry is not None and entry[0] > time.monotonic():
+        return manager, entry[1]
+
     source = request.query.get("source", "local")
     if source not in {"cloud", "local"}:
         raise web.HTTPBadRequest(text="source must be cloud or local\n")
-
-    camera_slug = request.query.get("camera") or None
-    hours = _clamped_float(request.query.get("hours"), 24, 0.1, 24 * 30)
-    pages = _clamped_int(request.query.get("pages"), 3, 1, 10)
-    limit = _clamped_int(request.query.get("limit"), 200, 1, 500)
-
-    manager = ClipManager(_require_client(request))
     clips = await manager.list_clips(
         source=source,
-        camera_slug=camera_slug,
-        hours=hours,
-        pages=pages,
-        limit=limit,
+        camera_slug=request.query.get("camera") or None,
+        hours=_clamped_float(request.query.get("hours"), 24, 0.1, 24 * 30),
+        pages=_clamped_int(request.query.get("pages"), 3, 1, 10),
+        limit=_clamped_int(request.query.get("limit"), 200, 1, 500),
     )
+    _remember_clips(request.app, clips)
     clip = next((item for item in clips if clip_id(item) == clip_key), None)
     if clip is None:
         raise web.HTTPNotFound(text="Clip was not found in the current manifest\n")
+    return manager, clip
 
+def _cached_clip_filename(cache: ClipCache, clip_key: str) -> str:
+    """The download name for a clip served from disk after the index has gone."""
+    meta = cache.metadata(clip_key)
     try:
-        upstream = await manager.open_clip_response(clip)
-    except RuntimeError as err:
-        raise web.HTTPBadGateway(text=f"{err}\n") from err
+        return clip_filename(
+            str(meta["camera_name"]), parse_blink_time(meta["created_at"]), str(meta["source"])
+        )
+    except (KeyError, ValueError, TypeError):
+        return f"{clip_key}.mp4"
 
-    filename = clip_filename(clip["camera_name"], clip["created_at"], clip["source"])
-    headers = {
-        "Cache-Control": "no-store",
-        "Content-Disposition": f'attachment; filename="{filename}"',
-        "X-Accel-Buffering": "no",
-    }
-    content_length = upstream.headers.get("Content-Length")
-    if content_length:
-        headers["Content-Length"] = content_length
+async def clip_download_handler(request: web.Request) -> web.FileResponse:
+    """One clip, from the cache - filled from Blink the first time it is asked for.
 
-    response = web.StreamResponse(status=200, headers=headers)
-    response.content_type = upstream.headers.get("Content-Type", "video/mp4")
-    try:
-        await response.prepare(request)
-        async for chunk in upstream.content.iter_chunked(102400):
-            await response.write(chunk)
-    except (ConnectionResetError, TimeoutError):
-        LOGGER.debug("Browser clip download closed for %s", clip_key)
-    finally:
-        upstream.close()
-    return response
+    A FileResponse rather than a relay of Blink's stream: it answers byte
+    ranges, which is what lets the viewer seek and what Safari needs before
+    it will play an MP4 at all, and the second request for the same clip
+    never touches Blink.
+    """
+    check_authorized(request)
+    clip_key = request.match_info["clip_id"]
+    cache: ClipCache = request.app["clip_cache"]
+
+    path = cache.cached_clip(clip_key)
+    if path is None:
+        manager, clip = await _find_clip(request, clip_key)
+        try:
+            path = await cache.ensure_clip(manager, clip)
+        except RuntimeError as err:
+            raise web.HTTPBadGateway(text=f"{err}\n") from err
+        filename = clip_filename(clip["camera_name"], clip["created_at"], clip["source"])
+    else:
+        filename = _cached_clip_filename(cache, clip_key)
+
+    return web.FileResponse(
+        path,
+        headers={
+            # The id is a hash of the clip's identity, so the bytes behind
+            # it never change; a browser may keep them for the session.
+            "Cache-Control": "private, max-age=86400",
+            "Content-Type": "video/mp4",
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
+
+async def clip_thumbnail_handler(request: web.Request) -> web.FileResponse:
+    """The first frame of one clip as a JPEG, cut once and kept beside the clip."""
+    check_authorized(request)
+    clip_key = request.match_info["clip_id"]
+    cache: ClipCache = request.app["clip_cache"]
+
+    path = cache.cached_thumbnail(clip_key)
+    if path is None:
+        manager, clip = await _find_clip(request, clip_key)
+        config = request.app["config"]
+        try:
+            path = await cache.ensure_thumbnail(
+                manager,
+                clip,
+                ffmpeg=str(config.get("ffmpeg") or "ffmpeg"),
+                loglevel=str(config.get("ffmpeg_loglevel", "warning")),
+            )
+        except RuntimeError as err:
+            raise web.HTTPBadGateway(text=f"{err}\n") from err
+
+    return web.FileResponse(
+        path,
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "Content-Type": "image/jpeg",
+        },
+    )
 
 async def mpegts_handler(request: web.Request) -> web.StreamResponse:
     check_authorized(request)
@@ -606,6 +684,13 @@ async def hls_segment_handler(request: web.Request) -> web.FileResponse:
         raise web.HTTPNotFound()
     return web.FileResponse(path, headers={"Cache-Control": "no-store"})
 
+def clip_cache_dir(config: dict[str, Any], config_base: Path) -> Path:
+    """Where clips are kept: as configured, else beside the live-view cache."""
+    configured = config.get("clip_cache_dir")
+    if configured:
+        return resolve_path(configured, config_base)
+    return resolve_path(config["liveview_cache_dir"], config_base).parent / "clips"
+
 async def make_app(
     config: dict[str, Any], config_base: Path, pin: str | None
 ) -> web.Application:
@@ -627,6 +712,11 @@ async def make_app(
     app["mpegts_cooldowns"] = {}
     app["active_liveviews"] = active_liveviews
     app["mp4_locks"] = {}
+    app["clip_cache"] = ClipCache(
+        clip_cache_dir(config, config_base),
+        int(config.get("clip_cache_max_mb", 512)) * 1024 * 1024,
+    )
+    app["clip_index"] = {}
 
     def activate_client(client) -> None:
         app["client"] = client
@@ -652,6 +742,7 @@ async def make_app(
     app.router.add_get("/cameras", cameras_handler)
     app.router.add_get("/clips", clips_handler)
     app.router.add_get("/clips/{clip_id}.mp4", clip_download_handler)
+    app.router.add_get("/clips/{clip_id}.jpg", clip_thumbnail_handler)
     app.router.add_get("/cameras/{slug}/mpegts", mpegts_handler)
     app.router.add_get("/cameras/{slug}/ptt", ptt_handler)
     app.router.add_get("/cameras/{slug}/last-liveview", last_liveview_info_handler)
@@ -666,6 +757,8 @@ async def make_app(
 
     async def cleanup_context(_app: web.Application):
         cleanup_task = asyncio.create_task(hls_manager.cleanup_loop())
+        # Whatever a previous run left behind, trimmed before the first request.
+        app["clip_cache"].prune()
         await auth_controller.start_startup_login()
         try:
             yield

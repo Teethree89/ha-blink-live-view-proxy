@@ -1,8 +1,8 @@
-name: "Blink Liveview Proxy"
+name: "Blink Live View Proxy"
 description: >-
   Local MPEG-TS live-view proxy and clip archive for Blink cameras.
   Install the matching integration via HACS (or from custom_components/ in this repo).
-version: "0.6.2"
+version: "0.7.0"
 slug: "blink_liveview_proxy"
 init: false
 # armhf and armv7 are deliberately absent: Supervisor deprecated both, and
@@ -37,7 +37,7 @@ schema:
 ports:
   8088/tcp: null
 ports_description:
-  8088/tcp: "Blink Liveview Proxy HTTP API"
+  8088/tcp: "Blink Live View Proxy HTTP API"
 # Permissions, and why each one is here.
 #
 # hassio_api is REQUIRED. While the proxy waits for a 2FA code it has to read

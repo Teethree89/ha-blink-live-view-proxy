@@ -6,7 +6,7 @@ import logging
 
 from typing import Any
 
-from homeassistant.components import panel_custom
+from homeassistant.components import frontend, panel_custom
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
@@ -22,6 +22,7 @@ from .const import (
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
     FRONTEND_RESOURCE_URL,
+    ICONSET_MODULE_URL,
     LEGACY_FRONTEND_RESOURCE_URL,
     PLATFORMS,
 )
@@ -45,12 +46,18 @@ async def _async_register_auth_panel(hass: HomeAssistant) -> None:
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get("_auth_panel_registered"):
         return
+    # The sidebar draws its icon with ha-icon, which hands any prefix it does
+    # not know to window.customIcons. This module registers the "blink" set on
+    # every page load - the same route HACS takes for its own entry - so the
+    # panel carries the one-colour mark from the wordmark. The set is idempotent
+    # and the URL manager is a set, so a reload adds nothing twice.
+    frontend.add_extra_js_url(hass, ICONSET_MODULE_URL)
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=AUTH_PANEL_PATH,
         webcomponent_name="blink-proxy-auth-panel",
-        sidebar_title="Blink Proxy",
-        sidebar_icon="mdi:cctv",
+        sidebar_title="Blink Live View Proxy",
+        sidebar_icon="blink:logo",
         module_url=AUTH_PANEL_MODULE_URL,
         require_admin=True,
         config_panel_domain=DOMAIN,

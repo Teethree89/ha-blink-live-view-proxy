@@ -114,7 +114,7 @@ def test_backend_contract() -> None:
           "an unreadable Lovelace resource list is reported as unknown")
 
     # The brand images live beside manifest.json, not in frontend/, and Home
-    # Assistant only serves them itself from 2026.3.0. The floor is 2024.6.0.
+    # Assistant only serves them itself from 2026.3.0. The floor is 2024.11.0.
     # hass.data["lovelace"] has had three shapes; reading it directly saw only
     # the newest, which is why both callers go through the same accessor.
     check("resource_collection(" in source, "Lovelace is read through the shared accessor")
@@ -129,6 +129,18 @@ def test_backend_contract() -> None:
     check("_hacs_update_facts" in source, "the readout can see HACS's update entity")
     check("release_url" in source,
           "HACS's entity is matched on the repository URL, not a renameable name")
+
+    # The panel is in the sidebar from the first restart after installing,
+    # before any config entry exists. A 503 there was the one thing it showed.
+    check('"configured": False' in source and '"configured": True' in source,
+          "the payload says whether a config entry exists yet")
+    check("except web.HTTPServiceUnavailable:" in source.split("async def _panel_payload")[1].split("PANEL_UPDATE_MESSAGES")[0],
+          "a missing entry is answered, not raised")
+    check('"blink-liveview-icons.js"' in source, "the icon set is on the static allow-list")
+    check("BlinkLiveviewProxyClipThumbnailView" in source, "clip thumbnails are proxied")
+    check('"thumbnail_url"' in source, "and their URLs are rewritten like the download URL")
+    check('range_header := request.headers.get("Range")' in source,
+          "byte ranges reach the proxy, so the clip player can seek and Safari can play")
 
     check("BRAND_ROOT" in source, "the panel serves its own brand images")
     for name in ("logo.png", "dark_logo.png"):
@@ -203,6 +215,19 @@ def test_frontend_contract() -> None:
         "both wordmark variants are used",
     )
     check("_darkTheme()," in panel, "a theme change re-renders the header")
+
+    check("_setupHtml()" in panel and "configured === false" in panel,
+          "before a config entry exists, Overview shows the install paths")
+    check("/config/integrations/dashboard/add?domain=blink_liveview_proxy" in panel,
+          "and offers to start the config flow")
+    for tab in ("_camerasHtml", "_authHtml", "_yamlHtml"):
+        body = panel.split(f"  {tab}() {{")[1].split("\n  }\n")[0]
+        check("_configured()" in body, f"{tab} explains itself before setup rather than erroring")
+
+    init = (COMPONENT / "__init__.py").read_text()
+    check('sidebar_icon="blink:logo"' in init and "add_extra_js_url" in init,
+          "the sidebar entry uses the shipped icon set, loaded on every page")
+    check('sidebar_title="Blink Live View Proxy"' in init, "the sidebar entry carries the product name")
 
 
 def main() -> int:

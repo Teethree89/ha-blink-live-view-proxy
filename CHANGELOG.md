@@ -8,6 +8,78 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.7.0] — 2026-09-04
+
+Release preparation ahead of 1.0: the product gets its proper name, the clip
+viewer gets thumbnails and a layout that holds still, phones get a live view
+that fits the screen, and the three things standing between this and a
+default HACS listing are gone.
+
+- **It is called Blink Live View Proxy now, everywhere you can read it.** The
+  wordmark always said so; the manifest, HACS, the add-on store, the config
+  flow, the sidebar and the docs said "Liveview". Nothing that code depends
+  on moved: the domain is still `blink_liveview_proxy`, every URL and entity
+  id is unchanged, and the health sensor keeps
+  `binary_sensor.blink_liveview_proxy` on a fresh install too — it names its
+  own object id rather than letting the new name derive a second one.
+- **The sidebar entry carries the logo.** A `blink:` icon set ships with the
+  integration and is loaded on every page the way HACS loads its own, so the
+  one-colour mark from the wordmark is what the sidebar draws, and
+  `blink:logo` works anywhere an icon name does. The generated dashboards use
+  it on the proxy pill.
+- **Every string in the config flow, the options flow and the three repair
+  issues rendered as its raw key.** `strings.json` is a build-time file that
+  Home Assistant compiles for core integrations and reads from nowhere at
+  runtime; a custom integration has to ship `translations/en.json`, and this
+  one never had. It does now, and a test keeps the two identical.
+- **The Home Assistant floor is 2024.11.0, which is what it always needed.**
+  The options flow reads `OptionsFlow.config_entry`, a property that appeared
+  in 2024.11. `hacs.json` promised 2024.6.0, so on the four releases between
+  the integration installed cleanly and raised the moment Options opened.
+  A test now holds `hacs.json` and the panel's own floor to one number.
+- **CI no longer ignores the brands check, because it passes.** The icon
+  lives in `brand/` beside the manifest, which is what the check looks for
+  first since Home Assistant 2026.3 stopped taking custom icons in its brands
+  repository. An ignore anywhere disqualifies a HACS default submission, and
+  this was the last one.
+- **Clips have thumbnails.** Each row in the clip viewer shows the clip's
+  first frame, with a spinner until it arrives. The proxy cuts it with ffmpeg
+  from a copy of the clip it now keeps: a Sync Module clip cannot be read in
+  part — blinkpy has the module upload the whole thing to Blink's cloud and
+  polls until it lands — so each clip is fetched exactly once, one at a time,
+  and kept under a 512 MB cap (`clip_cache_dir`, `clip_cache_max_mb`; the
+  add-on and the image use `/data/clips`, a systemd install lands beside its
+  live-view cache). Thumbnails load only for the rows on screen. A proxy
+  older than 0.7.0 lists clips without them and the row shows a placeholder.
+- **Preview and Download no longer go to Blink every time,** and the player
+  can seek: a cached clip is served as a file, which answers byte ranges,
+  and Home Assistant forwards them. That is also what Safari requires before
+  it will play an MP4 at all — on an iPhone, Preview used to do nothing.
+- **The clip viewer holds still.** The page grew with the list, so the
+  preview stretched to the height of sixty rows with the video somewhere in
+  the middle. It is two panes now: the list scrolls on its own, the player
+  is locked to the viewport beside it and centred, and on a phone the video
+  sits on top with the list underneath. Arrow keys move through the list.
+- **Live view fits a phone in portrait.** The dialog was sized in `100vh`,
+  which on a phone is the height with the browser toolbar hidden, so the
+  bottom of the video and its controls sat behind the toolbar until the
+  phone was turned sideways. It uses the visible height now, and keeps the
+  header and controls clear of the notch and the home bar.
+- **Generated dashboards stack on a phone.** Whole-dashboard and view output,
+  from the YAML tab and the generator alike, is a sections view with up to
+  three tiles across on a desktop and one column on a phone; the flat card
+  list before it squeezed a tile and its four buttons into half a phone
+  screen. The buttons are 40px, Home Assistant's own touch size, up from 36.
+- **The panel says what to do before the integration is set up.** It is in
+  the sidebar from the first restart after installing, which is exactly when
+  someone needs the install steps, and a 503 was the one thing it showed.
+  Overview now lays out the three ways to run the proxy, offers to start
+  the config flow, and runs the checks that do not need a proxy.
+
+Two halves again: the thumbnails need proxy 0.7.0. The integration's repair
+notice and the Overview tab say so and offer the update where the install
+supports it.
+
 ## [0.6.2] — 2026-09-03
 
 Four ways the frontend could silently do nothing, and the update button now

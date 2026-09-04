@@ -22,9 +22,16 @@
         position: fixed;
         inset: 0;
         width: 100vw;
+        /* 100vh on a phone is the height with the browser toolbar hidden, so
+           the bottom of the dialog - where the video's controls live - sat
+           behind the toolbar in portrait and only appeared in landscape,
+           where the toolbar collapses. dvh is the height actually visible;
+           the vh line stays for engines without it. */
         height: 100vh;
+        height: 100dvh;
         max-width: 100vw;
         max-height: 100vh;
+        max-height: 100dvh;
         margin: 0;
         border: 0;
         padding: 0;
@@ -48,8 +55,9 @@
       #${DIALOG_ID} .blink-liveview-shell {
         width: min(1120px, calc(100vw - 32px));
         height: min(760px, calc(100vh - 32px));
+        height: min(760px, calc(100dvh - 32px));
         display: grid;
-        grid-template-rows: 56px 1fr;
+        grid-template-rows: auto minmax(0, 1fr);
         overflow: hidden;
         border-radius: 8px;
         background: var(--card-background-color, #111827);
@@ -61,8 +69,15 @@
         align-items: center;
         gap: 8px;
         min-width: 0;
+        min-height: 56px;
         padding: 0 8px;
         background: var(--app-header-background-color, #1f2937);
+      }
+      #${DIALOG_ID} button svg {
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+        vertical-align: middle;
       }
       #${DIALOG_ID} .blink-liveview-title {
         overflow: hidden;
@@ -141,14 +156,25 @@
       @keyframes blinkCameraSpin {
         to { transform: rotate(360deg); }
       }
-      @media (max-width: 720px) {
+      /* A phone in either orientation, or anything short enough that the
+         framed dialog would leave no room for the picture: fill the screen,
+         and keep the header and controls out of the notch and home bar. */
+      @media (max-width: 720px), (max-height: 520px) {
         #${DIALOG_ID} {
-          place-items: stretch;
+          align-items: stretch;
+          justify-content: stretch;
         }
         #${DIALOG_ID} .blink-liveview-shell {
-          width: 100vw;
-          height: 100vh;
+          width: 100%;
+          height: 100%;
           border-radius: 0;
+          box-sizing: border-box;
+          padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+        #${DIALOG_ID} .blink-liveview-header {
+          padding-top: env(safe-area-inset-top, 0px);
+          padding-left: max(8px, env(safe-area-inset-left, 0px));
+          padding-right: max(8px, env(safe-area-inset-right, 0px));
         }
       }
     `;
@@ -192,7 +218,8 @@
     const close = document.createElement("button");
     close.type = "button";
     close.setAttribute("aria-label", "Close");
-    close.textContent = "x";
+    // The MDI "close" glyph, inline so this file stays self-contained.
+    close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>';
     close.addEventListener("click", closeDialog);
 
     const heading = document.createElement("div");
@@ -259,7 +286,7 @@
     const title =
       config.title ||
       (state && state.attributes && state.attributes.friendly_name) ||
-      `Blink Live ${slug}`;
+      `Live view ${slug}`;
     let src = "";
     if (slug && entityId && token) {
       src = `/api/blink_liveview_proxy/cameras/${encodeURIComponent(
@@ -280,7 +307,7 @@
     if (token) params.set("token", token);
     const query = params.toString();
     openFrameDialog({
-      title: config.title || "Blink Local Clips",
+      title: config.title || "Local clips",
       src: `/api/blink_liveview_proxy/clips/viewer${query ? `?${query}` : ""}`
     });
   }

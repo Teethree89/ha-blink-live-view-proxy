@@ -222,8 +222,22 @@ def clip_download_url(
     )
     return f"/clips/{clip_id(clip)}.mp4?{query}"
 
+def clip_thumbnail_url(
+    clip: dict[str, Any],
+    *,
+    hours: float,
+    pages: int,
+    limit: int,
+) -> str:
+    """The first frame of a listed clip, on the same query the download uses."""
+    return clip_download_url(clip, hours=hours, pages=pages, limit=limit).replace(
+        ".mp4?", ".jpg?", 1
+    )
+
 def printable_clip(
-    clip: dict[str, Any], download_url: str | None = None
+    clip: dict[str, Any],
+    download_url: str | None = None,
+    thumbnail_url: str | None = None,
 ) -> dict[str, Any]:
     row = {
         "id": clip_id(clip),
@@ -235,4 +249,6 @@ def printable_clip(
     }
     if download_url:
         row["download_url"] = download_url
+    if thumbnail_url:
+        row["thumbnail_url"] = thumbnail_url
     return row

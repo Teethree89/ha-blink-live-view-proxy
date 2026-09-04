@@ -153,6 +153,24 @@ def test_manifest() -> None:
     check("http" in data.get("dependencies", []), "declares the http dependency")
 
 
+def test_translations_shipped() -> None:
+    """strings.json is a build-time file. Custom integrations must ship the
+    translation Home Assistant actually reads, translations/en.json, or every
+    label in the config flow, the options flow and the repair issues renders
+    as its raw key. Nothing in Home Assistant or HACS reports that."""
+    print("\ntranslations are shipped, and match the source strings")
+    component = ROOT / "custom_components/blink_liveview_proxy"
+    source = json.loads((component / "strings.json").read_text())
+    shipped_path = component / "translations/en.json"
+    check(shipped_path.exists(), "translations/en.json exists")
+    if shipped_path.exists():
+        shipped = json.loads(shipped_path.read_text())
+        check(shipped == source, "translations/en.json says exactly what strings.json says")
+    icons = component / "frontend/blink-liveview-icons.js"
+    check(icons.exists() and "customIcons" in icons.read_text(),
+          "the blink: icon set is shipped, so the sidebar entry has its mark")
+
+
 def test_generator_shapes() -> None:
     """--demo needs no proxy, so the three shapes are checkable here."""
     print("\ngenerate-dashboard.py --demo")
@@ -606,7 +624,7 @@ def test_standalone_image() -> None:
         check("token_exported=yes" in out, "a generated token reaches the proxy process")
         check(config["cameras"] == {} and config["host"] == "0.0.0.0", "the container config discovers cameras")
         check(
-            all(str(data) in config[key] for key in ("auth_file", "hls_dir", "liveview_cache_dir")),
+            all(str(data) in config[key] for key in ("auth_file", "hls_dir", "liveview_cache_dir", "clip_cache_dir")),
             "all state is written inside the volume, not the image layer",
         )
         check(oct(token.stat().st_mode)[-3:] == "600", "the generated token file is owner-only")
@@ -647,6 +665,21 @@ def test_requirements_are_stated_once_and_true() -> None:
     check(
         hacs["homeassistant"].rsplit(".", 1)[0] in readme or hacs["homeassistant"] in readme,
         f"the README names the Home Assistant version HACS enforces ({hacs['homeassistant']})",
+    )
+    # The panel reports the same floor; two numbers here means one of them lies.
+    declared_floor = re.search(
+        r'MINIMUM_HA_VERSION = "([^"]+)"',
+        (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text(),
+    )
+    check(
+        declared_floor is not None and declared_floor.group(1) == hacs["homeassistant"],
+        f"const.py and hacs.json agree on the floor ({hacs['homeassistant']})",
+    )
+    # OptionsFlow.config_entry, which the options flow reads, only exists from
+    # 2024.11. A lower floor installs fine and breaks the moment Options opens.
+    check(
+        tuple(int(part) for part in hacs["homeassistant"].split(".")) >= (2024, 11, 0),
+        "the floor is at least 2024.11.0, where OptionsFlow.config_entry appeared",
     )
 
     # blinkpy is pinned exactly, on purpose: 0.25.5 reads Blink's 2FA challenge
@@ -761,6 +794,7 @@ def main() -> int:
         test_button_card_styles,
         test_hacs_json,
         test_manifest,
+        test_translations_shipped,
         test_generator_shapes,
         test_proxy_copies_match,
         test_install_token,

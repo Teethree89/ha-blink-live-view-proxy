@@ -41,7 +41,7 @@ def facts(**overrides) -> dict:
     """A fully healthy install, so each test can break exactly one thing."""
     base = {
         "ha_version": "2026.9.0",
-        "minimum_ha": "2024.6.0",
+        "minimum_ha": "2024.11.0",
         "required_blinkpy": "0.25.9",
         "environment_proxy_version": "0.6.1",
         "proxy_version": "0.6.1",
@@ -123,9 +123,9 @@ def test_all_green() -> None:
 
 def test_home_assistant() -> None:
     print("\nHome Assistant version")
-    check(rows(ha_version="2024.6.0")["home_assistant"]["state"] == OK,
+    check(rows(ha_version="2024.11.0")["home_assistant"]["state"] == OK,
           "the floor itself passes")
-    check(rows(ha_version="2024.5.5")["home_assistant"]["state"] == MISSING,
+    check(rows(ha_version="2024.10.4")["home_assistant"]["state"] == MISSING,
           "one release below the floor fails")
     check(rows(ha_version="2026.10.0b3")["home_assistant"]["state"] == UNKNOWN,
           "a beta is not comparable, and is not called a failure")

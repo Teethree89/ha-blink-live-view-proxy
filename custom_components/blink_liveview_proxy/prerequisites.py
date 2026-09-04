@@ -395,7 +395,7 @@ def _integration_update(facts: dict[str, Any]) -> dict[str, Any]:
         "Fixes and new checks in this panel",
         False,
         [
-            "HACS → Integrations → Blink Liveview Proxy → Update, then "
+            "HACS → Integrations → Blink Live View Proxy → Update, then "
             "restart Home Assistant.",
             "The two halves move separately: HACS updates the integration, and "
             "nothing updates the proxy. Use the Update proxy action above "

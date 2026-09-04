@@ -64,7 +64,7 @@ _FAILURES: dict[str, dict[str, str]] = {
             "The proxy rejected this integration's token. Update it in the "
             "integration's options, or accept the reauthentication prompt."
         ),
-        "remedy": "Settings -> Devices & services -> Blink Liveview Proxy -> Configure",
+        "remedy": "Settings -> Devices & services -> Blink Live View Proxy -> Configure",
     },
     UNKNOWN: {
         "message": (

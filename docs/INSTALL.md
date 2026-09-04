@@ -36,7 +36,7 @@ The add-on is the whole proxy. No Linux setup, no Python, no separate host.
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
-2. Install **Blink Liveview Proxy** from the store.
+2. Install **Blink Live View Proxy** from the store.
 3. Open the add-on **Configuration** tab. Fill in `blink_username` and
    `blink_password`. Leave `blink_2fa_code` and `proxy_api_token` empty: the
    add-on generates a token on first start, keeps it across updates, and shares
@@ -331,7 +331,7 @@ For Docker-based HA, copy into the mounted config directory then restart the con
 After restarting:
 
 ```text
-Settings → Devices & services → Add integration → Blink Liveview Proxy
+Settings → Devices & services → Add integration → Blink Live View Proxy
 ```
 
 The URL depends on where the proxy runs:
@@ -346,7 +346,7 @@ Paste the proxy API token in the token field. Add-on installs have it filled in
 already; the other paths printed where to read it.
 
 The integration can be added while a new proxy is waiting for Blink login as
-long as the proxy API token is configured. It adds an admin-only **Blink
+long as the proxy API token is configured. It adds an admin-only **Blink Live View
 Proxy → Authentication** sidebar tab — that panel is the only browser entry point,
 including for a systemd install: the proxy itself never serves a login page.
 Home Assistant must be able to reach the proxy URL you entered, so a proxy bound

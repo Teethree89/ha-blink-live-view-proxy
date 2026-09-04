@@ -133,7 +133,7 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors["base"] = "unknown"
                 else:
                     return self.async_create_entry(
-                        title="Blink Liveview Proxy",
+                        title="Blink Live View Proxy",
                         data=data,
                     )
 

@@ -93,7 +93,7 @@ PIN before a login has started — Blink has not issued one yet.
 
 ### Browser (recommended)
 
-The custom integration adds an admin-only **Blink Proxy** panel to the
+The custom integration adds an admin-only **Blink Live View Proxy** panel to the
 Home Assistant sidebar. It needs the proxy API token set on both sides, which
 both install paths handle: `scripts/install-proxy.sh` writes one to the
 service's environment file, and the add-on generates one and shares it with the

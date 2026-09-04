@@ -47,7 +47,7 @@ LOGGER = logging.getLogger(__name__)
 STATIC_ROOT = Path(__file__).parent / "frontend"
 # The wordmarks and icon live in brand/, beside manifest.json, where Home
 # Assistant 2026.3.0 and newer serve them itself at /api/brands. This project
-# still supports 2024.6.0, where that route does not exist, so the panel gets
+# still supports 2024.11.0, where that route does not exist, so the panel gets
 # them from here instead and looks the same on every supported core.
 BRAND_ROOT = Path(__file__).parent / "brand"
 PLAYER_LIBRARY_URL = f"{ASSET_URL_BASE}/mpegts.min.js"
@@ -76,6 +76,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxySnapshotRefreshView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipsView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipDownloadView(hass))
+    hass.http.register_view(BlinkLiveviewProxyClipThumbnailView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipsViewerView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthStatusView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthActionView(hass))
@@ -100,6 +101,7 @@ class BlinkLiveviewProxyAssetView(HomeAssistantView):
     _content_types: ClassVar[dict[str, str]] = {
         "blink-liveview-dialog.js": "application/javascript",
         "blink-proxy-auth-panel.js": "application/javascript",
+        "blink-liveview-icons.js": "application/javascript",
         "mpegts.min.js": "application/javascript",
         "logo.png": "image/png",
         "dark_logo.png": "image/png",
@@ -337,12 +339,13 @@ async def _open_proxy_response(
     client: BlinkLiveviewProxyClient,
     path: str,
     query: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> ClientResponse:
     """Open a streaming response from the local proxy."""
     try:
         response = await client._session.get(  # noqa: SLF001
             client.proxy_url(path, query),
-            headers=client.auth_headers(),
+            headers={**client.auth_headers(), **(headers or {})},
             timeout=ClientTimeout(connect=15, sock_connect=15, sock_read=75, total=None),
         )
     except ClientError as err:
@@ -379,13 +382,25 @@ async def _proxy_stream(
     query: dict[str, str] | None = None,
     *,
     download_filename: str | None = None,
+    cache_control: str = "no-store",
 ) -> web.StreamResponse:
-    """Stream bytes from the local proxy to the browser."""
-    upstream = await _open_proxy_response(_client(hass), path, query)
+    """Stream bytes from the local proxy to the browser.
+
+    A Range header is forwarded and a 206 comes back as a 206. The proxy serves
+    cached clips as files, which answer ranges, and that is what lets the clip
+    player seek - and what Safari requires before it will play an MP4 at all.
+    """
+    forward: dict[str, str] = {}
+    if range_header := request.headers.get("Range"):
+        forward["Range"] = range_header
+    upstream = await _open_proxy_response(_client(hass), path, query, forward or None)
     headers = {
-        "Cache-Control": "no-store",
+        "Cache-Control": cache_control,
         "X-Accel-Buffering": "no",
     }
+    for name in ("Content-Range", "Content-Length", "Accept-Ranges"):
+        if name in upstream.headers:
+            headers[name] = upstream.headers[name]
     if download_filename:
         headers["Content-Disposition"] = (
             f'attachment; filename="{download_filename}"'
@@ -395,7 +410,7 @@ async def _proxy_stream(
         if upstream_disposition:
             headers["Content-Disposition"] = upstream_disposition
     response = web.StreamResponse(
-        status=200,
+        status=upstream.status if upstream.status in (200, 206) else 200,
         headers=headers,
     )
     response.content_type = content_type
@@ -485,6 +500,7 @@ video.ready {{
   gap:14px;
   justify-items:center;
   max-width:min(520px,calc(100vw - 32px));
+  padding-bottom:env(safe-area-inset-bottom, 0px);
 }}
 .spinner {{
   width:58px;
@@ -515,8 +531,8 @@ video.ready {{
 }}
 .live-actions {{
   position:absolute;
-  top:16px;
-  right:16px;
+  top:calc(16px + env(safe-area-inset-top, 0px));
+  right:calc(16px + env(safe-area-inset-right, 0px));
   z-index:4;
   display:flex;
   gap:10px;
@@ -1465,24 +1481,35 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
 def _rewrite_clip_download_urls(
     payload: dict[str, Any], access_token: str = ""
 ) -> dict[str, Any]:
-    """Rewrite proxy-relative clip URLs into authenticated HA API URLs."""
+    """Rewrite proxy-relative clip URLs into authenticated HA API URLs.
+
+    Both the clip and, from proxy 0.7.0, its thumbnail. An older proxy sends
+    no thumbnail_url and the viewer shows a placeholder for that row.
+    """
     for clip in payload.get("clips", []):
         if not isinstance(clip, dict):
             continue
-        download_url = str(clip.get("download_url") or "")
-        if download_url.startswith("/clips/"):
-            clip["download_url"] = f"/api/blink_liveview_proxy{download_url}"
-        if access_token and clip.get("download_url"):
-            separator = "&" if "?" in str(clip["download_url"]) else "?"
-            clip["download_url"] = (
-                f"{clip['download_url']}{separator}token="
-                f"{quote(access_token, safe='')}"
-            )
+        for key in ("download_url", "thumbnail_url"):
+            url = str(clip.get(key) or "")
+            if not url:
+                continue
+            if url.startswith("/clips/"):
+                url = f"/api/blink_liveview_proxy{url}"
+            if access_token:
+                separator = "&" if "?" in url else "?"
+                url = f"{url}{separator}token={quote(access_token, safe='')}"
+            clip[key] = url
     return payload
 
 
 def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
-    """Return the local Sync Module clip viewer page."""
+    """Return the local Sync Module clip viewer page.
+
+    Two panes that scroll independently: the list on its own, and the
+    player locked to the viewport beside it. A plain string, not an
+    f-string, because the CSS is full of braces; values go in by
+    .replace(), and a test checks every placeholder is substituted.
+    """
     camera_json = json.dumps(camera_slug or "")
     token_json = json.dumps(access_token)
     html_text = """<!doctype html>
@@ -1490,145 +1517,78 @@ def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Blink Local Clips</title>
+<title>Local clips</title>
 <link rel="icon" href="__ASSET_BASE__/icon.png">
 <style>
-html,body {
-  margin:0;
-  min-height:100%;
-  background:#05070a;
-  color:#f8fafc;
-  font-family:Arial,Helvetica,sans-serif;
-}
-body {
-  display:grid;
-  grid-template-rows:auto auto 1fr;
-}
-header {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  min-height:56px;
-  padding:0 16px;
-  background:#111827;
-  border-bottom:1px solid rgba(148,163,184,.2);
-}
-h1 {
-  margin:0;
-  font-size:18px;
-  line-height:1.2;
-}
-.controls {
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  align-items:center;
-  padding:12px 16px;
-  background:#0b1018;
-  border-bottom:1px solid rgba(148,163,184,.16);
-}
-label {
-  display:grid;
-  gap:4px;
-  color:#cbd5e1;
-  font-size:12px;
-  font-weight:700;
-}
-select,button {
-  min-height:36px;
-  border:1px solid rgba(148,163,184,.28);
-  border-radius:6px;
-  background:#111827;
-  color:#f8fafc;
-  font:inherit;
-}
-select {
-  min-width:138px;
-  padding:0 10px;
-}
-button,a.button {
-  display:inline-grid;
-  place-items:center;
-  min-width:82px;
-  padding:0 12px;
-  text-decoration:none;
-  font-weight:800;
-  cursor:pointer;
-}
-button.primary {
-  border-color:#0284c7;
-  background:#0284c7;
-}
-main {
-  display:grid;
-  grid-template-columns:minmax(280px,420px) 1fr;
-  min-height:0;
-}
-.list {
-  overflow:auto;
-  border-right:1px solid rgba(148,163,184,.16);
-}
-.empty,.loading {
-  padding:28px 18px;
-  color:#cbd5e1;
-}
-.clip {
-  display:grid;
-  gap:8px;
-  padding:14px 16px;
-  border-bottom:1px solid rgba(148,163,184,.14);
-}
-.clip strong {
-  font-size:15px;
-}
-.meta {
-  color:#cbd5e1;
-  font-size:13px;
-}
-.row-actions {
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-}
-.preview {
-  display:grid;
-  grid-template-rows:1fr auto;
-  min-width:0;
-  min-height:0;
-  background:#020617;
-}
-video {
-  width:100%;
-  height:100%;
-  min-height:260px;
-  object-fit:contain;
-  background:#020617;
-}
-.preview-title {
-  padding:12px 16px;
-  color:#cbd5e1;
-  background:#0b1018;
-  border-top:1px solid rgba(148,163,184,.16);
-}
-@media (max-width: 780px) {
-  main {
-    grid-template-columns:1fr;
-  }
-  .list {
-    max-height:42vh;
-    border-right:0;
-    border-bottom:1px solid rgba(148,163,184,.16);
-  }
+:root{color-scheme:dark;--bg:#05070a;--panel:#0b1018;--card:#111827;--line:rgba(148,163,184,.16);--text:#f8fafc;--muted:#cbd5e1;--dim:#94a3b8;--accent:#0284c7;--accent-2:#38bdf8}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+/* The page is locked to the viewport and the list scrolls on its own. It used
+   to grow with the list, so the preview stretched to the height of sixty rows
+   and the video sat somewhere in the middle of it. */
+body{height:100vh;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+.toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.toolbar h1{display:none;margin:0;font-size:17px;align-self:center}
+body.standalone .toolbar h1{display:block}
+label{display:grid;gap:4px;color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+select,button,a.button{min-height:34px;border:1px solid rgba(148,163,184,.28);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:14px}
+select{min-width:128px;padding:0 10px}
+button,a.button{display:inline-grid;place-items:center;padding:0 12px;font-weight:700;cursor:pointer;text-decoration:none}
+button.primary{border-color:var(--accent);background:var(--accent)}
+button:disabled{opacity:.6;cursor:default}
+.summary{margin-left:auto;align-self:center;color:var(--dim);font-size:13px}
+main{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);min-height:0}
+.list{overflow-y:auto;overscroll-behavior:contain;border-right:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.empty,.loading{padding:28px 18px;color:var(--muted);line-height:1.5}
+.clip{display:grid;grid-template-columns:132px minmax(0,1fr);gap:12px;align-items:center;width:100%;margin:0;padding:10px 12px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.clip:hover,.clip:focus-visible{background:rgba(148,163,184,.08);outline:none}
+.clip.active{background:rgba(2,132,199,.16);box-shadow:inset 3px 0 0 var(--accent-2)}
+.thumb{position:relative;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#0b1018}
+.thumb img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s ease}
+.thumb.loaded img{opacity:1}
+.thumb .spinner{position:absolute;inset:0;display:grid;place-items:center}
+.thumb .spinner::before{content:"";width:22px;height:22px;border-radius:999px;border:3px solid rgba(226,232,240,.22);border-top-color:var(--accent-2);animation:spin .9s linear infinite}
+.thumb.loaded .spinner,.thumb.failed .spinner,.thumb.none .spinner{display:none}
+.thumb .fallback{position:absolute;inset:0;display:none;place-items:center;color:var(--dim)}
+.thumb.failed .fallback,.thumb.none .fallback{display:grid}
+.thumb svg{width:28px;height:28px;fill:currentColor}
+.thumb .play{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity .15s ease;background:rgba(2,6,23,.35)}
+.thumb .play svg{width:34px;height:34px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.6))}
+.clip:hover .thumb.loaded .play,.clip:focus-visible .thumb.loaded .play,.clip.active .thumb.loaded .play{opacity:1}
+.text{min-width:0;display:grid;gap:3px}
+.text strong{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{color:var(--muted);font-size:13px}
+.stage{display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0;gap:12px;padding:16px;background:#020617}
+/* The video fills whatever the stage gives it and letterboxes inside, so it
+   is centred whether the row is tall or wide. No fixed frame: a box sized by
+   aspect-ratio cannot shrink on both axes at once. */
+.frame{position:relative;min-height:0;display:grid;place-items:center;border-radius:10px;overflow:hidden;background:#000}
+video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;background:#000}
+.placeholder{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:10px;padding:24px;color:var(--dim);text-align:center;line-height:1.5}
+.placeholder svg{width:52px;height:52px;fill:currentColor;opacity:.6}
+.frame.playing .placeholder{display:none}
+.now{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;min-height:34px}
+.now strong{font-size:15px}
+.now .meta{flex:1 1 auto}
+.now[hidden]{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.thumb .spinner::before{animation:none}}
+@media (max-width:780px){
+  /* Phone: video first at its natural height, the list scrolls underneath. */
+  main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .stage{padding:10px 10px 8px;gap:8px}
+  .frame{aspect-ratio:16/9}
+  video{height:100%}
+  .list{border-right:0;border-top:1px solid var(--line)}
+  .clip{grid-template-columns:104px minmax(0,1fr)}
+  .toolbar{gap:8px 10px}
+  select{min-width:104px}
 }
 </style>
 </head>
 <body>
-<header>
-  <h1>Blink Local Clips</h1>
-  <span id="summary" class="meta"></span>
-</header>
-<section class="controls">
+<section class="toolbar">
+  <h1>Local clips</h1>
   <label>Window
     <select id="hours">
       <option value="24">24 hours</option>
@@ -1642,7 +1602,7 @@ video {
       <option value="">All cameras</option>
     </select>
   </label>
-  <label>Limit
+  <label>Show
     <select id="limit">
       <option value="30">30 clips</option>
       <option value="60" selected>60 clips</option>
@@ -1650,21 +1610,36 @@ video {
     </select>
   </label>
   <button id="refresh" class="primary" type="button">Refresh</button>
+  <span id="summary" class="summary"></span>
 </section>
 <main>
-  <section id="list" class="list">
-    <div class="loading">Loading local Sync Module clips...</div>
+  <section class="stage">
+    <div id="frame" class="frame">
+      <video id="video" controls playsinline preload="metadata"></video>
+      <div class="placeholder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z"/></svg>
+        <span>Select a clip to play it here.</span>
+      </div>
+    </div>
+    <div id="now" class="now" hidden>
+      <strong id="nowTitle"></strong>
+      <span id="nowMeta" class="meta"></span>
+      <a id="nowDownload" class="button" href="#" download>Download</a>
+    </div>
   </section>
-  <section class="preview">
-    <video id="video" controls playsinline></video>
-    <div id="previewTitle" class="preview-title">Select a clip to preview it here.</div>
+  <section id="list" class="list" role="list" aria-label="Clips">
+    <div class="loading">Loading local Sync Module clips…</div>
   </section>
 </main>
 <script>
 const list = document.getElementById("list");
 const video = document.getElementById("video");
+const frame = document.getElementById("frame");
 const summary = document.getElementById("summary");
-const previewTitle = document.getElementById("previewTitle");
+const now = document.getElementById("now");
+const nowTitle = document.getElementById("nowTitle");
+const nowMeta = document.getElementById("nowMeta");
+const nowDownload = document.getElementById("nowDownload");
 const hours = document.getElementById("hours");
 const limit = document.getElementById("limit");
 const camera = document.getElementById("camera");
@@ -1672,7 +1647,13 @@ const refresh = document.getElementById("refresh");
 const initial = new URLSearchParams(window.location.search);
 const fixedCamera = __CAMERA_JSON__;
 const accessToken = __TOKEN_JSON__;
+const FILM_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
 let clips = [];
+let activeId = "";
+
+// Opened outside the dialog there is no header naming the page, so show one.
+if (window.self === window.top) document.body.classList.add("standalone");
 
 if (fixedCamera || initial.get("camera")) {
   const slug = fixedCamera || initial.get("camera");
@@ -1681,13 +1662,25 @@ if (fixedCamera || initial.get("camera")) {
   camera.disabled = Boolean(fixedCamera);
 }
 
+// Thumbnails are cut on the proxy from a clip it has to fetch from Blink
+// first, one at a time. Only ask for the rows that are on screen, so the
+// first few appear in seconds instead of the whole list queueing behind
+// clips nobody has scrolled to.
+const visible = "IntersectionObserver" in window
+  ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const image = entry.target;
+        visible.unobserve(image);
+        image.src = image.dataset.src;
+      }
+    }, { root: list, rootMargin: "240px 0px" })
+  : null;
+
 function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value || "";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function formatSize(value) {
@@ -1705,89 +1698,133 @@ function updateCameraOptions() {
   const selected = camera.value;
   const seen = new Map();
   for (const clip of clips) {
-    if (!clip.slug) continue;
-    seen.set(clip.slug, optionLabel(clip));
+    if (clip.slug) seen.set(clip.slug, optionLabel(clip));
   }
   camera.replaceChildren(new Option("All cameras", ""));
   for (const [slug, label] of [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))) {
     camera.append(new Option(label, slug));
   }
-  if (selected && seen.has(selected)) {
-    camera.value = selected;
+  if (selected && seen.has(selected)) camera.value = selected;
+}
+
+function thumbnail(clip) {
+  const box = document.createElement("div");
+  box.className = "thumb";
+  const fallback = document.createElement("div");
+  fallback.className = "fallback";
+  fallback.innerHTML = FILM_ICON;
+  box.append(fallback);
+  if (!clip.thumbnail_url) {
+    // An older proxy lists clips without thumbnails. Say so quietly.
+    box.classList.add("none");
+    return box;
   }
+  const spinner = document.createElement("div");
+  spinner.className = "spinner";
+  spinner.setAttribute("aria-label", "Loading thumbnail");
+  const image = document.createElement("img");
+  image.alt = "";
+  image.decoding = "async";
+  image.dataset.src = clip.thumbnail_url;
+  image.addEventListener("load", () => box.classList.add("loaded"));
+  image.addEventListener("error", () => box.classList.add("failed"));
+  const play = document.createElement("div");
+  play.className = "play";
+  play.innerHTML = PLAY_ICON;
+  box.append(spinner, image, play);
+  if (visible) visible.observe(image);
+  else image.src = clip.thumbnail_url;
+  return box;
+}
+
+function play(clip) {
+  activeId = clip.id;
+  for (const row of list.querySelectorAll(".clip")) {
+    row.classList.toggle("active", row.dataset.id === clip.id);
+  }
+  frame.classList.add("playing");
+  video.src = clip.download_url;
+  video.load();
+  video.play().catch(() => {});
+  nowTitle.textContent = optionLabel(clip);
+  const size = formatSize(clip.size);
+  nowMeta.textContent = `${formatTime(clip.created_at)}${size ? ` · ${size}` : ""}`;
+  nowDownload.href = clip.download_url;
+  now.hidden = false;
 }
 
 function render() {
   const selected = fixedCamera || camera.value;
-  const visible = selected ? clips.filter((clip) => clip.slug === selected) : clips;
-  summary.textContent = visible.length ? `${visible.length} local clip${visible.length === 1 ? "" : "s"}` : "";
+  const shown = selected ? clips.filter((clip) => clip.slug === selected) : clips;
+  summary.textContent = shown.length ? `${shown.length} clip${shown.length === 1 ? "" : "s"}` : "";
   list.replaceChildren();
-  if (!visible.length) {
+  if (!shown.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No local Sync Module clips found for this window.";
+    empty.textContent = "No local Sync Module clips in this window. Try a longer one, or check that the Sync Module has local storage.";
     list.append(empty);
     return;
   }
-  for (const clip of visible) {
-    const row = document.createElement("article");
-    row.className = "clip";
+  for (const clip of shown) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `clip${clip.id === activeId ? " active" : ""}`;
+    row.dataset.id = clip.id;
+    row.setAttribute("role", "listitem");
+    row.setAttribute("aria-label", `${optionLabel(clip)}, ${formatTime(clip.created_at)}`);
+    const text = document.createElement("div");
+    text.className = "text";
     const title = document.createElement("strong");
     title.textContent = optionLabel(clip);
     const meta = document.createElement("div");
     meta.className = "meta";
     const size = formatSize(clip.size);
-    meta.textContent = `${formatTime(clip.created_at)}${size ? ` - ${size}` : ""}`;
-    const actions = document.createElement("div");
-    actions.className = "row-actions";
-    const preview = document.createElement("button");
-    preview.type = "button";
-    preview.textContent = "Preview";
-    preview.addEventListener("click", () => {
-      video.src = clip.download_url;
-      video.load();
-      video.play().catch(() => {});
-      previewTitle.textContent = `${optionLabel(clip)} - ${formatTime(clip.created_at)}`;
-    });
-    const download = document.createElement("a");
-    download.className = "button";
-    download.href = clip.download_url;
-    download.textContent = "Download";
-    actions.append(preview, download);
-    row.append(title, meta, actions);
+    meta.textContent = `${formatTime(clip.created_at)}${size ? ` · ${size}` : ""}`;
+    text.append(title, meta);
+    row.append(thumbnail(clip), text);
+    row.addEventListener("click", () => play(clip));
     list.append(row);
   }
 }
 
 async function loadClips() {
   refresh.disabled = true;
-  list.innerHTML = '<div class="loading">Loading local Sync Module clips...</div>';
-  const params = new URLSearchParams({
-    hours: hours.value,
-    limit: limit.value
-  });
-  if (fixedCamera || camera.value) {
-    params.set("camera", fixedCamera || camera.value);
-  }
-  if (accessToken) {
-    params.set("token", accessToken);
-  }
-  const response = await fetch(`/api/blink_liveview_proxy/clips?${params}`, {
-    cache: "no-store",
-    credentials: "same-origin"
-  });
-  if (!response.ok) {
-    list.innerHTML = '<div class="empty">Could not load local clips.</div>';
+  list.innerHTML = '<div class="loading">Loading local Sync Module clips…</div>';
+  const params = new URLSearchParams({ hours: hours.value, limit: limit.value });
+  if (fixedCamera || camera.value) params.set("camera", fixedCamera || camera.value);
+  if (accessToken) params.set("token", accessToken);
+  try {
+    const response = await fetch(`/api/blink_liveview_proxy/clips?${params}`, {
+      cache: "no-store",
+      credentials: "same-origin"
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    clips = Array.isArray(data.clips) ? data.clips : [];
+  } catch (err) {
+    list.innerHTML = '<div class="empty">Could not load local clips. Check that the proxy is running and signed in to Blink, then refresh.</div>';
     summary.textContent = "";
     refresh.disabled = false;
     return;
   }
-  const data = await response.json();
-  clips = Array.isArray(data.clips) ? data.clips : [];
   updateCameraOptions();
   render();
   refresh.disabled = false;
 }
+
+// Arrow keys move through the list from wherever focus is; Enter/Space on a
+// row already plays it, because rows are buttons.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  const rows = [...list.querySelectorAll(".clip")];
+  if (!rows.length) return;
+  const index = rows.findIndex((row) => row.dataset.id === activeId);
+  const next = rows[Math.min(rows.length - 1, Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)))];
+  if (!next) return;
+  event.preventDefault();
+  next.focus();
+  next.click();
+});
 
 refresh.addEventListener("click", loadClips);
 hours.addEventListener("change", loadClips);
@@ -1883,6 +1920,47 @@ class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
             f"/clips/{clip_id}.mp4",
             "video/mp4",
             query,
+            cache_control="private, max-age=86400",
+        )
+
+
+class BlinkLiveviewProxyClipThumbnailView(HomeAssistantView):
+    """Proxy one clip's first frame. The proxy cuts and keeps it.
+
+    Same authorization as the clip itself. A proxy older than 0.7.0 has no
+    such route and answers 404, which the viewer turns into a placeholder.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/clips/{clip_id}.jpg"
+    name = "api:blink_liveview_proxy:clip_thumbnail"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request: web.Request, clip_id: str) -> web.StreamResponse:
+        """Return one clip thumbnail."""
+        camera_slug = request.query.get("camera") or None
+        if camera_slug:
+            _camera(self.hass, camera_slug)
+            _authorize_browser_request(self.hass, request, camera_slug)
+        elif not request.get(KEY_AUTHENTICATED, False):
+            raise web.HTTPForbidden(text="Missing camera token\n")
+
+        allowed = {"camera", "hours", "pages", "limit"}
+        query = {
+            key: value
+            for key, value in request.query.items()
+            if key in allowed
+        }
+        query["source"] = "local"
+        return await _proxy_stream(
+            self.hass,
+            request,
+            f"/clips/{clip_id}.jpg",
+            "image/jpeg",
+            query,
+            cache_control="private, max-age=86400",
         )
 
 
@@ -2174,23 +2252,55 @@ async def _prerequisite_facts(
 
 
 async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
-    """Build the admin panel's redacted, read-only snapshot."""
+    """Build the admin panel's redacted, read-only snapshot.
+
+    Answers before a config entry exists too. The panel is registered at
+    integration setup so that it is there on the first restart after
+    installing - exactly when someone most needs the install steps - and a
+    503 at that moment was the one thing it showed. Without an entry every
+    proxy-side check reads "not checked", the Home Assistant-side ones are
+    real, and `configured` tells the panel which page to draw.
+    """
     from homeassistant.loader import async_get_integration
 
-    entry_id, runtime = _runtime_entry(hass)
+    integration = await async_get_integration(hass, DOMAIN)
+    own_version = str(integration.version or "")
+
+    try:
+        entry_id, runtime = _runtime_entry(hass)
+    except web.HTTPServiceUnavailable:
+        checks = prerequisites.build(
+            await _prerequisite_facts(hass, {}, None, own_version)
+        )
+        return {
+            "configured": False,
+            "entry_id": None,
+            "title": "Blink Live View Proxy",
+            "base_url": "",
+            "health": {},
+            "status": {},
+            "versions": {"integration": own_version, "proxy": "unknown", "behind": False},
+            "update": {"available": False, "blocker": None, "method": None},
+            "environment": {},
+            "prerequisites": {
+                "checks": checks,
+                "summary": prerequisites.summarize(checks),
+            },
+            "cameras": [],
+        }
+
     coordinator = runtime["coordinator"]
     data = coordinator.data or {}
     status = data.get("status") if isinstance(data.get("status"), dict) else {}
-    integration = await async_get_integration(hass, DOMAIN)
-    own_version = str(integration.version or "")
     proxy_version = infer_version(status)
     entry = hass.config_entries.async_get_entry(entry_id)
     checks = prerequisites.build(
         await _prerequisite_facts(hass, status, proxy_version, own_version)
     )
     return {
+        "configured": True,
         "entry_id": entry_id,
-        "title": entry.title if entry else "Blink Liveview Proxy",
+        "title": entry.title if entry else "Blink Live View Proxy",
         "base_url": str(entry.data.get(CONF_BASE_URL, "")) if entry else "",
         "health": data.get("health") or {},
         "status": status,
@@ -2216,7 +2326,7 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
 PANEL_UPDATE_MESSAGES = {
     "already_running": "An update is already running. Check again in a few minutes.",
     "entry_gone": "The integration entry is no longer loaded.",
-    "no_addon": "Supervisor could not find the Blink Liveview Proxy add-on.",
+    "no_addon": "Supervisor could not find the Blink Live View Proxy add-on.",
     "not_supported": "This proxy installation cannot update itself.",
     "update_failed": "The update could not be started. Check the Home Assistant and proxy logs.",
 }

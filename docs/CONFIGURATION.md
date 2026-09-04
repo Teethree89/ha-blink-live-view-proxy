@@ -17,6 +17,8 @@ Important fields:
   "auth_file": "/var/lib/blink-liveview-proxy/secrets/blink-auth.json",
   "ffmpeg": "ffmpeg",
   "liveview_cache_dir": "/var/lib/blink-liveview-proxy/liveviews",
+  "clip_cache_dir": "/var/lib/blink-liveview-proxy/clips",
+  "clip_cache_max_mb": 512,
   "mpegts_session_seconds": 60,
   "mpegts_cooldown_seconds": 30,
   "ptt_force_enabled_slugs": [],
@@ -54,7 +56,7 @@ refresh actions.
 The Home Assistant integration has an options flow:
 
 ```text
-Settings > Devices & services > Blink Liveview Proxy > Configure
+Settings > Devices & services > Blink Live View Proxy > Configure
 ```
 
 `Live-view duration in seconds` controls how long the direct player asks the HA
@@ -208,6 +210,19 @@ The HA clip viewer intentionally uses local Sync Module clips:
 
 The proxy also has diagnostic support for cloud clips, but the HA viewer does
 not expose them.
+
+Each clip is fetched from Blink once and kept, and its first frame is cut as
+the thumbnail the viewer shows. Two keys control that:
+
+| Key | Default | What it does |
+|---|---|---|
+| `clip_cache_dir` | a `clips/` directory beside `liveview_cache_dir` | Where clips and thumbnails are kept. The add-on and the Docker image use `/data/clips`; a config written before this key existed lands under the same state directory as the live-view cache |
+| `clip_cache_max_mb` | `512` | Past this, the oldest files go first. A thumbnail is a few kilobytes beside its clip, so this really bounds how many clips replay instantly |
+
+Fetching a Sync Module clip means asking the module to upload it to Blink's
+cloud and waiting for it to land, several seconds each, so the proxy does one
+at a time and never the same one twice. Thumbnails are only requested for the
+rows on screen.
 
 ## Proxy Token
 

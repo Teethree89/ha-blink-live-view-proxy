@@ -35,7 +35,7 @@ class BlinkLiveviewProxyHealthSensor(
     """Represent the local proxy health endpoint."""
 
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_name = "Blink Liveview Proxy"
+    _attr_name = "Blink Live View Proxy"
 
     def __init__(
         self, coordinator: BlinkLiveviewProxyCoordinator, entry: ConfigEntry
@@ -44,9 +44,22 @@ class BlinkLiveviewProxyHealthSensor(
         self._attr_unique_id = f"{entry.entry_id}_health"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
-            "name": "Blink Liveview Proxy",
+            "name": "Blink Live View Proxy",
             "manufacturer": "Local",
         }
+
+    @property
+    def suggested_object_id(self) -> str | None:
+        """Keep binary_sensor.blink_liveview_proxy through the rename.
+
+        Home Assistant derives a new entity's object id from its name, and the
+        name is now "Blink Live View Proxy". Every example dashboard and the
+        generator's proxy pill read binary_sensor.blink_liveview_proxy, and
+        installs from before the rename keep that id in the entity registry
+        regardless - so a fresh install must land on the same one, or the
+        same YAML works for one group and not the other.
+        """
+        return "blink_liveview_proxy"
 
     @property
     def is_on(self) -> bool:

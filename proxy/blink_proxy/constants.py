@@ -12,7 +12,7 @@ LOGGER_NAME = "blink_liveview_proxy"
 # proxy is old enough to be missing routes it needs. Kept in step with
 # manifest.json and addon/config.yaml by a test, because a version that lies is
 # worse than no version at all.
-PROXY_VERSION = "0.6.2"
+PROXY_VERSION = "0.7.0"
 
 IMMI_HEADER_BYTES = 9
 
@@ -54,6 +54,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hls_transcode": False,
     "hls_frame_rate": 24,
     "liveview_cache_dir": ".runtime/blink-liveview-proxy/liveviews",
+    # Local clips are fetched from Blink once and kept here, with the first
+    # frame of each cut as a thumbnail. Oldest files go first past the cap.
+    # None means "a clips/ directory beside liveview_cache_dir": a config
+    # written before this key existed then lands under the same state
+    # directory as everything else, not beside the config file.
+    "clip_cache_dir": None,
+    "clip_cache_max_mb": 512,
     "mpegts_session_seconds": 60,
     "mpegts_cooldown_seconds": 30,
     "save_liveview_cache": True,

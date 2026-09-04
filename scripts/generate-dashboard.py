@@ -43,11 +43,11 @@ PILL_PROXY = """\
             entity: binary_sensor.blink_liveview_proxy
             name: Proxy
             show_state: true
-            icon: mdi:cctv
+            icon: blink:logo
             state:
               - value: "on"
                 color: "#22c55e"
-                icon: mdi:cctv
+                icon: blink:logo
               - value: "off"
                 color: "#ef4444"
                 icon: mdi:cctv-off
@@ -214,12 +214,12 @@ def button(icon: str, right: str, event: str, body: str) -> str:
                 - background: rgba(2, 6, 23, 0.55)
                 - border-radius: 999px
                 - border: 0
-                - width: 36px
-                - height: 36px
+                - width: 40px
+                - height: 40px
                 - padding: 0
               icon:
                 - color: white
-                - width: 20px
+                - width: 22px
             style:
               bottom: 8px
               right: {right}
@@ -294,14 +294,14 @@ def card_for(camera: dict) -> str:
 
     tile += button(
         "mdi:filmstrip",
-        "100px",
+        "104px",
         "blink_liveview_proxy_clips",
         f"                slug: {slug}\n"
         f"                title: {name} Clips",
     )
     tile += button(
         "mdi:image-refresh",
-        "54px",
+        "56px",
         "blink_snapshot_refresh",
         f"                slug: {slug}\n"
         f"                source_entity_id: {source}",
@@ -326,11 +326,11 @@ def card_for(camera: dict) -> str:
                 - background: rgba(2, 6, 23, 0.55)
                 - border-radius: 999px
                 - border: 0
-                - width: 36px
-                - height: 36px
+                - width: 40px
+                - height: 40px
                 - padding: 0
               icon:
-                - width: 20px
+                - width: 22px
                 - color: >
                     [[[
                       return entity && entity.state === 'on'
@@ -401,6 +401,10 @@ HEADER_CARD = """\
 #
 #   Open the dashboard, pencil -> + Add card -> scroll down -> Manual,
 #   replace what is in the box with this, Save.
+#
+# Its two-column grid is fixed, so on a phone each tile gets half the screen.
+# For a layout that stacks on a phone, use --format view instead, which lays
+# the cameras out as sections.
 """
 
 
@@ -409,10 +413,27 @@ def emit_dashboard(cameras: list[dict], with_package: bool) -> str:
 
 
 def emit_view(cameras: list[dict], with_package: bool) -> str:
-    out = "  - title: Cameras\n    path: cameras\n    cards:\n"
-    out += status_pills(with_package)
+    """A sections view: the pill row across the top, then a section per camera.
+
+    Sections lay themselves out by width - up to three tiles side by side on
+    a desktop, one column on a phone - which is what the old flat card list
+    left to masonry, and masonry on a phone squeezed a 16:9 tile and its
+    four buttons into half the screen.
+    """
+    out = (
+        "  - title: Cameras\n"
+        "    path: cameras\n"
+        "    type: sections\n"
+        "    max_columns: 3\n"
+        "    sections:\n"
+        "      - type: grid\n"
+        "        column_span: 3\n"
+        "        cards:\n"
+    )
+    out += reindent(status_pills(with_package), 4)
     for camera in cameras:
-        out += card_for(camera)
+        out += "      - type: grid\n        cards:\n"
+        out += reindent(card_for(camera), 4)
     return out
 
 

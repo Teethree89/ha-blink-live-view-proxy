@@ -3,6 +3,14 @@
 Things worth doing, and things that are odd but deliberate. Not a promise of
 dates — a list so nobody has to rediscover them.
 
+Getting listed in HACS by default has its own checklist, with its own reasoning,
+in [HACS_SUBMISSION.md](HACS_SUBMISSION.md). Two of its setup items are still
+open and belong here too: Supervisor discovery, so an installed add-on makes
+Home Assistant offer the integration with URL and token filled in rather than
+waiting to be added; and the Blink login as a step of the config flow, so the
+2FA PIN is asked for where the setup already is instead of on a panel found
+afterwards.
+
 ## Known rough edges
 
 ### The proxy source exists twice

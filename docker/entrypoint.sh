@@ -27,6 +27,7 @@ config = {
     "auth_file": f"{data}/blink-auth.json",
     "hls_dir": f"{data}/hls",
     "liveview_cache_dir": f"{data}/liveviews",
+    "clip_cache_dir": f"{data}/clips",
     "cameras": {},
 }
 with open(path, "w", encoding="utf-8") as handle:

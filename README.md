@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/logo.png" alt="Blink Liveview Proxy" width="520">
+  <img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/logo.png" alt="Blink Live View Proxy" width="520">
 </p>
 
-# Blink Liveview Proxy
+# Blink Live View Proxy
 
 Unofficial Home Assistant custom integration plus a small local Blink proxy
 service for direct Blink live view, push-to-talk experiments, last-live-view
@@ -38,7 +38,8 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Fresh snapshot button using the official HA Blink camera entity.
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.
-- Local Sync Module clip viewer/downloader.
+- Local Sync Module clip viewer with first-frame thumbnails, a player that
+  seeks, and downloads that never fetch the same clip from Blink twice.
 - Admin-only browser authentication and deliberate reauthentication through
   Home Assistant, with the Blink OAuth challenge kept in one proxy process.
 - Three ways to run the proxy — add-on, systemd, or a standalone Docker image —
@@ -47,7 +48,9 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
   local HTTPS origin.
 
 See the [roadmap](docs/ROADMAP.md) for what is planned, what is deliberately
-out of scope, and the rough edges worth knowing about.
+out of scope, and the rough edges worth knowing about, and the [HACS
+submission plan](docs/HACS_SUBMISSION.md) for what still stands between this
+and being listed in HACS by default.
 
 ## Known Limits
 
@@ -95,7 +98,7 @@ Its Python dependencies are in [`proxy/requirements.txt`](proxy/requirements.txt
 release that recognises Blink's current 2FA challenge, and an older one fails
 login while still texting you a code.
 
-**The integration**: Home Assistant **2024.6.0 or newer**, installed through
+**The integration**: Home Assistant **2024.11.0 or newer**, installed through
 HACS or copied into `custom_components/`. It adds no Python dependencies of its
 own — it uses Home Assistant's `aiohttp` — and depends only on built-in
 `http`, `frontend` and `panel_custom`.
@@ -114,7 +117,7 @@ not duplicate those.
 **For development**: `pyyaml` and `proxy/requirements.txt` for the tests, `ruff`
 for the lint, and `node` for `node --check` on the frontend files.
 
-Once it is installed, the **Blink Proxy** sidebar panel checks every one of
+Once it is installed, the **Blink Live View Proxy** sidebar panel checks every one of
 these against the running install and keeps the setup steps for each next to
 the result — see the [Dashboard Guide](docs/DASHBOARD.md#requirements-at-a-glance).
 
@@ -129,7 +132,7 @@ directly from the add-on store. No separate Linux host or Python setup required.
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
-2. Install **Blink Liveview Proxy** from the add-on store.
+2. Install **Blink Live View Proxy** from the add-on store.
 3. Open the add-on **Configuration** tab. Set `blink_username` and
    `blink_password`, leave `blink_2fa_code` and `proxy_api_token` empty, then
    start the add-on once. Cameras are discovered, and the add-on generates its
@@ -167,9 +170,9 @@ It prints the URL to give Home Assistant and the one command that reads the
 token back. Then, in Home Assistant:
 
 1. Install the integration through HACS (see below) and restart HA.
-2. Add `Blink Liveview Proxy` from `Settings → Devices & services`, using the
+2. Add `Blink Live View Proxy` from `Settings → Devices & services`, using the
    printed URL and token.
-3. Open **Blink Proxy** in the sidebar, select **Authentication**, and sign in.
+3. Open **Blink Live View Proxy** in the sidebar, select **Authentication**, and sign in.
 
 Re-running the script upgrades in place, keeping the token, config, and Blink
 session. The Lovelace helper resource is registered for you; add it by hand
@@ -184,7 +187,7 @@ it misbehaves in the [operations guide](docs/OPERATIONS.md).
 
 ### Browser authentication and reauthentication
 
-The custom integration registers an admin-only **Blink Proxy** dashboard in the
+The custom integration registers an admin-only **Blink Live View Proxy** dashboard in the
 Home Assistant sidebar. Its Authentication tab needs a proxy API token on both sides, which
 both install paths now provision for you: the installer writes one to the
 service's environment file, and the add-on generates one and shares it with the
@@ -225,15 +228,16 @@ Install the Home Assistant integration half through HACS:
 
 1. In HACS open the three-dot menu → **Custom repositories**.
 2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
-3. Download it, restart Home Assistant, then add `Blink Liveview Proxy` from
+3. Download it, restart Home Assistant, then add `Blink Live View Proxy` from
    `Settings → Devices & services`.
 
 HACS installs only `custom_components/blink_liveview_proxy`. You still need
 either the add-on (Option A) or the Linux proxy service (Option B) running
 alongside it.
 
-Default HACS listing can wait until the project has wider testing, a release,
-brand assets, and passing validation history.
+A default HACS listing — findable by typing "blink" into HACS, no URL to
+paste — is the next step. What it takes, and where it stands, is in
+[docs/HACS_SUBMISSION.md](docs/HACS_SUBMISSION.md).
 
 ## Proxy API Layout
 

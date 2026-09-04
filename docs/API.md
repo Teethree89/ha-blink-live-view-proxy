@@ -137,7 +137,7 @@ reflected back to the browser.
 
 ### Home Assistant admin dashboard
 
-The tabbed **Blink Proxy** sidebar panel uses three additional Home Assistant
+The tabbed **Blink Live View Proxy** sidebar panel uses three additional Home Assistant
 routes. They require an authenticated administrator and never return the proxy
 API token or Blink credentials:
 
@@ -184,6 +184,25 @@ The MP4 endpoint remuxes the cached MPEG-TS file with `ffmpeg` on demand.
 
 - `GET /clips?source=local&hours=24&limit=20`
 - `GET /clips/{clip_id}.mp4?source=local`
+- `GET /clips/{clip_id}.jpg?source=local`
 
 The Home Assistant viewer intentionally uses local Sync Module clips. Cloud clip
 support remains a diagnostic proxy path and is not surfaced in the HA viewer.
+
+Each listed clip carries a `download_url`, a `thumbnail_url` and `cached`.
+The first request for a clip fetches it from Blink and keeps it under
+`clip_cache_dir`; the thumbnail is its first frame, cut with ffmpeg from that
+copy. Both are then served as files, so they answer byte ranges — which is
+what lets the viewer seek, and what Safari needs before it plays an MP4 at
+all — and a browser may keep them for a day (`Cache-Control: private`). The
+id is a hash of the clip's identity, so the bytes behind it never change.
+
+Fetches from Blink run one at a time. blinkpy's `prepare_download()` has the
+Sync Module upload the clip to the cloud and polls until it lands, and several
+of those at once is the pattern that gets an account rate-limited. A listing
+also remembers its clips by id for fifteen minutes, so a thumbnail or download
+does not refresh the module's manifest just to find the clip again.
+
+The cache is pruned oldest-first past `clip_cache_max_mb` (default 512). A
+thumbnail is a few kilobytes beside its clip, so the cap really bounds how many
+clips stay instantly replayable.

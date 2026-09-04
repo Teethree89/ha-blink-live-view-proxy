@@ -151,7 +151,7 @@ done
 PROXY_HOST="$(hostname -f 2>/dev/null || hostname)"
 
 cat <<MSG
-Installed and started Blink Liveview Proxy.
+Installed and started Blink Live View Proxy.
 
   Service:  blink-liveview-proxy.service - $HEALTH_NOTE
   Config:   $ETC_DIR/config.json - cameras are discovered, nothing to edit
@@ -163,16 +163,16 @@ Nothing else to do on this host. Finish in Home Assistant:
 
   1. HACS -> three-dot menu -> Custom repositories, add
      https://github.com/Teethree89/ha-blink-live-view-proxy as an Integration.
-     Download "Blink Liveview Proxy" and restart Home Assistant.
+     Download "Blink Live View Proxy" and restart Home Assistant.
 
-  2. Settings -> Devices & services -> Add integration -> Blink Liveview Proxy
+  2. Settings -> Devices & services -> Add integration -> Blink Live View Proxy
 
        Proxy base URL:  http://$PROXY_HOST:$PROXY_PORT
        Proxy token:     sudo sed -n 's/^BLINK_PROXY_TOKEN=//p' $ENV_FILE
 
      The token is not printed here, so it stays out of logs and scrollback.
 
-  3. Sidebar -> Blink Authentication -> enter your Blink email and password,
+  3. Sidebar -> Blink Live View Proxy -> Authentication -> enter your Blink email and password,
      then the PIN Blink texts you while that page waits. This is the only
      interactive step there is: Blink 2FA cannot be automated, by design.
 

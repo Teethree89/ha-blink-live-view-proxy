@@ -76,7 +76,7 @@ fi
 # code typed during the wait is picked up without this.
 
 PORT="$(bashio::config 'port')"
-bashio::log.info "Starting Blink Liveview Proxy on port ${PORT}..."
+bashio::log.info "Starting Blink Live View Proxy on port ${PORT}..."
 exec "$PYTHON" /opt/proxy/blink_liveview_proxy.py \
     --config "$CONFIG_FILE" \
     serve --host "0.0.0.0" --port "$PORT"

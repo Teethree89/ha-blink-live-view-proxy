@@ -25,6 +25,7 @@ config = {
     "hls_dir": "/data/hls",
     "hls_transcode": bool(options.get("low_latency", False)),
     "liveview_cache_dir": "/data/liveviews",
+    "clip_cache_dir": "/data/clips",
     "cameras": cameras,
 }
 

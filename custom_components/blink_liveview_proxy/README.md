@@ -1,6 +1,6 @@
-# Blink Liveview Proxy Custom Integration
+# Blink Live View Proxy Custom Integration
 
-Unofficial local Home Assistant wrapper for the Blink Liveview Proxy service.
+Unofficial local Home Assistant wrapper for the Blink Live View Proxy service.
 
 This integration does not log in to Blink and does not store Blink credentials.
 It only talks to the local proxy HTTP API:
@@ -10,6 +10,7 @@ It only talks to the local proxy HTTP API:
 - `GET /cameras/{slug}/mpegts`
 - `GET /clips?source=local`
 - `GET /clips/{clip_id}.mp4?source=local`
+- `GET /clips/{clip_id}.jpg?source=local` — the first frame, from proxy 0.7.0
 - `GET /auth/status`, `POST /auth/login`, `POST /auth/pin`, `POST /auth/cancel`
 - authenticated `GET /status` version/update capability and `POST /update`
 
@@ -20,7 +21,7 @@ and PIN pass through in request bodies, are never persisted by Home Assistant,
 and the refresh token stays inside the proxy's `auth_file`.
 
 The publishable package lives in the
-[Blink Liveview Proxy repository](https://github.com/Teethree89/ha-blink-live-view-proxy).
+[Blink Live View Proxy repository](https://github.com/Teethree89/ha-blink-live-view-proxy).
 
 This integration is not affiliated with, endorsed by, or supported by Amazon or
 Blink. It is an interoperability layer for cameras you own.
@@ -29,7 +30,7 @@ Blink. It is an interoperability layer for cameras you own.
 
 | What | Why |
 |---|---|
-| Home Assistant **2024.6.0+** | Enforced by `hacs.json`; the panel and repair notices rely on it |
+| Home Assistant **2024.11.0+** | Enforced by `hacs.json`; the panel and repair notices rely on it |
 | A running proxy, **0.3.0 or newer** | This integration is only a client. Older proxies work for live view but have no `/auth` routes, and the integration says so rather than failing quietly |
 | A proxy API token | Required for **Blink Proxy → Authentication**, and for any proxy not bound to loopback. Both installers generate one |
 | Matching proxy and integration releases | A newer integration raises a repair issue and offers **Fix** when systemd or Supervisor can perform the update |
@@ -46,8 +47,9 @@ Assistant's `aiohttp` — and depends only on the built-in `http`, `frontend` an
 From the repo root:
 
 ```bash
-. .venv-blink-liveview/bin/activate
-python blink-liveview-proxy/proxy/blink_liveview_proxy.py --config /path/to/config.json serve
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r proxy/requirements.txt
+python proxy/blink_liveview_proxy.py --config /path/to/config.json serve
 ```
 
 If `BLINK_PROXY_TOKEN` is set for the proxy, enter the same token in the
@@ -56,7 +58,7 @@ integration setup form.
 For first-time Blink auth, run the proxy CLI once before starting `serve`:
 
 ```bash
-BLINK_USERNAME='you@example.com' python blink-liveview-proxy/proxy/blink_liveview_proxy.py \
+BLINK_USERNAME='you@example.com' python proxy/blink_liveview_proxy.py \
   --config /path/to/config.json list
 ```
 
@@ -68,12 +70,12 @@ refresh token in `secrets/blink-auth.json`; this integration only sees the local
 proxy URL.
 
 Once a proxy token is configured on both sides, later logins can be done from
-the browser instead — see **Blink Proxy panel** below.
+the browser instead — see **Blink Live View Proxy panel** below.
 
 ## Home Assistant Setup
 
 With HACS, add
-[Blink Liveview Proxy](https://github.com/Teethree89/ha-blink-live-view-proxy)
+[Blink Live View Proxy](https://github.com/Teethree89/ha-blink-live-view-proxy)
 as a custom repository of type `Integration`, download it, and restart Home
 Assistant.
 
@@ -81,7 +83,7 @@ After the custom component is present under Home Assistant's
 `custom_components/` directory and Home Assistant has restarted:
 
 1. Go to Settings > Devices & services.
-2. Add integration: `Blink Liveview Proxy`.
+2. Add integration: `Blink Live View Proxy`.
 3. Use `http://127.0.0.1:8088` when the proxy runs on the HA host.
 4. Use `http://<mac-lan-ip>:8088` when testing against a proxy running on the
    Mac with `--host 0.0.0.0`.
@@ -90,7 +92,7 @@ After the custom component is present under Home Assistant's
 
 The integration creates:
 
-- an admin-only, tabbed **Blink Proxy** panel at `/blink-liveview-proxy-auth`
+- an admin-only, tabbed **Blink Live View Proxy** panel at `/blink-liveview-proxy-auth`
   with health/version details, camera capabilities, links to each related
   native Home Assistant entity, browser authentication, and YAML export
 - one `camera.blink_live_*` stream entity per proxy camera
@@ -105,8 +107,9 @@ The integration creates:
   a page that has gone stale needs a credentialed caller to refresh it
 - an authenticated local Sync Module clip viewer at
   `/api/blink_liveview_proxy/clips/viewer`
-- authenticated local Sync Module clip metadata/download routes under
-  `/api/blink_liveview_proxy/clips`
+- authenticated local Sync Module clip metadata, download and thumbnail
+  routes under `/api/blink_liveview_proxy/clips`. Downloads forward byte
+  ranges, so the viewer can seek and Safari can play them
 - a manual source snapshot refresh route at
   `/api/blink_liveview_proxy/cameras/{slug}/snapshot-refresh`
 
@@ -170,7 +173,7 @@ tap_action:
     slug: driveway
 ```
 
-## Blink Proxy Panel
+## Blink Live View Proxy Panel
 
 The sidebar panel has four tabs: **Overview**, **Cameras & entities**,
 **Authentication**, and **YAML**. Overview shows proxy health and versions and,

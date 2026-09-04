@@ -110,7 +110,7 @@ async def _async_update_addon(
                 hass,
                 slug,
                 False,
-                "Blink Liveview Proxy",
+                "Blink Live View Proxy",
                 infer_version(current_status),
             )
     except Exception as err:  # noqa: BLE001 - Supervisor raises its own types
