@@ -31,7 +31,8 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Optional low-latency mode: one-second HLS segments instead of four-second
   ones, at the cost of an encode per open live view.
 - Configurable direct player duration, default `60` seconds.
-- "End & Save" and "Save MP4" for the most recent watched live view.
+- "End" then "Save MP4" for the live view you just watched, and "Start
+  Again" to reopen it.
 - Push-to-talk on tested regular Blink cameras and doorbells.
 - PTT hidden on Blink Mini/`owl` cameras by default, and unavailable on
   RTSP-transport cameras, which have no upstream audio channel.

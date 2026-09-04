@@ -139,6 +139,22 @@ Found by testing it on a real install, and fixed here:
   view. A flex container has a definite height here, so the picture is
   letterboxed instead of overflowing.
 
+- **"End & Save" is now just "End".** It was doing three things — stop the
+  stream, wait for its recording to be finalized, download it — and the
+  waiting could not work on the HLS path: a session is only finalized when it
+  stops, and it did not stop until the idle timeout, which is three quarters
+  of a minute on a tuned install. The poll gave up in seven seconds and
+  reported a failure for a recording that did arrive, forty seconds later.
+  Ending and saving are separate now: **End** stops the stream, and the
+  **Save MP4** and **Start Again** buttons that already existed take it from
+  there. All the polling is deleted.
+- **A live view now ends when you close it, not up to a minute later.** The
+  player asks the proxy to end the session — on closing the dialog as well as
+  on End — where before only the MPEG-TS path stopped promptly, because its
+  stream ends with the connection. On HLS the camera went on streaming to
+  nobody for the whole idle timeout, which on a battery camera is battery.
+  Every path a live view can finish by goes through the same call, so the
+  recording is always finalized before Save MP4 is offered.
 - **"End & Save" never worked on an iPhone, and "Save MP4" there was lying.**
   The cached copy of a live view was written only by the MPEG-TS handler, and
   iOS has no Media Source Extensions so it always takes the HLS path, which

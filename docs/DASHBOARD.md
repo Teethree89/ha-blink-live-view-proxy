@@ -148,7 +148,7 @@ proxy service or add-on described in the package example.
 `camera.blink_live_<slug>` and `camera.<slug>`. Pass them when your entities
 were renamed.
 
-Push-to-talk, **End & Save** and **Save MP4** are inside the live-view dialog,
+Push-to-talk, **End** and **Save MP4** are inside the live-view dialog,
 not on the tile. PTT only appears for cameras the proxy reports as supporting
 it; Mini/`owl` cameras are hidden by default and can be opted back in per
 camera with `ptt_force_enabled_slugs`.

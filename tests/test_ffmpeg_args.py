@@ -111,7 +111,7 @@ async def main():
     inputs = args[: args.index("-i")]
 
     # An HLS session has to leave the same cached copy the MPEG-TS path does,
-    # or "End & Save" has nothing to finalize on any client that plays HLS -
+    # or saving a live view has nothing to finalize on a client that plays HLS -
     # which is every iPhone, since they have no MSE and never take the other
     # route. It used to fail there, and "Save MP4" quietly handed back an
     # older session's recording instead.

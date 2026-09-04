@@ -162,7 +162,7 @@ views:
       #   image-refresh ...... pull a fresh snapshot from Blink
       #   motion-sensor ...... toggle motion detection
       #
-      # Push-to-talk, "End & Save" and "Save MP4" live inside the live-view
+      # Push-to-talk, "End" and "Save MP4" live inside the live-view
       # dialog. PTT only appears for cameras the proxy reports as supporting
       # it; Mini/owl cameras are hidden by default and can be opted back in
       # with ptt_force_enabled_slugs in the proxy config.

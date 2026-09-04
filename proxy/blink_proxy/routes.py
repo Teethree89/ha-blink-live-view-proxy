@@ -643,6 +643,24 @@ async def last_liveview_mp4_download_handler(request: web.Request) -> web.FileRe
         },
     )
 
+async def stop_liveview_handler(request: web.Request) -> web.Response:
+    """End a camera's live view now, instead of at the idle timeout.
+
+    What the player calls when someone closes the dialog or asks to save what
+    they just watched. On the MPEG-TS path the stream ends when the connection
+    does, so this is the HLS path catching up with that: without it the camera
+    goes on streaming for hls_idle_timeout seconds after the viewer has gone,
+    and the cached copy is not finalized until then either.
+    """
+    check_authorized(request)
+    slug = request.match_info["slug"]
+    manager: HlsManager = request.app["hls_manager"]
+    stopped = await manager.stop_session(slug)
+    return web.json_response(
+        {"stopped": stopped, "slug": slug},
+        headers={"Cache-Control": "no-store"},
+    )
+
 async def hls_playlist_handler(request: web.Request) -> web.Response:
     check_authorized(request)
     _require_client(request)
@@ -752,6 +770,7 @@ async def make_app(
     app.router.add_get(
         "/cameras/{slug}/last-liveview.mp4", last_liveview_mp4_download_handler
     )
+    app.router.add_post("/cameras/{slug}/stop", stop_liveview_handler)
     app.router.add_get("/cameras/{slug}/hls/index.m3u8", hls_playlist_handler)
     app.router.add_get("/cameras/{slug}/hls/{filename}", hls_segment_handler)
 

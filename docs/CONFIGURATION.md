@@ -81,7 +81,7 @@ The one user-visible difference is that **push-to-talk is not available on a
 camera using the RTSP transport**: the transport carries no upstream audio
 channel, so the proxy raises `push-to-talk is not available over RTSP` rather
 than appearing to send audio nowhere. Everything else — the MSE player, HLS,
-"End & Save", snapshots, motion controls — behaves the same on both.
+"End", snapshots, motion controls — behaves the same on both.
 
 Blink's RTSP server does not follow RFC 2326: it answers every request with
 `CSeq: 1` instead of echoing the sequence number, and omits both `Session` and

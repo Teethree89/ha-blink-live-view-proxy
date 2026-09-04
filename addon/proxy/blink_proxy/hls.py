@@ -31,7 +31,7 @@ class HlsSession:
         self.liveview: LiveViewHandle | None = None
         self.process: asyncio.subprocess.Process | None = None
         # The same cached copy the MPEG-TS path keeps, written as a second
-        # ffmpeg output. Without it "End & Save" had nothing to finalize on
+        # ffmpeg output. Without it saving a live view had nothing to finalize on
         # any client that plays HLS - which is every iPhone and iPad, since
         # they have no Media Source Extensions and never take the MPEG-TS
         # route. Worse than the error it showed: "Save MP4" would then hand
@@ -278,6 +278,23 @@ class HlsManager:
             if session:
                 session.touch()
             return session
+
+    async def stop_session(self, slug: str) -> bool:
+        """Stop one camera's session now. True if there was one to stop.
+
+        The idle timeout is a backstop for a viewer that walked away, not the
+        way a deliberate close should work. Waiting for it means the Blink
+        camera keeps streaming for the whole timeout after nobody is watching
+        - battery, on a battery camera - and it means the cached copy of the
+        live view is not finalized until then either, so anything asking to
+        save what was just watched finds nothing and gives up long before.
+        """
+        async with self.lock:
+            session = self.sessions.pop(slug, None)
+        if session is None:
+            return False
+        await session.stop()
+        return True
 
     async def cleanup_loop(self) -> None:
         idle_timeout = float(self.config.get("hls_idle_timeout", 45))

@@ -70,6 +70,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyHlsPlaylistView(hass))
     hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
+    hass.http.register_view(BlinkLiveviewProxyStopView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewMp4DownloadView(hass))
@@ -635,7 +636,7 @@ button.talk.active {{
   </section>
   <div id="liveActions" class="live-actions" hidden>
     <button id="talk" class="talk" type="button" disabled>Hold Talk</button>
-    <button id="endSave" class="danger" type="button">End &amp; Save</button>
+    <button id="end" class="danger" type="button">End</button>
   </div>
 </main>
 <script src="{PLAYER_LIBRARY_URL}"></script>
@@ -666,7 +667,7 @@ const liveActions = document.getElementById("liveActions");
 const restart = document.getElementById("restart");
 const save = document.getElementById("save");
 const talk = document.getElementById("talk");
-const endSave = document.getElementById("endSave");
+const endButton = document.getElementById("end");
 let player = null;
 let endTimer = null;
 let talkWs = null;
@@ -708,10 +709,26 @@ function downloadUrl() {{
   return new URL(path, window.location.origin).href;
 }}
 
-function lastLiveviewInfoUrl() {{
+function stopUrl() {{
   const token = encodeURIComponent(accessToken || "");
-  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/last-liveview?token=${{token}}&cache=${{Date.now()}}`;
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/stop?token=${{token}}`;
   return new URL(path, window.location.origin).href;
+}}
+
+// Tell the proxy the live view is over. On the MPEG-TS path that happens by
+// itself when the connection drops; the HLS path has only an idle timeout,
+// which on a tuned install can be the better part of a minute - long enough
+// that the camera keeps streaming to nobody, and that the cached copy is not
+// finalized until well after anything waiting for it has given up.
+async function stopUpstream() {{
+  try {{
+    await fetch(stopUrl(), {{
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      keepalive: true,
+    }});
+  }} catch (err) {{}}
 }}
 
 function delay(ms) {{
@@ -723,36 +740,6 @@ function downloadFilename(response) {{
   const header = response.headers.get("content-disposition") || "";
   const match = header.match(/filename="?([^";]+)"?/i);
   return match ? match[1] : fallback;
-}}
-
-function liveviewKey(info) {{
-  if (!info || !info.available) {{
-    return "";
-  }}
-  return `${{info.filename || ""}}:${{info.bytes || ""}}:${{info.ended_at || ""}}`;
-}}
-
-async function currentLiveviewInfo() {{
-  const response = await fetch(lastLiveviewInfoUrl(), {{
-    cache: "no-store",
-    credentials: "same-origin"
-  }});
-  if (!response.ok) {{
-    return null;
-  }}
-  return response.json();
-}}
-
-async function waitForFinalizedLiveview(previousKey) {{
-  for (let attempt = 0; attempt < 10; attempt += 1) {{
-    await delay(attempt === 0 ? 800 : 700);
-    const info = await currentLiveviewInfo();
-    const key = liveviewKey(info);
-    if (key && key !== previousKey) {{
-      return info;
-    }}
-  }}
-  throw new Error("No newly finalized live view was found");
 }}
 
 async function fetchLastViewMp4(retries = 2) {{
@@ -958,6 +945,10 @@ async function saveLastView() {{
   save.textContent = "Saving MP4";
 
   try {{
+    // Belt and braces: if anything still has the session open, close it so
+    // the file being fetched is the one just watched rather than an older
+    // one. A no-op when it has already stopped.
+    await stopUpstream();
     const response = await fetchLastViewMp4(3);
     await downloadMp4(response);
     save.textContent = "Saved";
@@ -972,25 +963,30 @@ async function saveLastView() {{
   }}
 }}
 
-async function endAndSaveCurrentStream() {{
-  const originalText = endSave.textContent;
-  endSave.disabled = true;
-  endSave.textContent = "Saving";
-
+// One job, not three. This used to end the stream, poll for the recording to
+// be finalized and download it, and the polling could not work on the HLS
+// path: the session is only finalized when it stops, and it did not stop
+// until the idle timeout - three quarters of a minute on a tuned install,
+// long after the poll had given up and reported a failure for a recording
+// that did in fact arrive. Ending and saving are two buttons now, and the
+// save one appears once the stream has actually ended.
+async function endCurrentStream() {{
+  endButton.disabled = true;
   try {{
-    const previousKey = liveviewKey(await currentLiveviewInfo().catch(() => null));
-    stopPlayer();
-    setLoading("Saving current live view");
-    await waitForFinalizedLiveview(previousKey);
-    const response = await fetchLastViewMp4(4);
-    await downloadMp4(response);
-    setEnded("Live view saved.");
-  }} catch (err) {{
-    setEnded("Could not save the current live view.");
+    await endSession("Live view ended. Save it, or start again.");
   }} finally {{
-    endSave.disabled = false;
-    endSave.textContent = originalText;
+    endButton.disabled = false;
   }}
+}}
+
+// Every way a live view can finish goes through here, so the upstream session
+// is always closed and its recording always finalized before Save MP4 is
+// offered - whether the viewer ended it, the timer elapsed, or the camera did.
+async function endSession(message) {{
+  stopPlayer();
+  setLoading("Ending live view");
+  await stopUpstream();
+  setEnded(message);
 }}
 
 function setLoading(message) {{
@@ -1055,12 +1051,10 @@ async function startPlayer() {{
       talk.disabled = !pttSupported;
     }};
     video.onended = () => {{
-      stopPlayer();
-      setEnded("Live view ended.");
+      endSession("Live view ended.");
     }};
     video.onerror = () => {{
-      stopPlayer();
-      setEnded("Live view ended or the camera stopped sending video.");
+      endSession("Live view ended or the camera stopped sending video.");
     }};
     video.src = hlsUrl();
     video.load();
@@ -1070,8 +1064,7 @@ async function startPlayer() {{
       statusText.textContent = "Tap play to start live view";
     }}
     endTimer = setTimeout(() => {{
-      stopPlayer();
-      setEnded(`${{seconds}} second live view finished.`);
+      endSession(`${{seconds}} second live view finished.`);
     }}, (seconds + 5) * 1000);
     return;
   }}
@@ -1098,8 +1091,7 @@ async function startPlayer() {{
   }});
 
   player.on(mpegts.Events.ERROR, () => {{
-    stopPlayer();
-    setEnded("Live view ended or the camera stopped sending video.");
+    endSession("Live view ended or the camera stopped sending video.");
   }});
 
   video.onplaying = () => {{
@@ -1112,8 +1104,7 @@ async function startPlayer() {{
   }};
 
   video.onended = () => {{
-    stopPlayer();
-    setEnded("Live view ended.");
+    endSession("Live view ended.");
   }};
 
   player.attachMediaElement(video);
@@ -1126,14 +1117,13 @@ async function startPlayer() {{
   }}
 
   endTimer = setTimeout(() => {{
-    stopPlayer();
-    setEnded(`${{seconds}} second live view finished.`);
+    endSession(`${{seconds}} second live view finished.`);
   }}, (seconds + 5) * 1000);
 }}
 
 restart.addEventListener("click", startPlayer);
 save.addEventListener("click", saveLastView);
-endSave.addEventListener("click", endAndSaveCurrentStream);
+endButton.addEventListener("click", endCurrentStream);
 talk.addEventListener("pointerdown", startTalk);
 talk.addEventListener("pointerup", stopTalk);
 talk.addEventListener("pointercancel", stopTalk);
@@ -1150,6 +1140,9 @@ talk.hidden = !pttSupported;
 // parent calls this first; pagehide covers a normal navigation away.
 window.__blinkStopPlayer = () => {{
   try {{ stopPlayer(); }} catch (err) {{}}
+  // Closing the dialog should free the camera too, not leave it streaming to
+  // nobody until the idle timeout elapses.
+  stopUpstream();
 }};
 window.addEventListener("pagehide", () => {{
   window.__blinkStopPlayer();
@@ -1398,6 +1391,41 @@ class BlinkLiveviewProxyPttView(HomeAssistantView):
             await browser_ws.close()
 
         return browser_ws
+
+
+class BlinkLiveviewProxyStopView(HomeAssistantView):
+    """End a camera's live view now, rather than at the proxy's idle timeout."""
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/stop"
+    name = "api:blink_liveview_proxy:stop"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def post(self, request: web.Request, slug: str) -> web.Response:
+        """Ask the proxy to stop this camera's session."""
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        client = _client(self.hass)
+        try:
+            async with asyncio.timeout(15):
+                async with client._session.post(  # noqa: SLF001
+                    client.proxy_url(f"/cameras/{slug}/stop"),
+                    headers=client.auth_headers(),
+                ) as response:
+                    payload = await response.json(content_type=None)
+        except (ClientError, asyncio.TimeoutError, ValueError) as err:
+            # Best effort by nature: the caller is on its way out either way,
+            # and the idle timeout is still there behind this.
+            LOGGER.debug("Could not stop the live view for %s: %s", slug, err)
+            return web.json_response(
+                {"stopped": False}, headers={"Cache-Control": "no-store"}
+            )
+        return web.json_response(
+            payload if isinstance(payload, dict) else {"stopped": True},
+            headers={"Cache-Control": "no-store"},
+        )
 
 
 class BlinkLiveviewProxyLastLiveviewInfoView(HomeAssistantView):
