@@ -243,10 +243,100 @@
     };
   }
 
+  function watchVideoBounds(root, iframe, close) {
+    let video = null;
+    let observer = null;
+
+    const reset = () => {
+      close.style.left = "";
+    };
+    const apply = () => {
+      if (!root.isConnected || root.clientWidth <= root.clientHeight) {
+        reset();
+        return;
+      }
+
+      try {
+        const candidate = iframe.contentDocument?.querySelector("video");
+        if (!candidate || !candidate.videoWidth || !candidate.videoHeight) {
+          reset();
+          return;
+        }
+
+        const shell = close.offsetParent;
+        const shellRect = shell.getBoundingClientRect();
+        const frameRect = iframe.getBoundingClientRect();
+        const videoRect = candidate.getBoundingClientRect();
+        const videoLeft = frameRect.left - shellRect.left + videoRect.left;
+        const edge = 10;
+        const gap = 8;
+
+        // Only move the button when the letterbox genuinely has room for it.
+        // On a screen with no side gutter, the safe-area CSS remains the better
+        // fallback than putting the button over the picture's left edge.
+        if (videoLeft < edge + close.offsetWidth + gap) {
+          reset();
+          return;
+        }
+        close.style.left = `${Math.floor(videoLeft - close.offsetWidth - gap)}px`;
+      } catch (err) {
+        // A frame which has navigated away or become cross-origin cannot offer
+        // useful bounds; leave the button in its safe-area CSS position.
+        reset();
+      }
+    };
+    const applyThroughRotation = () => {
+      apply();
+      for (const delay of [60, 180, 400, 800]) setTimeout(apply, delay);
+    };
+    const connectVideo = () => {
+      try {
+        const candidate = iframe.contentDocument?.querySelector("video");
+        if (candidate !== video) {
+          if (video) {
+            video.removeEventListener("loadedmetadata", apply);
+            video.removeEventListener("resize", apply);
+          }
+          if (observer) observer.disconnect();
+          video = candidate;
+          if (video) {
+            video.addEventListener("loadedmetadata", apply);
+            video.addEventListener("resize", apply);
+            if (window.ResizeObserver) {
+              observer = new ResizeObserver(apply);
+              observer.observe(video);
+            }
+          }
+        }
+      } catch (err) {
+        video = null;
+      }
+      applyThroughRotation();
+    };
+
+    iframe.addEventListener("load", connectVideo);
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", applyThroughRotation);
+    connectVideo();
+    root.__blinkStopPositioningClose = () => {
+      iframe.removeEventListener("load", connectVideo);
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", applyThroughRotation);
+      if (video) {
+        video.removeEventListener("loadedmetadata", apply);
+        video.removeEventListener("resize", apply);
+      }
+      if (observer) observer.disconnect();
+    };
+  }
+
   function closeDialog() {
     const existing = document.getElementById(DIALOG_ID);
     if (!existing) return;
     if (typeof existing.__blinkStopWatching === "function") existing.__blinkStopWatching();
+    if (typeof existing.__blinkStopPositioningClose === "function") {
+      existing.__blinkStopPositioningClose();
+    }
     if (typeof existing.close === "function" && existing.open) existing.close();
 
     // Tell the player to stop before the iframe goes.
@@ -306,13 +396,14 @@
     close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>';
     close.addEventListener("click", closeDialog);
 
+    let iframe = null;
     if (!src) {
       const error = document.createElement("div");
       error.className = "blink-liveview-error";
       error.textContent = "Camera access token is not ready yet. Refresh the dashboard and try again.";
       shell.append(error);
     } else {
-      const iframe = document.createElement("iframe");
+      iframe = document.createElement("iframe");
       iframe.allow = "autoplay; fullscreen; microphone; picture-in-picture";
       iframe.src = src;
       shell.append(iframe);
@@ -326,6 +417,7 @@
     });
     document.body.append(root);
     watchViewport(root);
+    if (iframe) watchVideoBounds(root, iframe, close);
 
     // showModal() promotes the element into the top layer, which is what
     // actually gets it painted in the iOS app's WKWebView. Fall back to leaving

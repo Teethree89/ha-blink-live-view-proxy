@@ -93,6 +93,10 @@ Found by testing it on a real install, and fixed here:
   exposed Home Assistant's light-theme card background: below the picture in
   portrait, and beside and below it in landscape. The player now paints through
   those insets while the floating controls carry their own safe-area offsets.
+  In landscape, the close button measures the letterboxed video and sits just
+  outside its left edge instead of overlapping the picture. In portrait, Hold
+  Talk and End move into the empty space below the video when that gutter is
+  deep enough to clear both the native controls and the home indicator.
 - **The sidebar icon was blank until a hard refresh** — and on the iOS
   companion app there is no way to force one. `add_extra_js_url` puts the icon
   set in `index.html`, which is right for a fresh page load and useless to a

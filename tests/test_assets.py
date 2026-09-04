@@ -863,6 +863,34 @@ def test_liveview_safe_areas_do_not_pad_the_player() -> None:
         "background: #05070a;" in source,
         "the shell cannot inherit Home Assistant's white card background",
     )
+    check(
+        'iframe.contentDocument?.querySelector("video")' in source,
+        "the dialog measures the same-origin player's rendered video",
+    )
+    check(
+        "videoLeft - close.offsetWidth - gap" in source,
+        "the landscape close button sits just left of the video",
+    )
+    check(
+        "root.clientWidth <= root.clientHeight" in source,
+        "portrait keeps the safe-area CSS position",
+    )
+
+    player = (
+        ROOT / "custom_components/blink_liveview_proxy/views.py"
+    ).read_text()
+    check(
+        'liveActions.classList.add("bottom-gutter")' in player,
+        "portrait can put live actions in the gutter below the video",
+    )
+    check(
+        "window.innerHeight - videoRect.bottom" in player,
+        "bottom placement uses the rendered video edge",
+    )
+    check(
+        "roomBelow >= liveActions.offsetHeight + 80" in player,
+        "buttons move only when the gutter clears the home indicator",
+    )
 
 
 def main() -> int:

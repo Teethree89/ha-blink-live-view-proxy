@@ -553,6 +553,10 @@ video.ready {{
 .live-actions[hidden] {{
   display:none;
 }}
+.live-actions.bottom-gutter {{
+  top:auto;
+  bottom:calc(16px + env(safe-area-inset-bottom, 0px));
+}}
 button,a.button {{
   appearance:none;
   border:0;
@@ -687,6 +691,27 @@ let talkMute = null;
 let talkActive = false;
 let talkStarting = false;
 let talkListening = false;
+
+function positionLiveActions() {{
+  liveActions.classList.remove("bottom-gutter");
+  if (window.innerWidth >= window.innerHeight || liveActions.hidden) return;
+
+  const videoRect = video.getBoundingClientRect();
+  const roomBelow = window.innerHeight - videoRect.bottom;
+  // Safari does not expose whether its native media controls are currently
+  // showing. The rendered geometry tells us what matters: if a portrait
+  // letterbox leaves enough room below the video for both these buttons and
+  // the home indicator, use that gutter. Otherwise keep them at the top,
+  // clear of the native controls along the video's bottom edge.
+  if (roomBelow >= liveActions.offsetHeight + 80) {{
+    liveActions.classList.add("bottom-gutter");
+  }}
+}}
+
+function positionLiveActionsThroughRotation() {{
+  positionLiveActions();
+  for (const delay of [60, 180, 400, 800]) setTimeout(positionLiveActions, delay);
+}}
 
 function streamUrl() {{
   const token = encodeURIComponent(accessToken || "");
@@ -1057,6 +1082,7 @@ async function startPlayer() {{
       liveActions.hidden = false;
       talk.hidden = !pttSupported;
       talk.disabled = !pttSupported;
+      positionLiveActions();
     }};
     video.onended = () => {{
       endSession("Live view ended.");
@@ -1109,6 +1135,7 @@ async function startPlayer() {{
     liveActions.hidden = false;
     talk.hidden = !pttSupported;
     talk.disabled = !pttSupported;
+    positionLiveActions();
   }};
 
   video.onended = () => {{
@@ -1136,6 +1163,10 @@ talk.addEventListener("pointerdown", startTalk);
 talk.addEventListener("pointerup", stopTalk);
 talk.addEventListener("pointercancel", stopTalk);
 talk.addEventListener("pointerleave", stopTalk);
+video.addEventListener("loadedmetadata", positionLiveActions);
+video.addEventListener("resize", positionLiveActions);
+window.addEventListener("resize", positionLiveActions);
+window.addEventListener("orientationchange", positionLiveActionsThroughRotation);
 window.addEventListener("blur", stopTalk);
 window.addEventListener("beforeunload", () => {{
   stopTalk();
