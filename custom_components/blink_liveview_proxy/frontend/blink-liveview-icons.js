@@ -68,8 +68,15 @@
   const heal = () => {
     try { repaint(document, 0); } catch (err) { /* never break a page over an icon */ }
   };
-  // Once now for anything already on screen, and once after the frame settles
-  // for the sidebar, which Home Assistant builds from a websocket round trip.
+  // Several passes, not one. The sidebar is built from a websocket round trip,
+  // so on a cold start - a phone waking, a home-screen PWA launching - it can
+  // render well after this file has run. These are a handful of cheap DOM
+  // walks spread over the first few seconds.
   heal();
-  requestAnimationFrame(() => setTimeout(heal, 400));
+  for (const delay of [200, 600, 1500, 3500]) setTimeout(heal, delay);
+  // A home-screen PWA resumes rather than reloads, so it never runs this file
+  // again. Repaint when it comes back to the foreground.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) heal();
+  });
 })();

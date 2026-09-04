@@ -105,6 +105,12 @@ Found by testing it on a real install, and fixed here:
   showing a placeholder. A proxy that is merely still signing in answers 503
   now instead of being collapsed into a 502 — the difference between "try
   again" and "the gateway is broken".
+- **The clip rows are their own placeholder now, not a spinner.** The tile
+  reserves its 16:9 space from the start and shimmers until the picture fades
+  in over it, so a row never changes height and there is never an empty box
+  with nothing happening in it. The spinner it replaced was 22px on a 132px
+  tile — easy to miss even while a cold thumbnail took its full two and a half
+  seconds, which rather defeated the point of having one.
 - **The live-view dialog was taller than an iPhone's screen.** `100dvh` is
   still not what the companion app's webview actually shows, so the bottom of
   the shell — where iOS puts the native video controls, AirPlay included — sat

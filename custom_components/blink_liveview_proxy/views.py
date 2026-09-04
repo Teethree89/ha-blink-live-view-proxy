@@ -1565,12 +1565,17 @@ main{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);min-he
 .clip{display:grid;grid-template-columns:132px minmax(0,1fr);gap:12px;align-items:center;width:100%;margin:0;padding:10px 12px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
 .clip:hover,.clip:focus-visible{background:rgba(148,163,184,.08);outline:none}
 .clip.active{background:rgba(2,132,199,.16);box-shadow:inset 3px 0 0 var(--accent-2)}
-.thumb{position:relative;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#0b1018}
-.thumb img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .25s ease}
+/* The tile is its own placeholder. aspect-ratio plus the img's width/height
+   attributes mean the row is the right height before anything is fetched, so
+   nothing moves when the picture arrives - it fades in over the skeleton.
+   That replaced a spinner, which was both easy to miss at this size and the
+   only thing between an empty tile and a filled one. */
+.thumb{position:relative;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#141c26}
+.thumb img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease}
 .thumb.loaded img{opacity:1}
-.thumb .spinner{position:absolute;inset:0;display:grid;place-items:center}
-.thumb .spinner::before{content:"";width:22px;height:22px;border-radius:999px;border:3px solid rgba(226,232,240,.22);border-top-color:var(--accent-2);animation:spin .9s linear infinite}
-.thumb.loaded .spinner,.thumb.failed .spinner,.thumb.none .spinner{display:none}
+.thumb .skeleton{position:absolute;inset:0;background:linear-gradient(100deg,#141c26 34%,#202c3a 50%,#141c26 66%);background-size:240% 100%;animation:shimmer 1.5s linear infinite}
+.thumb.loaded .skeleton,.thumb.failed .skeleton,.thumb.none .skeleton{display:none}
+@keyframes shimmer{from{background-position:190% 0}to{background-position:-90% 0}}
 .thumb .fallback{position:absolute;inset:0;display:none;place-items:center;color:var(--dim)}
 .thumb.failed .fallback,.thumb.none .fallback{display:grid}
 .thumb svg{width:28px;height:28px;fill:currentColor}
@@ -1593,8 +1598,7 @@ video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;ba
 .now strong{font-size:15px}
 .now .meta{flex:1 1 auto}
 .now[hidden]{display:none}
-@keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.thumb .spinner::before{animation:none}}
+@media (prefers-reduced-motion:reduce){.thumb .skeleton{animation:none}}
 @media (max-width:780px){
   /* Phone: video first at its natural height, the list scrolls underneath. */
   main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
@@ -1786,17 +1790,20 @@ function thumbnail(clip) {
     box.classList.add("none");
     return box;
   }
-  const spinner = document.createElement("div");
-  spinner.className = "spinner";
-  spinner.setAttribute("aria-label", "Loading thumbnail");
+  const skeleton = document.createElement("div");
+  skeleton.className = "skeleton";
+  skeleton.setAttribute("aria-label", "Loading thumbnail");
   const image = document.createElement("img");
   image.alt = "";
   image.decoding = "async";
+  // Intrinsic size up front, so the row never grows when the picture lands.
+  image.width = 480;
+  image.height = 270;
   image.dataset.src = clip.thumbnail_url;
   const play = document.createElement("div");
   play.className = "play";
   play.innerHTML = PLAY_ICON;
-  box.append(spinner, image, play);
+  box.append(skeleton, image, play);
   if (visible) visible.observe(image);
   else queueThumbnail(box, image, clip.thumbnail_url);
   return box;
