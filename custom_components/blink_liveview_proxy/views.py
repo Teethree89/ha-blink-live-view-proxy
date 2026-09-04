@@ -1573,9 +1573,15 @@ main{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);min-he
 .thumb{position:relative;aspect-ratio:16/9;border-radius:6px;overflow:hidden;background:#141c26}
 .thumb img{display:block;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s ease}
 .thumb.loaded img{opacity:1}
-.thumb .skeleton{position:absolute;inset:0;background:linear-gradient(100deg,#141c26 34%,#202c3a 50%,#141c26 66%);background-size:240% 100%;animation:shimmer 1.5s linear infinite}
+/* Two channels, because one subtle one is not enough: the whole tile pulses
+   between two clearly separated blues, and a light band sweeps across it.
+   The first version moved #141c26 to #202c3a - a step of about fifteen per
+   channel on a 132px tile - which animated correctly and could not be seen. */
+.thumb .skeleton{position:absolute;inset:0;background:#1b2635;animation:pulse 1.3s ease-in-out infinite}
+.thumb .skeleton::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 32%,rgba(125,211,252,.22) 50%,transparent 68%);background-size:220% 100%;animation:sweep 1.3s linear infinite}
 .thumb.loaded .skeleton,.thumb.failed .skeleton,.thumb.none .skeleton{display:none}
-@keyframes shimmer{from{background-position:190% 0}to{background-position:-90% 0}}
+@keyframes pulse{0%,100%{background-color:#1b2635}50%{background-color:#31465f}}
+@keyframes sweep{from{background-position:170% 0}to{background-position:-70% 0}}
 .thumb .fallback{position:absolute;inset:0;display:none;place-items:center;color:var(--dim)}
 .thumb.failed .fallback,.thumb.none .fallback{display:grid}
 .thumb svg{width:28px;height:28px;fill:currentColor}
@@ -1598,7 +1604,12 @@ video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;ba
 .now strong{font-size:15px}
 .now .meta{flex:1 1 auto}
 .now[hidden]{display:none}
-@media (prefers-reduced-motion:reduce){.thumb .skeleton{animation:none}}
+/* Still obviously a placeholder without moving: a flat fill lighter than the
+   tile it sits in, rather than nothing at all. */
+@media (prefers-reduced-motion:reduce){
+  .thumb .skeleton{animation:none;background:#2b3d53}
+  .thumb .skeleton::after{display:none}
+}
 @media (max-width:780px){
   /* Phone: video first at its natural height, the list scrolls underneath. */
   main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
