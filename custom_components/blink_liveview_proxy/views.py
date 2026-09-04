@@ -525,6 +525,8 @@ video.ready {{
 .title {{
   font-size:clamp(22px,4vw,38px);
   font-weight:700;
+  -webkit-user-select:none;
+  user-select:none;
 }}
 .status {{
   color:#cbd5e1;
@@ -554,6 +556,12 @@ video.ready {{
 button,a.button {{
   appearance:none;
   border:0;
+  /* Hold Talk is a press-and-hold control, and a long press on a phone
+     selects the label and raises the callout menu unless both are refused. */
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent;
   border-radius:6px;
   background:#0284c7;
   color:#f8fafc;

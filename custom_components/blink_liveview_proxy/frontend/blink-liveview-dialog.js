@@ -85,6 +85,13 @@
         fill: currentColor;
         vertical-align: middle;
       }
+      #${DIALOG_ID} .blink-liveview-title,
+      #${DIALOG_ID} button {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
       #${DIALOG_ID} .blink-liveview-title {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -195,12 +202,22 @@
   // keep it current; the CSS units stay as the fallback.
   function sizeDialog(root) {
     if (!root) return;
-    // visualViewport is what is actually on screen; window.innerHeight is the
-    // fallback for anything without it.
-    const visual = window.visualViewport && window.visualViewport.height;
-    const height = `${Math.round(visual || window.innerHeight)}px`;
-    root.style.height = height;
-    root.style.maxHeight = height;
+    // Clamp, never set.
+    //
+    // Setting an explicit height replaces the box that `inset: 0` already
+    // describes, so a measurement that reads high makes the dialog taller
+    // than the screen rather than shorter - which is what put a landscape
+    // live view's bottom row off the display even after portrait was fixed.
+    // Taking the smallest of everything on offer, and applying it only as an
+    // upper bound, can shrink the dialog to fit but can never stretch it.
+    const measures = [window.innerHeight];
+    if (window.visualViewport && window.visualViewport.height) {
+      measures.push(window.visualViewport.height);
+    }
+    const height = Math.floor(Math.min(...measures.filter(Boolean)));
+    if (!height) return;
+    root.style.height = "";
+    root.style.maxHeight = `${height}px`;
   }
 
   function watchViewport(root) {
