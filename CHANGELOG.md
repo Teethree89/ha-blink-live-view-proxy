@@ -132,7 +132,12 @@ Found by testing it on a real install, and fixed here:
   below the fold. The dialog now takes its height from `window.innerHeight`
   and follows it on resize, rotation and Safari's sliding toolbars. On a phone
   the video element also shrink-wraps the picture rather than filling all that
-  black, so those controls sit under the video where they belong.
+  black, so those controls sit under the video where they belong. That has to
+  be done with flex: the stage is a grid whose only row carries no explicit
+  size, and a `max-height: 100%` measured against a row that grows to fit its
+  own content clamps nothing — which cropped the bottom off a landscape live
+  view. A flex container has a definite height here, so the picture is
+  letterboxed instead of overflowing.
 
 Two halves again: the thumbnails need proxy 0.7.0. The integration's repair
 notice and the Overview tab say so and offer the update where the install

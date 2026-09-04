@@ -582,15 +582,31 @@ button.talk.pending {{
 button.talk.active {{
   background:#16a34a;
 }}
-/* On a phone the stage is far taller than a 16:9 picture, and a video element
-   that fills it puts iOS's native control bar - AirPlay and the rest - at the
-   bottom of all that black, below the fold. Letting the element shrink-wrap
-   the picture keeps those controls under the video where they belong. */
+/* On a phone the stage is far bigger than a 16:9 picture in one direction or
+   the other - much taller in portrait, much wider in landscape - and a video
+   element that fills it puts iOS's native control bar, AirPlay and all, at the
+   bottom of the black rather than under the picture. Letting the element
+   shrink-wrap the picture keeps those controls where they belong.
+
+   It has to be flex, not the grid above. A grid row with no explicit size is
+   sized by its content, so `width:100%; height:auto` made the row as tall as
+   the video wanted to be and `max-height:100%` then measured itself against
+   that same grown row - clamping nothing, and cropping the bottom off a
+   landscape live view. A flex container has a definite height here, so the
+   percentages resolve against the screen and the picture is letterboxed
+   instead of overflowing. width and height stay auto so the element takes the
+   video's own shape, and the two max- rules bound it on both axes. */
 @media (max-width: 720px), (max-height: 520px) {{
+  .stage {{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }}
   video {{
     position:static;
-    width:100%;
+    width:auto;
     height:auto;
+    max-width:100%;
     max-height:100%;
   }}
 }}
