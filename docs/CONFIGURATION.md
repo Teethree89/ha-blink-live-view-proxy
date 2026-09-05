@@ -17,11 +17,13 @@ Important fields:
   "auth_file": "/var/lib/blink-liveview-proxy/secrets/blink-auth.json",
   "ffmpeg": "ffmpeg",
   "liveview_cache_dir": "/var/lib/blink-liveview-proxy/liveviews",
+  "clip_cache_dir": "/var/lib/blink-liveview-proxy/clips",
+  "clip_cache_max_mb": 512,
   "mpegts_session_seconds": 60,
   "mpegts_cooldown_seconds": 30,
   "ptt_force_enabled_slugs": [],
-  "ptt_disabled_camera_types": ["mini"],
-  "ptt_disabled_product_types": ["owl"],
+  "ptt_disabled_camera_types": [],
+  "ptt_disabled_product_types": ["xt", "white", "superior"],
   "cameras": {}
 }
 ```
@@ -54,7 +56,7 @@ refresh actions.
 The Home Assistant integration has an options flow:
 
 ```text
-Settings > Devices & services > Blink Liveview Proxy > Configure
+Settings > Devices & services > Blink Live View Proxy > Configure
 ```
 
 `Live-view duration in seconds` controls how long the direct player asks the HA
@@ -79,7 +81,7 @@ The one user-visible difference is that **push-to-talk is not available on a
 camera using the RTSP transport**: the transport carries no upstream audio
 channel, so the proxy raises `push-to-talk is not available over RTSP` rather
 than appearing to send audio nowhere. Everything else — the MSE player, HLS,
-"End & Save", snapshots, motion controls — behaves the same on both.
+"End", snapshots, motion controls — behaves the same on both.
 
 Blink's RTSP server does not follow RFC 2326: it answers every request with
 `CSeq: 1` instead of echoing the sequence number, and omits both `Session` and
@@ -182,32 +184,103 @@ the default. Set it back to `false` if you hit issues and want to compare.
 
 ## Push-to-Talk
 
-Browser microphone capture requires HTTPS or a browser-trusted origin. The
-player sends PCM to HA over WebSocket; HA forwards it to the proxy; the proxy
-uses ffmpeg to encode AAC and sends IMMI audio frames to Blink.
+**This is the one feature that needs an HTTPS address.** Browsers only expose
+a microphone in a secure context — an HTTPS page, or `http://localhost` — so
+Hold Talk cannot work from `http://<address>:8123`, which is Home Assistant's
+own default and what the companion app uses at home unless you tell it
+otherwise. How the proxy is reached makes no difference: the address in the
+browser is what counts.
+
+Today it fails badly rather than clearly. The button is enabled from whether
+the *camera* supports push-to-talk, so on a plain-HTTP page it is offered,
+looks live, and does nothing at all: the refusal is written to a status line
+the player has already hidden by the time the button becomes usable, and
+nothing appears in the proxy log because nothing was ever sent. If Hold Talk
+seems dead, check **Blink Live View Proxy → Overview**, which has a row for
+exactly this. Home Assistant Cloud (Nabu Casa) is the shortest route to an
+HTTPS address; a reverse proxy with a certificate, or `ssl_certificate` and
+`ssl_key` under `http:` in `configuration.yaml`, also do it.
+
+Once the microphone is available, the player sends PCM to HA over WebSocket;
+HA forwards it to the proxy; the proxy uses ffmpeg to encode AAC and sends
+IMMI audio frames to Blink.
 
 PTT is hidden for camera families in:
 
 ```json
 "ptt_force_enabled_slugs": [],
-"ptt_disabled_camera_types": ["mini"],
-"ptt_disabled_product_types": ["owl"]
+"ptt_disabled_camera_types": [],
+"ptt_disabled_product_types": ["xt", "white", "superior"]
 ```
 
-Add a slug such as `"kitchen"` to `ptt_force_enabled_slugs` only for targeted
-testing of cameras that are disabled by family defaults. A Blink Mini/`owl`
-camera was confirmed audible this way on June 30, 2026.
+`ptt_disabled_product_types` ships with `xt`, `white` and `superior`; the
+other two lists are empty. The three are not there for the same reason, and
+the difference decides when each comes back off.
 
-## Local Clips
+**`xt` and `white` — never.** They get `rtsps://`, and `BlinkRtspLiveStream`
+raises `NotImplementedError` because RTSP has no equivalent of
+`send_session_command()`. There is nothing for the proxy to call, so the
+button could only ever fail. No work on the proxy changes that.
 
-The HA clip viewer intentionally uses local Sync Module clips:
+**`superior` — not yet.** It gets `immis://` and the path exists, so this one
+is fixable. Today the audio shape the camera expects is not the one we send,
+and the cost is worse than a button that fails: with the audio config on the
+camera closes the stream about four seconds into the hold, without it a few
+seconds after release, and either way it refuses to rejoin for about three
+minutes. A capture of what Blink's own app sends to a `superior` would make it
+fixable, and the entry should come out then.
+
+That is a different case from `mini` and `owl`, which these lists used to
+carry — set before anyone had actually tried it, and a Blink Mini/`owl` was
+confirmed audible on June 30, 2026. The default was hiding a control that
+works, and they came off.
+
+`ptt_disabled_camera_types` stays empty on purpose: `camera_type` cannot tell
+the families apart. An `xt` reports `default`, and so does a `catalina`, which
+does have push-to-talk.
+
+Put a family on a list when it genuinely cannot do this, and use
+`ptt_force_enabled_slugs` for a single camera you want back regardless.
+
+An add-on install can set all three; they are add-on options. There, an empty
+box means "keep these defaults" rather than "allow everything", so the lists
+can only be added to from the add-on UI.
+
+## Clips
+
+The HA clip viewer lists both inventories:
 
 ```text
 /api/blink_liveview_proxy/clips/viewer
 ```
 
-The proxy also has diagnostic support for cloud clips, but the HA viewer does
-not expose them.
+Its Source select narrows that to the Sync Module or to Blink's cloud alone,
+and the browser remembers the choice for the next open. `?source=cloud` on the
+URL opens straight there.
+
+Cloud clips exist only for an account with a Blink subscription; without one,
+motion clips are written to a Sync Module's local storage and nothing else.
+Listing them is metadata only. Fetching one is not, and that is why cloud
+clips show a placeholder rather than a thumbnail: a thumbnail is the first
+frame of the clip, so drawing a screenful would pull every clip in the window
+off Blink's servers. A cloud clip is fetched when someone plays it, or when
+someone presses **Load cloud thumbnails**, which says how many clips that is
+before it starts. The newest six cloud clips show a thumbnail automatically;
+the rest load on demand. Local clips come off your own Sync Module and are
+drawn without asking.
+
+Each clip is fetched from Blink once and kept, and its first frame is cut as
+the thumbnail the viewer shows. Two keys control that:
+
+| Key | Default | What it does |
+|---|---|---|
+| `clip_cache_dir` | a `clips/` directory beside `liveview_cache_dir` | Where clips and thumbnails are kept. The add-on and the Docker image use `/data/clips`; a config written before this key existed lands under the same state directory as the live-view cache |
+| `clip_cache_max_mb` | `512` | Past this, the oldest files go first. A thumbnail is a few kilobytes beside its clip, so this really bounds how many clips replay instantly |
+
+Fetching a Sync Module clip means asking the module to upload it to Blink's
+cloud and waiting for it to land, several seconds each, so the proxy does one
+at a time and never the same one twice. Thumbnails are only requested for the
+rows on screen.
 
 ## Proxy Token
 
@@ -242,7 +315,7 @@ environment:
 
 | Variable | Default | What it does |
 |---|---|---|
-| `VERSION` | newest tag | Install a specific tag instead |
+| `VERSION` | newest stable or prerelease tag | Install a specific tag instead |
 | `FORCE` | unset | Reinstall even when that tag is already installed |
 | `SRC_DIR` | `/opt/src/ha-blink-live-view-proxy` | Where the checkout lives |
 | `BIND_HOST` | `0.0.0.0` | `127.0.0.1` keeps the proxy on loopback |

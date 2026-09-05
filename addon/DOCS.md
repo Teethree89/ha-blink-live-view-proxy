@@ -1,11 +1,11 @@
-# Blink Liveview Proxy — Add-on
+# Blink Live View Proxy — Add-on
 
-Runs the Blink Liveview Proxy as a Home Assistant add-on. No separate Linux host required.
+Runs the Blink Live View Proxy as a Home Assistant add-on. No separate Linux host required.
 
 ## Prerequisites
 
 - The official **Blink** integration installed and working in Home Assistant.
-- The **Blink Liveview Proxy** custom integration installed via HACS (or copied from `custom_components/` in this repo).
+- The **Blink Live View Proxy** custom integration installed via HACS (or copied from `custom_components/` in this repo).
 
 ## Installation
 
@@ -15,7 +15,7 @@ Runs the Blink Liveview Proxy as a Home Assistant add-on. No separate Linux host
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
 
-2. Install **Blink Liveview Proxy** from the add-on store and open its **Configuration** tab.
+2. Install **Blink Live View Proxy** from the add-on store and open its **Configuration** tab.
 
 ## Requirements
 
@@ -24,7 +24,7 @@ Runs the Blink Liveview Proxy as a Home Assistant add-on. No separate Linux host
 | Home Assistant OS or Supervised | Add-ons need Supervisor. On Container or Core, run the proxy as a systemd service or a Docker container instead |
 | `aarch64` or `amd64` | ffmpeg transcoding a live stream is beyond 32-bit ARM; those builds were dropped in 0.2.0 |
 | A Blink account with cameras | The add-on logs in as you, and Blink texts a 2FA PIN the first time |
-| The matching custom integration | Only if you want the Home Assistant side: entities, the player, the clip viewer, and the **Blink Authentication** panel |
+| The matching custom integration | Only if you want the Home Assistant side: entities, the player, the clip viewer, and the **Blink Live View Proxy** panel |
 | The official Blink integration | Optional. It adds the snapshot behind the loading frame, the snapshot-refresh button and motion switches. Everything else works without it |
 
 ffmpeg and Python are inside the add-on image; there is nothing to install on
@@ -41,6 +41,16 @@ the host.
 | `port` | `8088` | Port the proxy HTTP API listens on |
 | `low_latency` | `false` | Re-encode the live view into one-second segments so it starts several seconds sooner. Costs CPU for each open stream; see [Low latency](../docs/CONFIGURATION.md#low-latency) |
 | `cameras` | `[]` | List of camera entries (see below) |
+| `ptt_disabled_product_types` | empty | Blink product types that are never offered Hold Talk, e.g. `owl`. Empty keeps the proxy's own default rather than allowing everything |
+| `ptt_disabled_camera_types` | empty | The same, by camera type, e.g. `mini`. Empty keeps the proxy's default |
+| `ptt_force_enabled_slugs` | empty | Cameras that are offered Hold Talk whatever the two lists above say |
+
+Push-to-talk needs Blink's IMMI transport. Cameras that stream over RTSP have
+no talk path at all, so listing their product type in
+`ptt_disabled_product_types` is what stops the button being offered where it
+can only fail. Each list is left empty by default and an empty list means
+"use the proxy's default", so clearing a box never turns push-to-talk on for a
+family that cannot use it.
 
 ### Camera fields
 
@@ -94,8 +104,8 @@ The add-on writes its token to `blink_liveview_proxy.token` in the Home
 Assistant config directory, and the integration's setup form pre-fills from it —
 nothing to copy. Upgrading from a version that ran without a token is handled
 the same way: the proxy starts requiring one, Home Assistant notices the
-rejected requests and asks you to confirm the new token, already filled in. Once that integration is added, Home Assistant shows **Blink
-Authentication** in the sidebar for administrators:
+rejected requests and asks you to confirm the new token, already filled in. Once that integration is added, Home Assistant shows **Blink Live View
+Proxy** in the sidebar for administrators; its **Authentication** tab is the login page:
 
 1. Open the panel and select **Reauthenticate** (or use the login form shown for
    an idle/failed proxy).
@@ -121,17 +131,48 @@ query strings.
 After the add-on starts, add the integration:
 
 ```
-Settings → Devices & Services → Add Integration → Blink Liveview Proxy
+Settings → Devices & Services → Add Integration → Blink Live View Proxy
 ```
 
-The form arrives pre-filled with `http://homeassistant.local:8088` and the
-token the add-on generated, so setup is usually a single click. If you replace
-`proxy_api_token` later, restart the add-on: it rewrites the shared file, and
-Home Assistant prompts once to accept the new token. The integration configures
-only the proxy URL, stream duration, and proxy token; Blink account
-authentication stays inside the proxy.
+The form arrives pre-filled with the token the add-on generated and the address
+it is reachable on, so setup is usually a single click. That address is the
+add-on's own hostname on Home Assistant's internal network — something like
+`http://a1b2c3d4-blink-liveview-proxy:8088`, where the prefix identifies the
+repository you installed from. It is not always a repository hash: for an
+add-on **built locally**, under `/addons/<name>/` rather than installed from
+the store, the prefix is literally `local` — `http://local-blink-liveview-proxy:8088`
+— which reads like a placeholder rather than a real slug if you go looking for
+a hash that is not there. It works with no port published to the host, which
+is the default: `8088/tcp` is offered in the add-on's **Network** panel and
+left unmapped unless you map it.
+
+If the form ever arrives with an address that does not work, the two things to
+try are the internal hostname above (take the slug from the add-on page's URL
+and swap `_` for `-`) or mapping `8088` in the Network panel and using
+`http://homeassistant.local:8088`.
+
+If you replace `proxy_api_token` later, restart the add-on: it rewrites the
+shared file, and Home Assistant prompts once to accept the new token. The
+integration configures only the proxy URL, stream duration, and proxy token;
+Blink account authentication stays inside the proxy.
+
+## Storage
+
+Two files are written outside `/data`, both into the Home Assistant config
+directory and both rewritten on every start: `blink_liveview_proxy.token` and
+`blink_liveview_proxy.url`, which are what the integration's setup form fills
+itself in from.
+
+Everything else the add-on keeps is under `/data`: the Blink refresh token
+(`blink-auth.json`), the generated proxy token, HLS segments while a live view
+is open, the last watched live view per camera, and from 0.7.0 a clip cache at
+`/data/clips` — each local clip fetched from Blink once, with its first-frame
+thumbnail beside it, pruned oldest-first past 512 MB.
 
 ## Health Check
+
+From a machine on your network, with `8088` mapped in the add-on's **Network**
+panel — without that mapping nothing on the host is listening, by design:
 
 ```bash
 curl http://homeassistant.local:8088/health

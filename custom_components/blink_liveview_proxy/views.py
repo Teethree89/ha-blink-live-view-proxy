@@ -47,7 +47,7 @@ LOGGER = logging.getLogger(__name__)
 STATIC_ROOT = Path(__file__).parent / "frontend"
 # The wordmarks and icon live in brand/, beside manifest.json, where Home
 # Assistant 2026.3.0 and newer serve them itself at /api/brands. This project
-# still supports 2024.6.0, where that route does not exist, so the panel gets
+# still supports 2024.11.0, where that route does not exist, so the panel gets
 # them from here instead and looks the same on every supported core.
 BRAND_ROOT = Path(__file__).parent / "brand"
 PLAYER_LIBRARY_URL = f"{ASSET_URL_BASE}/mpegts.min.js"
@@ -70,12 +70,14 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyHlsPlaylistView(hass))
     hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
+    hass.http.register_view(BlinkLiveviewProxyStopView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewMp4DownloadView(hass))
     hass.http.register_view(BlinkLiveviewProxySnapshotRefreshView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipsView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipDownloadView(hass))
+    hass.http.register_view(BlinkLiveviewProxyClipThumbnailView(hass))
     hass.http.register_view(BlinkLiveviewProxyClipsViewerView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthStatusView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthActionView(hass))
@@ -100,6 +102,7 @@ class BlinkLiveviewProxyAssetView(HomeAssistantView):
     _content_types: ClassVar[dict[str, str]] = {
         "blink-liveview-dialog.js": "application/javascript",
         "blink-proxy-auth-panel.js": "application/javascript",
+        "blink-liveview-icons.js": "application/javascript",
         "mpegts.min.js": "application/javascript",
         "logo.png": "image/png",
         "dark_logo.png": "image/png",
@@ -216,6 +219,16 @@ def _camera(hass: HomeAssistant, slug: str) -> dict[str, Any]:
         if camera.get("slug") == slug:
             return camera
     raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n")
+
+
+def _camera_inventory(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Return every proxy camera as slug and display name, for the clip viewer's select."""
+    cameras = _runtime(hass)["coordinator"].data.get("cameras", [])
+    return [
+        {"slug": str(item["slug"]), "name": str(item.get("name") or item["slug"])}
+        for item in cameras
+        if item.get("slug")
+    ]
 
 
 def _live_camera_state(hass: HomeAssistant, slug: str):
@@ -337,12 +350,13 @@ async def _open_proxy_response(
     client: BlinkLiveviewProxyClient,
     path: str,
     query: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> ClientResponse:
     """Open a streaming response from the local proxy."""
     try:
         response = await client._session.get(  # noqa: SLF001
             client.proxy_url(path, query),
-            headers=client.auth_headers(),
+            headers={**client.auth_headers(), **(headers or {})},
             timeout=ClientTimeout(connect=15, sock_connect=15, sock_read=75, total=None),
         )
     except ClientError as err:
@@ -354,6 +368,28 @@ async def _open_proxy_response(
     if response.status == 404:
         response.close()
         raise web.HTTPNotFound(text="Proxy resource not found\n")
+    if response.status == 503:
+        # The proxy is up but its Blink client is not ready - it is signing in,
+        # or reconnecting. Collapsing that into 502 told the browser the
+        # gateway was broken and left a permanent broken thumbnail; 503 is
+        # honest and is what the viewer retries on.
+        body = await response.text()
+        response.close()
+        raise web.HTTPServiceUnavailable(
+            text=body or "The proxy is not ready yet\n"
+        )
+    if response.status == 416:
+        # An unsatisfiable Range. The proxy answers it correctly, and says in
+        # Content-Range how long the resource actually is; collapsing that into
+        # 502 told the browser the gateway was broken and threw away the one
+        # header that would have let it ask again for something valid.
+        content_range = response.headers.get("Content-Range")
+        body = await response.text()
+        response.close()
+        raise web.HTTPRequestRangeNotSatisfiable(
+            text=body or "Requested range not satisfiable\n",
+            headers={"Content-Range": content_range} if content_range else None,
+        )
     if response.status == 429:
         retry_after = response.headers.get("Retry-After", "30")
         body = await response.text()
@@ -379,13 +415,25 @@ async def _proxy_stream(
     query: dict[str, str] | None = None,
     *,
     download_filename: str | None = None,
+    cache_control: str = "no-store",
 ) -> web.StreamResponse:
-    """Stream bytes from the local proxy to the browser."""
-    upstream = await _open_proxy_response(_client(hass), path, query)
+    """Stream bytes from the local proxy to the browser.
+
+    A Range header is forwarded and a 206 comes back as a 206. The proxy serves
+    cached clips as files, which answer ranges, and that is what lets the clip
+    player seek - and what Safari requires before it will play an MP4 at all.
+    """
+    forward: dict[str, str] = {}
+    if range_header := request.headers.get("Range"):
+        forward["Range"] = range_header
+    upstream = await _open_proxy_response(_client(hass), path, query, forward or None)
     headers = {
-        "Cache-Control": "no-store",
+        "Cache-Control": cache_control,
         "X-Accel-Buffering": "no",
     }
+    for name in ("Content-Range", "Content-Length", "Accept-Ranges"):
+        if name in upstream.headers:
+            headers[name] = upstream.headers[name]
     if download_filename:
         headers["Content-Disposition"] = (
             f'attachment; filename="{download_filename}"'
@@ -395,7 +443,7 @@ async def _proxy_stream(
         if upstream_disposition:
             headers["Content-Disposition"] = upstream_disposition
     response = web.StreamResponse(
-        status=200,
+        status=upstream.status if upstream.status in (200, 206) else 200,
         headers=headers,
     )
     response.content_type = content_type
@@ -485,6 +533,7 @@ video.ready {{
   gap:14px;
   justify-items:center;
   max-width:min(520px,calc(100vw - 32px));
+  padding-bottom:env(safe-area-inset-bottom, 0px);
 }}
 .spinner {{
   width:58px;
@@ -498,6 +547,8 @@ video.ready {{
 .title {{
   font-size:clamp(22px,4vw,38px);
   font-weight:700;
+  -webkit-user-select:none;
+  user-select:none;
 }}
 .status {{
   color:#cbd5e1;
@@ -515,8 +566,8 @@ video.ready {{
 }}
 .live-actions {{
   position:absolute;
-  top:16px;
-  right:16px;
+  top:calc(16px + env(safe-area-inset-top, 0px));
+  right:calc(16px + env(safe-area-inset-right, 0px));
   z-index:4;
   display:flex;
   gap:10px;
@@ -524,9 +575,19 @@ video.ready {{
 .live-actions[hidden] {{
   display:none;
 }}
+.live-actions.bottom-gutter {{
+  top:auto;
+  bottom:calc(16px + env(safe-area-inset-bottom, 0px));
+}}
 button,a.button {{
   appearance:none;
   border:0;
+  /* Hold Talk is a press-and-hold control, and a long press on a phone
+     selects the label and raises the callout menu unless both are refused. */
+  -webkit-user-select:none;
+  user-select:none;
+  -webkit-touch-callout:none;
+  -webkit-tap-highlight-color:transparent;
   border-radius:6px;
   background:#0284c7;
   color:#f8fafc;
@@ -556,6 +617,41 @@ button.talk.pending {{
 button.talk.active {{
   background:#16a34a;
 }}
+/* On a phone the stage is far bigger than a 16:9 picture in one direction or
+   the other - much taller in portrait, much wider in landscape - and a video
+   element that fills it puts iOS's native control bar, AirPlay and all, at the
+   bottom of the black rather than under the picture. Letting the element
+   shrink-wrap the picture keeps those controls where they belong.
+
+   It has to be flex, not the grid above. A grid row with no explicit size is
+   sized by its content, so `width:100%; height:auto` made the row as tall as
+   the video wanted to be and `max-height:100%` then measured itself against
+   that same grown row - clamping nothing, and cropping the bottom off a
+   landscape live view. A flex container has a definite height here, so the
+   percentages resolve against the screen and the picture is letterboxed
+   instead of overflowing. width and height stay auto so the element takes the
+   video's own shape, and the two max- rules bound it on both axes. */
+@media (max-width: 720px), (max-height: 520px) {{
+  /* Centred, not tucked into the corner. On a phone the picture reaches the
+     edges and these sat on top of the native mute and AirPlay controls. */
+  .live-actions {{
+    left:50%;
+    right:auto;
+    transform:translateX(-50%);
+  }}
+  .stage {{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+  }}
+  video {{
+    position:static;
+    width:auto;
+    height:auto;
+    max-width:100%;
+    max-height:100%;
+  }}
+}}
 </style>
 </head>
 <body>
@@ -573,8 +669,9 @@ button.talk.active {{
     </div>
   </section>
   <div id="liveActions" class="live-actions" hidden>
+    <button id="sound" class="secondary" type="button" aria-pressed="false">Unmute</button>
     <button id="talk" class="talk" type="button" disabled>Hold Talk</button>
-    <button id="endSave" class="danger" type="button">End &amp; Save</button>
+    <button id="end" class="danger" type="button">End</button>
   </div>
 </main>
 <script src="{PLAYER_LIBRARY_URL}"></script>
@@ -605,7 +702,8 @@ const liveActions = document.getElementById("liveActions");
 const restart = document.getElementById("restart");
 const save = document.getElementById("save");
 const talk = document.getElementById("talk");
-const endSave = document.getElementById("endSave");
+const sound = document.getElementById("sound");
+const endButton = document.getElementById("end");
 let player = null;
 let endTimer = null;
 let talkWs = null;
@@ -617,6 +715,91 @@ let talkMute = null;
 let talkActive = false;
 let talkStarting = false;
 let talkListening = false;
+
+// Sound, and why the stream starts without it.
+//
+// Every browser refuses to autoplay audio until someone has interacted with
+// the page, so the only live view that starts on its own is a muted one - and
+// a live view that silently never had sound reads as a broken one, especially
+// next to a saved clip, which plays with audio. The native control bar can
+// unmute, once you know to tap the picture to find it. This is the same
+// switch, in the open, next to the controls that are already there.
+const SOUND_PREFERENCE = "blink-liveview-sound";
+let restoringMute = false;
+
+function soundWanted() {{
+  try {{
+    return window.localStorage.getItem(SOUND_PREFERENCE) === "on";
+  }} catch (err) {{
+    // Storage can be unavailable outright in a private window or a webview
+    // with site data blocked. Sound then simply does not persist.
+    return false;
+  }}
+}}
+
+function rememberSound(on) {{
+  try {{
+    window.localStorage.setItem(SOUND_PREFERENCE, on ? "on" : "off");
+  }} catch (err) {{}}
+}}
+
+function syncSoundButton() {{
+  sound.textContent = video.muted ? "Unmute" : "Mute";
+  sound.setAttribute("aria-pressed", video.muted ? "false" : "true");
+}}
+
+function toggleSound() {{
+  video.muted = !video.muted;
+  if (!video.muted && video.volume === 0) video.volume = 1;
+  if (video.paused) video.play().catch(() => {{}});
+}}
+
+async function startPlayback() {{
+  // A tap on this frame counts as the gesture that permits sound, so someone
+  // who unmuted last time gets sound this time without asking again. If the
+  // browser refuses anyway, fall back to the muted start it does allow rather
+  // than leaving a still picture and "Tap play".
+  if (soundWanted()) video.muted = false;
+  try {{
+    await video.play();
+    return;
+  }} catch (err) {{
+    if (video.muted) {{
+      statusText.textContent = "Tap play to start live view";
+      return;
+    }}
+  }}
+  restoringMute = true;
+  video.muted = true;
+  restoringMute = false;
+  syncSoundButton();
+  try {{
+    await video.play();
+  }} catch (err) {{
+    statusText.textContent = "Tap play to start live view";
+  }}
+}}
+
+function positionLiveActions() {{
+  liveActions.classList.remove("bottom-gutter");
+  if (window.innerWidth >= window.innerHeight || liveActions.hidden) return;
+
+  const videoRect = video.getBoundingClientRect();
+  const roomBelow = window.innerHeight - videoRect.bottom;
+  // Safari does not expose whether its native media controls are currently
+  // showing. The rendered geometry tells us what matters: if a portrait
+  // letterbox leaves enough room below the video for both these buttons and
+  // the home indicator, use that gutter. Otherwise keep them at the top,
+  // clear of the native controls along the video's bottom edge.
+  if (roomBelow >= liveActions.offsetHeight + 80) {{
+    liveActions.classList.add("bottom-gutter");
+  }}
+}}
+
+function positionLiveActionsThroughRotation() {{
+  positionLiveActions();
+  for (const delay of [60, 180, 400, 800]) setTimeout(positionLiveActions, delay);
+}}
 
 function streamUrl() {{
   const token = encodeURIComponent(accessToken || "");
@@ -647,10 +830,26 @@ function downloadUrl() {{
   return new URL(path, window.location.origin).href;
 }}
 
-function lastLiveviewInfoUrl() {{
+function stopUrl() {{
   const token = encodeURIComponent(accessToken || "");
-  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/last-liveview?token=${{token}}&cache=${{Date.now()}}`;
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/stop?token=${{token}}`;
   return new URL(path, window.location.origin).href;
+}}
+
+// Tell the proxy the live view is over. On the MPEG-TS path that happens by
+// itself when the connection drops; the HLS path has only an idle timeout,
+// which on a tuned install can be the better part of a minute - long enough
+// that the camera keeps streaming to nobody, and that the cached copy is not
+// finalized until well after anything waiting for it has given up.
+async function stopUpstream() {{
+  try {{
+    await fetch(stopUrl(), {{
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      keepalive: true,
+    }});
+  }} catch (err) {{}}
 }}
 
 function delay(ms) {{
@@ -662,36 +861,6 @@ function downloadFilename(response) {{
   const header = response.headers.get("content-disposition") || "";
   const match = header.match(/filename="?([^";]+)"?/i);
   return match ? match[1] : fallback;
-}}
-
-function liveviewKey(info) {{
-  if (!info || !info.available) {{
-    return "";
-  }}
-  return `${{info.filename || ""}}:${{info.bytes || ""}}:${{info.ended_at || ""}}`;
-}}
-
-async function currentLiveviewInfo() {{
-  const response = await fetch(lastLiveviewInfoUrl(), {{
-    cache: "no-store",
-    credentials: "same-origin"
-  }});
-  if (!response.ok) {{
-    return null;
-  }}
-  return response.json();
-}}
-
-async function waitForFinalizedLiveview(previousKey) {{
-  for (let attempt = 0; attempt < 10; attempt += 1) {{
-    await delay(attempt === 0 ? 800 : 700);
-    const info = await currentLiveviewInfo();
-    const key = liveviewKey(info);
-    if (key && key !== previousKey) {{
-      return info;
-    }}
-  }}
-  throw new Error("No newly finalized live view was found");
 }}
 
 async function fetchLastViewMp4(retries = 2) {{
@@ -897,6 +1066,10 @@ async function saveLastView() {{
   save.textContent = "Saving MP4";
 
   try {{
+    // Belt and braces: if anything still has the session open, close it so
+    // the file being fetched is the one just watched rather than an older
+    // one. A no-op when it has already stopped.
+    await stopUpstream();
     const response = await fetchLastViewMp4(3);
     await downloadMp4(response);
     save.textContent = "Saved";
@@ -911,25 +1084,30 @@ async function saveLastView() {{
   }}
 }}
 
-async function endAndSaveCurrentStream() {{
-  const originalText = endSave.textContent;
-  endSave.disabled = true;
-  endSave.textContent = "Saving";
-
+// One job, not three. This used to end the stream, poll for the recording to
+// be finalized and download it, and the polling could not work on the HLS
+// path: the session is only finalized when it stops, and it did not stop
+// until the idle timeout - three quarters of a minute on a tuned install,
+// long after the poll had given up and reported a failure for a recording
+// that did in fact arrive. Ending and saving are two buttons now, and the
+// save one appears once the stream has actually ended.
+async function endCurrentStream() {{
+  endButton.disabled = true;
   try {{
-    const previousKey = liveviewKey(await currentLiveviewInfo().catch(() => null));
-    stopPlayer();
-    setLoading("Saving current live view");
-    await waitForFinalizedLiveview(previousKey);
-    const response = await fetchLastViewMp4(4);
-    await downloadMp4(response);
-    setEnded("Live view saved.");
-  }} catch (err) {{
-    setEnded("Could not save the current live view.");
+    await endSession("Live view ended. Save it, or start again.");
   }} finally {{
-    endSave.disabled = false;
-    endSave.textContent = originalText;
+    endButton.disabled = false;
   }}
+}}
+
+// Every way a live view can finish goes through here, so the upstream session
+// is always closed and its recording always finalized before Save MP4 is
+// offered - whether the viewer ended it, the timer elapsed, or the camera did.
+async function endSession(message) {{
+  stopPlayer();
+  setLoading("Ending live view");
+  await stopUpstream();
+  setEnded(message);
 }}
 
 function setLoading(message) {{
@@ -992,25 +1170,19 @@ async function startPlayer() {{
       liveActions.hidden = false;
       talk.hidden = !pttSupported;
       talk.disabled = !pttSupported;
+      positionLiveActions();
     }};
     video.onended = () => {{
-      stopPlayer();
-      setEnded("Live view ended.");
+      endSession("Live view ended.");
     }};
     video.onerror = () => {{
-      stopPlayer();
-      setEnded("Live view ended or the camera stopped sending video.");
+      endSession("Live view ended or the camera stopped sending video.");
     }};
     video.src = hlsUrl();
     video.load();
-    try {{
-      await video.play();
-    }} catch (err) {{
-      statusText.textContent = "Tap play to start live view";
-    }}
+    await startPlayback();
     endTimer = setTimeout(() => {{
-      stopPlayer();
-      setEnded(`${{seconds}} second live view finished.`);
+      endSession(`${{seconds}} second live view finished.`);
     }}, (seconds + 5) * 1000);
     return;
   }}
@@ -1037,8 +1209,7 @@ async function startPlayer() {{
   }});
 
   player.on(mpegts.Events.ERROR, () => {{
-    stopPlayer();
-    setEnded("Live view ended or the camera stopped sending video.");
+    endSession("Live view ended or the camera stopped sending video.");
   }});
 
   video.onplaying = () => {{
@@ -1048,40 +1219,63 @@ async function startPlayer() {{
     liveActions.hidden = false;
     talk.hidden = !pttSupported;
     talk.disabled = !pttSupported;
+    positionLiveActions();
   }};
 
   video.onended = () => {{
-    stopPlayer();
-    setEnded("Live view ended.");
+    endSession("Live view ended.");
   }};
 
   player.attachMediaElement(video);
   player.load();
 
-  try {{
-    await video.play();
-  }} catch (err) {{
-    statusText.textContent = "Tap play to start live view";
-  }}
+  await startPlayback();
 
   endTimer = setTimeout(() => {{
-    stopPlayer();
-    setEnded(`${{seconds}} second live view finished.`);
+    endSession(`${{seconds}} second live view finished.`);
   }}, (seconds + 5) * 1000);
 }}
 
 restart.addEventListener("click", startPlayer);
 save.addEventListener("click", saveLastView);
-endSave.addEventListener("click", endAndSaveCurrentStream);
+endButton.addEventListener("click", endCurrentStream);
+sound.addEventListener("click", toggleSound);
+video.addEventListener("volumechange", () => {{
+  syncSoundButton();
+  // Keep the preference in step with the native control bar too, so unmuting
+  // there is remembered exactly like unmuting here. The one change that is
+  // not a choice - the fallback to a muted start - is excluded.
+  if (!restoringMute) rememberSound(!video.muted);
+}});
 talk.addEventListener("pointerdown", startTalk);
 talk.addEventListener("pointerup", stopTalk);
 talk.addEventListener("pointercancel", stopTalk);
 talk.addEventListener("pointerleave", stopTalk);
+video.addEventListener("loadedmetadata", positionLiveActions);
+video.addEventListener("resize", positionLiveActions);
+window.addEventListener("resize", positionLiveActions);
+window.addEventListener("orientationchange", positionLiveActionsThroughRotation);
 window.addEventListener("blur", stopTalk);
 window.addEventListener("beforeunload", () => {{
   stopTalk();
 }});
 talk.hidden = !pttSupported;
+syncSoundButton();
+
+// The dialog closes by removing this frame. On iOS that alone left the
+// <video> fetching HLS segments from a detached document, so the proxy never
+// saw the stream go idle and kept the Blink live view open behind it. The
+// parent calls this first; pagehide covers a normal navigation away.
+window.__blinkStopPlayer = () => {{
+  try {{ stopPlayer(); }} catch (err) {{}}
+  // Closing the dialog should free the camera too, not leave it streaming to
+  // nobody until the idle timeout elapses.
+  stopUpstream();
+}};
+window.addEventListener("pagehide", () => {{
+  window.__blinkStopPlayer();
+}});
+
 startPlayer();
 </script>
 </body>
@@ -1327,6 +1521,41 @@ class BlinkLiveviewProxyPttView(HomeAssistantView):
         return browser_ws
 
 
+class BlinkLiveviewProxyStopView(HomeAssistantView):
+    """End a camera's live view now, rather than at the proxy's idle timeout."""
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/stop"
+    name = "api:blink_liveview_proxy:stop"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def post(self, request: web.Request, slug: str) -> web.Response:
+        """Ask the proxy to stop this camera's session."""
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        client = _client(self.hass)
+        try:
+            async with asyncio.timeout(15):
+                async with client._session.post(  # noqa: SLF001
+                    client.proxy_url(f"/cameras/{slug}/stop"),
+                    headers=client.auth_headers(),
+                ) as response:
+                    payload = await response.json(content_type=None)
+        except (ClientError, asyncio.TimeoutError, ValueError) as err:
+            # Best effort by nature: the caller is on its way out either way,
+            # and the idle timeout is still there behind this.
+            LOGGER.debug("Could not stop the live view for %s: %s", slug, err)
+            return web.json_response(
+                {"stopped": False}, headers={"Cache-Control": "no-store"}
+            )
+        return web.json_response(
+            payload if isinstance(payload, dict) else {"stopped": True},
+            headers={"Cache-Control": "no-store"},
+        )
+
+
 class BlinkLiveviewProxyLastLiveviewInfoView(HomeAssistantView):
     """Proxy last-liveview metadata."""
 
@@ -1465,170 +1694,155 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
 def _rewrite_clip_download_urls(
     payload: dict[str, Any], access_token: str = ""
 ) -> dict[str, Any]:
-    """Rewrite proxy-relative clip URLs into authenticated HA API URLs."""
+    """Rewrite proxy-relative clip URLs into authenticated HA API URLs.
+
+    Both the clip and, from proxy 0.7.0, its thumbnail. An older proxy sends
+    no thumbnail_url and the viewer shows a placeholder for that row.
+    """
     for clip in payload.get("clips", []):
         if not isinstance(clip, dict):
             continue
-        download_url = str(clip.get("download_url") or "")
-        if download_url.startswith("/clips/"):
-            clip["download_url"] = f"/api/blink_liveview_proxy{download_url}"
-        if access_token and clip.get("download_url"):
-            separator = "&" if "?" in str(clip["download_url"]) else "?"
-            clip["download_url"] = (
-                f"{clip['download_url']}{separator}token="
-                f"{quote(access_token, safe='')}"
-            )
+        for key in ("download_url", "thumbnail_url"):
+            url = str(clip.get(key) or "")
+            if not url:
+                continue
+            if url.startswith("/clips/"):
+                url = f"/api/blink_liveview_proxy{url}"
+            if access_token:
+                separator = "&" if "?" in url else "?"
+                url = f"{url}{separator}token={quote(access_token, safe='')}"
+            clip[key] = url
     return payload
 
 
-def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
-    """Return the local Sync Module clip viewer page."""
+def _clips_viewer_html(
+    camera_slug: str | None,
+    access_token: str,
+    cameras: list[dict[str, str]] | None = None,
+) -> str:
+    """Return the clip viewer page, for Sync Module and cloud clips alike.
+
+    Two panes that scroll independently: the list on its own, and the
+    player locked to the viewport beside it. A plain string, not an
+    f-string, because the CSS is full of braces; values go in by
+    .replace(), and a test checks every placeholder is substituted.
+    """
     camera_json = json.dumps(camera_slug or "")
+    cameras_json = json.dumps(cameras or [])
     token_json = json.dumps(access_token)
     html_text = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Blink Local Clips</title>
+<title>Clips</title>
 <link rel="icon" href="__ASSET_BASE__/icon.png">
 <style>
-html,body {
-  margin:0;
-  min-height:100%;
-  background:#05070a;
-  color:#f8fafc;
-  font-family:Arial,Helvetica,sans-serif;
+:root{color-scheme:dark;--bg:#05070a;--panel:#0b1018;--card:#111827;--line:rgba(148,163,184,.16);--text:#f8fafc;--muted:#cbd5e1;--dim:#94a3b8;--accent:#0284c7;--accent-2:#38bdf8}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:Arial,Helvetica,sans-serif}
+/* The page is locked to the viewport and the list scrolls on its own. It used
+   to grow with the list, so the preview stretched to the height of sixty rows
+   and the video sat somewhere in the middle of it. */
+body{height:100vh;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+.toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px;padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
+.toolbar h1{display:none;margin:0;font-size:17px;align-self:center}
+body.standalone .toolbar h1{display:block}
+/* Opened in the dialog there is a floating close button over the top-left
+   corner, so the first control has to start clear of it. Standalone there is
+   no such button and the heading takes that space instead. */
+body:not(.standalone) .toolbar{padding-left:60px}
+label{display:grid;gap:4px;color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+select,button,a.button{min-height:34px;border:1px solid rgba(148,163,184,.28);border-radius:6px;background:var(--card);color:var(--text);font:inherit;font-size:14px}
+select{min-width:128px;padding:0 10px}
+button,a.button{display:inline-grid;place-items:center;padding:0 12px;font-weight:700;cursor:pointer;text-decoration:none}
+button.primary{border-color:var(--accent);background:var(--accent)}
+button:disabled{opacity:.6;cursor:default}
+.summary{margin-left:auto;align-self:center;color:var(--dim);font-size:13px}
+.badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--dim);font-size:11px;font-weight:600;vertical-align:middle}
+.thumb.cloud .fallback{display:grid;font-size:11px;font-weight:600;text-align:center;line-height:1.25;padding:0 6px}
+main{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);min-height:0}
+.list{overflow-y:auto;overscroll-behavior:contain;border-right:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
+.empty,.loading{padding:28px 18px;color:var(--muted);line-height:1.5}
+.clip{display:grid;grid-template-columns:132px minmax(0,1fr);gap:12px;align-items:center;width:100%;margin:0;padding:10px 12px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;color:inherit;text-align:left;cursor:pointer;font:inherit}
+.clip:hover,.clip:focus-visible{background:rgba(148,163,184,.08);outline:none}
+.clip.active{background:rgba(2,132,199,.16);box-shadow:inset 3px 0 0 var(--accent-2)}
+/* The tile is its own placeholder. aspect-ratio plus the img's width/height
+   attributes mean the row is the right height before anything is fetched, so
+   nothing moves when the picture arrives - it fades in over the skeleton.
+   That replaced a spinner, which was both easy to miss at this size and the
+   only thing between an empty tile and a filled one. */
+/* There is no <img> here on purpose. The picture arrives as a background on
+   a div of fixed size, and a background image takes no part in layout at all
+   - so the row cannot change height when it loads, whatever the picture turns
+   out to be. With an img the tile took its height from the one child whose
+   size is unknown until the network answers, and a list of cold rows was a
+   stack of squat rows that each jumped to full height as its own picture
+   landed. The tile is its final size from the first paint. */
+.thumb{position:relative;width:132px;height:74px;border-radius:6px;overflow:hidden;background:#1b2635}
+.thumb .picture{position:absolute;inset:0;background-position:center;background-size:cover;background-repeat:no-repeat;opacity:0;transition:opacity .3s ease}
+.thumb.loaded .picture{opacity:1}
+/* Two channels, because one subtle one is not enough: the whole tile pulses
+   between two clearly separated blues, and a light band sweeps across it.
+   The first version moved #141c26 to #202c3a - a step of about fifteen per
+   channel on a 132px tile - which animated correctly and could not be seen. */
+.thumb .skeleton{position:absolute;inset:0;background:#1b2635;animation:pulse 1.3s ease-in-out infinite}
+.thumb .skeleton::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 32%,rgba(125,211,252,.22) 50%,transparent 68%);background-size:220% 100%;animation:sweep 1.3s linear infinite}
+.thumb.loaded .skeleton,.thumb.failed .skeleton,.thumb.none .skeleton{display:none}
+@keyframes pulse{0%,100%{background-color:#1b2635}50%{background-color:#31465f}}
+@keyframes sweep{from{background-position:170% 0}to{background-position:-70% 0}}
+.thumb .fallback{position:absolute;inset:0;display:none;place-items:center;color:var(--dim)}
+.thumb.failed .fallback,.thumb.none .fallback{display:grid}
+.thumb svg{width:28px;height:28px;fill:currentColor}
+.thumb .play{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity .15s ease;background:rgba(2,6,23,.35)}
+.thumb .play svg{width:34px;height:34px;filter:drop-shadow(0 2px 6px rgba(0,0,0,.6))}
+.clip:hover .thumb.loaded .play,.clip:focus-visible .thumb.loaded .play,.clip.active .thumb.loaded .play{opacity:1}
+.text{min-width:0;display:grid;gap:3px}
+.text strong{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta{color:var(--muted);font-size:13px}
+.stage{display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0;gap:12px;padding:16px;background:#020617}
+/* The video fills whatever the stage gives it and letterboxes inside, so it
+   is centred whether the row is tall or wide. No fixed frame: a box sized by
+   aspect-ratio cannot shrink on both axes at once. */
+.frame{position:relative;min-height:0;display:grid;place-items:center;border-radius:10px;overflow:hidden;background:#000}
+video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;background:#000}
+.placeholder{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:10px;padding:24px;color:var(--dim);text-align:center;line-height:1.5}
+.placeholder svg{width:52px;height:52px;fill:currentColor;opacity:.6}
+.frame.playing .placeholder{display:none}
+.now{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;min-height:34px}
+.now strong{font-size:15px}
+.now .meta{flex:1 1 auto}
+.now[hidden]{display:none}
+/* Still obviously a placeholder without moving: a flat fill lighter than the
+   tile it sits in, rather than nothing at all. */
+@media (prefers-reduced-motion:reduce){
+  .thumb .skeleton{animation:none;background:#2b3d53}
+  .thumb .skeleton::after{display:none}
 }
-body {
-  display:grid;
-  grid-template-rows:auto auto 1fr;
-}
-header {
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  min-height:56px;
-  padding:0 16px;
-  background:#111827;
-  border-bottom:1px solid rgba(148,163,184,.2);
-}
-h1 {
-  margin:0;
-  font-size:18px;
-  line-height:1.2;
-}
-.controls {
-  display:flex;
-  flex-wrap:wrap;
-  gap:10px;
-  align-items:center;
-  padding:12px 16px;
-  background:#0b1018;
-  border-bottom:1px solid rgba(148,163,184,.16);
-}
-label {
-  display:grid;
-  gap:4px;
-  color:#cbd5e1;
-  font-size:12px;
-  font-weight:700;
-}
-select,button {
-  min-height:36px;
-  border:1px solid rgba(148,163,184,.28);
-  border-radius:6px;
-  background:#111827;
-  color:#f8fafc;
-  font:inherit;
-}
-select {
-  min-width:138px;
-  padding:0 10px;
-}
-button,a.button {
-  display:inline-grid;
-  place-items:center;
-  min-width:82px;
-  padding:0 12px;
-  text-decoration:none;
-  font-weight:800;
-  cursor:pointer;
-}
-button.primary {
-  border-color:#0284c7;
-  background:#0284c7;
-}
-main {
-  display:grid;
-  grid-template-columns:minmax(280px,420px) 1fr;
-  min-height:0;
-}
-.list {
-  overflow:auto;
-  border-right:1px solid rgba(148,163,184,.16);
-}
-.empty,.loading {
-  padding:28px 18px;
-  color:#cbd5e1;
-}
-.clip {
-  display:grid;
-  gap:8px;
-  padding:14px 16px;
-  border-bottom:1px solid rgba(148,163,184,.14);
-}
-.clip strong {
-  font-size:15px;
-}
-.meta {
-  color:#cbd5e1;
-  font-size:13px;
-}
-.row-actions {
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-}
-.preview {
-  display:grid;
-  grid-template-rows:1fr auto;
-  min-width:0;
-  min-height:0;
-  background:#020617;
-}
-video {
-  width:100%;
-  height:100%;
-  min-height:260px;
-  object-fit:contain;
-  background:#020617;
-}
-.preview-title {
-  padding:12px 16px;
-  color:#cbd5e1;
-  background:#0b1018;
-  border-top:1px solid rgba(148,163,184,.16);
-}
-@media (max-width: 780px) {
-  main {
-    grid-template-columns:1fr;
-  }
-  .list {
-    max-height:42vh;
-    border-right:0;
-    border-bottom:1px solid rgba(148,163,184,.16);
-  }
+@media (max-width:780px){
+  /* Phone: video first at its natural height, the list scrolls underneath. */
+  main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+  .stage{padding:10px 10px 8px;gap:8px}
+  .frame{aspect-ratio:16/9}
+  video{height:100%}
+  .list{border-right:0;border-top:1px solid var(--line)}
+  .clip{grid-template-columns:104px minmax(0,1fr)}
+  .thumb{width:104px;height:59px}
+  .toolbar{gap:8px 10px}
+  select{min-width:104px}
 }
 </style>
 </head>
 <body>
-<header>
-  <h1>Blink Local Clips</h1>
-  <span id="summary" class="meta"></span>
-</header>
-<section class="controls">
+<section class="toolbar">
+  <h1>Clips</h1>
+  <label>Source
+    <select id="source">
+      <option value="both" selected>Sync Module + cloud</option>
+      <option value="cloud">Blink cloud</option>
+      <option value="local">Sync Module</option>
+    </select>
+  </label>
   <label>Window
     <select id="hours">
       <option value="24">24 hours</option>
@@ -1642,7 +1856,7 @@ video {
       <option value="">All cameras</option>
     </select>
   </label>
-  <label>Limit
+  <label>Show
     <select id="limit">
       <option value="30">30 clips</option>
       <option value="60" selected>60 clips</option>
@@ -1650,44 +1864,185 @@ video {
     </select>
   </label>
   <button id="refresh" class="primary" type="button">Refresh</button>
+  <button id="cloudThumbs" class="secondary" type="button" hidden>Load cloud thumbnails</button>
+  <span id="summary" class="summary"></span>
 </section>
 <main>
-  <section id="list" class="list">
-    <div class="loading">Loading local Sync Module clips...</div>
+  <section class="stage">
+    <div id="frame" class="frame">
+      <video id="video" controls playsinline preload="metadata"></video>
+      <div class="placeholder">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z"/></svg>
+        <span>Select a clip to play it here.</span>
+      </div>
+    </div>
+    <div id="now" class="now" hidden>
+      <strong id="nowTitle"></strong>
+      <span id="nowMeta" class="meta"></span>
+      <a id="nowDownload" class="button" href="#" download>Download</a>
+    </div>
   </section>
-  <section class="preview">
-    <video id="video" controls playsinline></video>
-    <div id="previewTitle" class="preview-title">Select a clip to preview it here.</div>
+  <section id="list" class="list" role="list" aria-label="Clips">
+    <div class="loading">Loading clips…</div>
   </section>
 </main>
 <script>
 const list = document.getElementById("list");
 const video = document.getElementById("video");
+const frame = document.getElementById("frame");
 const summary = document.getElementById("summary");
-const previewTitle = document.getElementById("previewTitle");
+const now = document.getElementById("now");
+const nowTitle = document.getElementById("nowTitle");
+const nowMeta = document.getElementById("nowMeta");
+const nowDownload = document.getElementById("nowDownload");
+const source = document.getElementById("source");
 const hours = document.getElementById("hours");
 const limit = document.getElementById("limit");
 const camera = document.getElementById("camera");
 const refresh = document.getElementById("refresh");
+const cloudThumbs = document.getElementById("cloudThumbs");
 const initial = new URLSearchParams(window.location.search);
 const fixedCamera = __CAMERA_JSON__;
+const inventory = __CAMERAS_JSON__;
+const TOKENS_REQUEST = "blink_liveview_proxy_clips_tokens";
+const TOKENS_REPLY = "blink_liveview_proxy_clips_tokens_reply";
+const SOURCE_KEY = "blink_liveview_proxy.clips.source";
+const EMPTY_TEXT = {
+  both: "No clips in this window, from the Sync Module or from Blink's cloud. Try a longer one.",
+  cloud: "No clips in this window from Blink's cloud. Try a longer one, or another source.",
+  local: "No clips in this window from the Sync Module. Try a longer one, or another source."
+};
+let loadSeq = 0;
 const accessToken = __TOKEN_JSON__;
+const FILM_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z"/></svg>';
+const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
 let clips = [];
+let activeId = "";
 
-if (fixedCamera || initial.get("camera")) {
-  const slug = fixedCamera || initial.get("camera");
-  camera.append(new Option(slug, slug));
-  camera.value = slug;
-  camera.disabled = Boolean(fixedCamera);
+// Opened outside the dialog there is no header naming the page, so show one.
+if (window.self === window.top) document.body.classList.add("standalone");
+
+// An account whose clips are all in one place would otherwise pick it again every open.
+let remembered = "";
+try { remembered = localStorage.getItem(SOURCE_KEY) || ""; } catch (err) { remembered = ""; }
+const wantedSource = initial.get("source") || remembered;
+if (["both", "cloud", "local"].includes(wantedSource)) source.value = wantedSource;
+
+// Each request is authorised for one camera; inside the dialog the page borrows the token of every other one.
+const inDialog = Boolean(fixedCamera) && window.self !== window.top;
+const tokens = fixedCamera && accessToken ? { [fixedCamera]: accessToken } : {};
+let chosen = false;
+
+function fillCameraOptions() {
+  const known = new Map(inventory.map((item) => [item.slug, item.name || item.slug]));
+  const wantedCamera = fixedCamera ? "" : initial.get("camera") || "";
+  if (wantedCamera && !known.has(wantedCamera)) known.set(wantedCamera, wantedCamera);
+  const pinned = Boolean(fixedCamera) && Object.keys(tokens).length < 2;
+  const slugs = fixedCamera ? Object.keys(tokens) : [...known.keys()];
+  const current = camera.value;
+  camera.replaceChildren();
+  if (!pinned) camera.append(new Option("All cameras", ""));
+  slugs.sort((a, b) => (known.get(a) || a).localeCompare(known.get(b) || b));
+  for (const slug of slugs) camera.append(new Option(known.get(slug) || slug, slug));
+  let value = "";
+  if (pinned) value = fixedCamera;
+  else if (chosen) value = slugs.includes(current) ? current : "";
+  else if (!fixedCamera) value = wantedCamera;
+  camera.value = value;
+  camera.disabled = pinned;
 }
+fillCameraOptions();
+
+// Home Assistant rotates camera tokens, so the dialog is asked again before every load; a dialog that never answers (an older copy still cached) leaves the page pinned.
+function requestTokens() {
+  return new Promise((resolve) => {
+    if (!inDialog) { resolve(); return; }
+    const timer = setTimeout(() => { window.removeEventListener("message", onReply); resolve(); }, 1500);
+    function onReply(event) {
+      const data = event.data || {};
+      if (event.source !== window.parent || event.origin !== window.location.origin || data.type !== TOKENS_REPLY) return;
+      window.removeEventListener("message", onReply);
+      clearTimeout(timer);
+      Object.assign(tokens, data.tokens || {});
+      resolve();
+    }
+    window.addEventListener("message", onReply);
+    window.parent.postMessage({ type: TOKENS_REQUEST }, window.location.origin);
+  });
+}
+
+// Thumbnails are cut on the proxy from a clip it has to fetch from Blink
+// first, one at a time - each fetch makes the Sync Module upload the clip to
+// Blink's cloud and polls until it lands, about two and a half seconds.
+//
+// Asking for every visible row at once therefore put a dozen requests behind
+// that one queue. The last of them waited the better part of a minute, some
+// came back 502, and Blink began throttling the burst of prepare_download
+// calls. So the browser keeps its own queue two deep, rows fill top-down, and
+// a request that fails anyway is retried rather than left as a dead tile.
+const QUEUE = [];
+let inFlight = 0;
+const MAX_IN_FLIGHT = 2;
+
+function pump() {
+  while (inFlight < MAX_IN_FLIGHT && QUEUE.length) {
+    const job = QUEUE.shift();
+    inFlight += 1;
+    job().then(() => { inFlight -= 1; pump(); });
+  }
+}
+
+function loadThumbnail(box, picture, url, attempt = 0) {
+  return new Promise((resolve) => {
+    // A detached Image is only ever a loader. It never enters the document,
+    // so it cannot affect layout; once it has decoded, the same URL goes on
+    // as a background and fades in.
+    const probe = new Image();
+    probe.onload = () => {
+      picture.style.backgroundImage = `url("${probe.src.replace(/"/g, "%22")}")`;
+      box.classList.add("loaded");
+      resolve();
+    };
+    probe.onerror = () => {
+      // Transient by nature: the proxy may still be signing in to Blink, or
+      // this clip lost its place behind a long queue. Both used to leave a
+      // placeholder that never recovered.
+      if (attempt < 2) {
+        setTimeout(
+          () => loadThumbnail(box, picture, url, attempt + 1).then(resolve),
+          1200 * (attempt + 1),
+        );
+        return;
+      }
+      box.classList.add("failed");
+      resolve();
+    };
+    // A fresh query string per attempt: a browser will not re-request a src it
+    // has already failed on.
+    probe.src = attempt ? `${url}${url.includes("?") ? "&" : "?"}retry=${attempt}` : url;
+  });
+}
+
+function queueThumbnail(box, picture, url) {
+  QUEUE.push(() => loadThumbnail(box, picture, url));
+  pump();
+}
+
+const visible = "IntersectionObserver" in window
+  ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const box = entry.target;
+        visible.unobserve(box);
+        queueThumbnail(box, box.querySelector(".picture"), box.dataset.src);
+      }
+    }, { root: list, rootMargin: "160px 0px" })
+  : null;
 
 function formatTime(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value || "";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(date);
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function formatSize(value) {
@@ -1701,107 +2056,289 @@ function optionLabel(clip) {
   return clip.camera_name || clip.slug || "Camera";
 }
 
-function updateCameraOptions() {
+// What a cloud thumbnail actually costs.
+//
+// A thumbnail is the first frame cut from the clip file, so there is no cheap
+// way to draw one: the clip has to be on disk first. For a local clip that
+// download is the Sync Module on your own network. For a cloud clip it is
+// Blink's servers, and a screenful of tiles would pull every clip in the
+// window off them - so cloud tiles stay placeholders until someone asks,
+// either by playing one clip or by pressing the button, which says what it is
+// about to do. Blink's own app behaves the same way: a list is cheap, a clip
+// is fetched when you tap it.
+//
+// The newest few are drawn anyway: a screen of grey tiles says nothing about
+// what you are choosing between, and six is about one phone screen of them.
+const AUTO_CLOUD_THUMBNAILS = 6;
+let cloudThumbnailsOn = false;
+const fetchedClips = new Set();
+const autoThumbs = new Set();
+
+function cloudThumbnailReady(clip) {
+  return cloudThumbnailsOn || fetchedClips.has(clip.id) || autoThumbs.has(clip.id);
+}
+
+function thumbnail(clip) {
+  const box = document.createElement("div");
+  box.className = "thumb";
+  const fallback = document.createElement("div");
+  fallback.className = "fallback";
+  fallback.innerHTML = FILM_ICON;
+  box.append(fallback);
+  if (!clip.thumbnail_url) {
+    // An older proxy lists clips without thumbnails. Say so quietly.
+    box.classList.add("none");
+    return box;
+  }
+  if (clip.source === "cloud" && !cloudThumbnailReady(clip)) {
+    box.classList.add("none", "cloud");
+    fallback.textContent = "In Blink's cloud";
+    box.title = "Play this clip, or load cloud thumbnails, to see a frame";
+    return box;
+  }
+  const skeleton = document.createElement("div");
+  skeleton.className = "skeleton";
+  skeleton.setAttribute("aria-label", "Loading thumbnail");
+  const picture = document.createElement("div");
+  picture.className = "picture";
+  const play = document.createElement("div");
+  play.className = "play";
+  play.innerHTML = PLAY_ICON;
+  box.append(skeleton, picture, play);
+  box.dataset.src = clip.thumbnail_url;
+  if (visible) visible.observe(box);
+  else queueThumbnail(box, picture, clip.thumbnail_url);
+  return box;
+}
+
+function upgradeThumbnail(clip) {
+  // Swap one placeholder for a real tile without rebuilding the list, which
+  // would move the scroll position out from under whoever just clicked.
+  const row = list.querySelector(`.clip[data-id="${CSS.escape(clip.id)}"]`);
+  const existing = row && row.querySelector(".thumb");
+  if (!existing) return;
+  existing.replaceWith(thumbnail(clip));
+}
+
+function play(clip) {
+  activeId = clip.id;
+  if (clip.source === "cloud" && !fetchedClips.has(clip.id)) {
+    // Playing it puts it in the proxy's cache, so the thumbnail now costs
+    // nothing more. The proxy locks per clip, so this waits on the same
+    // download rather than starting a second one.
+    fetchedClips.add(clip.id);
+    updateCloudThumbnailButton();
+    upgradeThumbnail(clip);
+  }
+  for (const row of list.querySelectorAll(".clip")) {
+    row.classList.toggle("active", row.dataset.id === clip.id);
+  }
+  frame.classList.add("playing");
+  video.src = clip.download_url;
+  video.load();
+  video.play().catch(() => {});
+  nowTitle.textContent = optionLabel(clip);
+  const size = formatSize(clip.size);
+  nowMeta.textContent = `${formatTime(clip.created_at)}${size ? ` · ${size}` : ""}`;
+  nowDownload.href = clip.download_url;
+  now.hidden = false;
+}
+
+function shownClips() {
   const selected = camera.value;
-  const seen = new Map();
-  for (const clip of clips) {
-    if (!clip.slug) continue;
-    seen.set(clip.slug, optionLabel(clip));
+  const shown = selected ? clips.filter((clip) => clip.slug === selected) : clips;
+  autoThumbs.clear();
+  for (const clip of shown) {
+    if (autoThumbs.size >= AUTO_CLOUD_THUMBNAILS) break;
+    if (clip.source === "cloud" && clip.thumbnail_url) autoThumbs.add(clip.id);
   }
-  camera.replaceChildren(new Option("All cameras", ""));
-  for (const [slug, label] of [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))) {
-    camera.append(new Option(label, slug));
-  }
-  if (selected && seen.has(selected)) {
-    camera.value = selected;
-  }
+  return shown;
 }
 
 function render() {
-  const selected = fixedCamera || camera.value;
-  const visible = selected ? clips.filter((clip) => clip.slug === selected) : clips;
-  summary.textContent = visible.length ? `${visible.length} local clip${visible.length === 1 ? "" : "s"}` : "";
+  const shown = shownClips();
+  summary.textContent = shown.length ? `${shown.length} clip${shown.length === 1 ? "" : "s"}` : "";
+  QUEUE.length = 0;
   list.replaceChildren();
-  if (!visible.length) {
+  if (!shown.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No local Sync Module clips found for this window.";
+    empty.textContent = EMPTY_TEXT[source.value] || EMPTY_TEXT.both;
     list.append(empty);
     return;
   }
-  for (const clip of visible) {
-    const row = document.createElement("article");
-    row.className = "clip";
+  for (const clip of shown) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `clip${clip.id === activeId ? " active" : ""}`;
+    row.dataset.id = clip.id;
+    row.setAttribute("role", "listitem");
+    row.setAttribute("aria-label", `${optionLabel(clip)}, ${formatTime(clip.created_at)}`);
+    const text = document.createElement("div");
+    text.className = "text";
     const title = document.createElement("strong");
     title.textContent = optionLabel(clip);
+    if (clip.source === "cloud") {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "Cloud";
+      title.append(badge);
+    }
     const meta = document.createElement("div");
     meta.className = "meta";
     const size = formatSize(clip.size);
-    meta.textContent = `${formatTime(clip.created_at)}${size ? ` - ${size}` : ""}`;
-    const actions = document.createElement("div");
-    actions.className = "row-actions";
-    const preview = document.createElement("button");
-    preview.type = "button";
-    preview.textContent = "Preview";
-    preview.addEventListener("click", () => {
-      video.src = clip.download_url;
-      video.load();
-      video.play().catch(() => {});
-      previewTitle.textContent = `${optionLabel(clip)} - ${formatTime(clip.created_at)}`;
-    });
-    const download = document.createElement("a");
-    download.className = "button";
-    download.href = clip.download_url;
-    download.textContent = "Download";
-    actions.append(preview, download);
-    row.append(title, meta, actions);
+    meta.textContent = `${formatTime(clip.created_at)}${size ? ` · ${size}` : ""}`;
+    text.append(title, meta);
+    row.append(thumbnail(clip), text);
+    row.addEventListener("click", () => play(clip));
     list.append(row);
   }
 }
 
-async function loadClips() {
-  refresh.disabled = true;
-  list.innerHTML = '<div class="loading">Loading local Sync Module clips...</div>';
-  const params = new URLSearchParams({
-    hours: hours.value,
-    limit: limit.value
-  });
-  if (fixedCamera || camera.value) {
-    params.set("camera", fixedCamera || camera.value);
-  }
-  if (accessToken) {
-    params.set("token", accessToken);
-  }
+function pendingCloudThumbnails() {
+  return shownClips().filter(
+    (clip) => clip.source === "cloud" && clip.thumbnail_url && !cloudThumbnailReady(clip)
+  );
+}
+
+function updateCloudThumbnailButton() {
+  cloudThumbs.hidden = cloudThumbnailsOn || pendingCloudThumbnails().length === 0;
+}
+
+function loadCloudThumbnails() {
+  const pending = pendingCloudThumbnails();
+  if (!pending.length) return;
+  const count = pending.length;
+  // Spelled out rather than softened: this is the one action here that pulls
+  // video off Blink's servers without anyone having asked for that clip.
+  const warning =
+    `Load ${count} cloud thumbnail${count === 1 ? "" : "s"}?\n\n` +
+    "A thumbnail is the first frame of the clip, so each one has to be " +
+    `downloaded from Blink first — ${count} clip${count === 1 ? "" : "s"}, ` +
+    "kept in the proxy's cache afterwards. Clips already on your Sync Module " +
+    "are not affected.";
+  if (!window.confirm(warning)) return;
+  cloudThumbnailsOn = true;
+  updateCloudThumbnailButton();
+  render();
+}
+
+async function fetchClips(params) {
   const response = await fetch(`/api/blink_liveview_proxy/clips?${params}`, {
     cache: "no-store",
     credentials: "same-origin"
   });
-  if (!response.ok) {
-    list.innerHTML = '<div class="empty">Could not load local clips.</div>';
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  return Array.isArray(data.clips) ? data.clips : [];
+}
+
+// A standalone page is authenticated by Home Assistant itself; inside the dialog every camera is listed on its own token and the lists merged.
+async function listClips(base) {
+  if (!fixedCamera) {
+    const params = new URLSearchParams(base);
+    if (camera.value) params.set("camera", camera.value);
+    return fetchClips(params);
+  }
+  const results = await Promise.allSettled(Object.entries(tokens).map(([slug, token]) => {
+    const params = new URLSearchParams(base);
+    params.set("camera", slug);
+    params.set("token", token);
+    return fetchClips(params);
+  }));
+  const merged = results.filter((item) => item.status === "fulfilled").flatMap((item) => item.value);
+  const failed = results.find((item) => item.status === "rejected");
+  if (!merged.length && failed) throw failed.reason;
+  merged.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  return merged.slice(0, Number(limit.value) || merged.length);
+}
+
+async function loadClips() {
+  const seq = ++loadSeq;
+  refresh.disabled = true;
+  list.innerHTML = '<div class="loading">Loading clips…</div>';
+  await requestTokens();
+  if (seq !== loadSeq) return;
+  fillCameraOptions();
+  try {
+    const loaded = await listClips({
+      hours: hours.value,
+      limit: limit.value,
+      // Listing is metadata only - no clip is fetched to build this list.
+      source: source.value
+    });
+    // A slower reply from an earlier load must not overwrite the current one.
+    if (seq !== loadSeq) return;
+    clips = loaded;
+  } catch (err) {
+    if (seq !== loadSeq) return;
+    list.innerHTML = '<div class="empty">Could not load clips. Check that the proxy is running and signed in to Blink, then refresh.</div>';
     summary.textContent = "";
     refresh.disabled = false;
     return;
   }
-  const data = await response.json();
-  clips = Array.isArray(data.clips) ? data.clips : [];
-  updateCameraOptions();
+  updateCloudThumbnailButton();
   render();
   refresh.disabled = false;
 }
 
+// Arrow keys move through the list from wherever focus is; Enter/Space on a
+// row already plays it, because rows are buttons.
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  const rows = [...list.querySelectorAll(".clip")];
+  if (!rows.length) return;
+  const index = rows.findIndex((row) => row.dataset.id === activeId);
+  const next = rows[Math.min(rows.length - 1, Math.max(0, index + (event.key === "ArrowDown" ? 1 : -1)))];
+  if (!next) return;
+  event.preventDefault();
+  next.focus();
+  next.click();
+});
+
 refresh.addEventListener("click", loadClips);
+cloudThumbs.addEventListener("click", loadCloudThumbnails);
+source.addEventListener("change", () => {
+  try { localStorage.setItem(SOURCE_KEY, source.value); } catch (err) { /* private browsing */ }
+  loadClips();
+});
 hours.addEventListener("change", loadClips);
 limit.addEventListener("change", loadClips);
-camera.addEventListener("change", render);
+camera.addEventListener("change", () => {
+  chosen = true;
+  updateCloudThumbnailButton();
+  render();
+});
 loadClips();
 </script>
 </body>
 </html>"""
     return (
         html_text.replace("__CAMERA_JSON__", camera_json)
+        .replace("__CAMERAS_JSON__", cameras_json)
         .replace("__ASSET_BASE__", ASSET_URL_BASE)
         .replace("__TOKEN_JSON__", token_json)
     )
+
+
+def _clip_query(request: web.Request, *, allow_both: bool) -> dict[str, str]:
+    """The listing arguments a clip request may carry, and its clip source.
+
+    `source` decides which Blink inventory a clip is looked for in. It used to
+    be pinned to "local" here, which is why an account whose clips are all in
+    Blink's cloud saw an empty viewer. It is an enum, checked against the
+    values the proxy accepts, and never passed through as free text.
+    """
+    allowed = {"camera", "hours", "pages", "limit"}
+    query = {
+        key: value for key, value in request.query.items() if key in allowed
+    }
+    source = request.query.get("source", "local")
+    permitted = {"local", "cloud", "both"} if allow_both else {"local", "cloud"}
+    if source not in permitted:
+        raise web.HTTPBadRequest(text="Unknown clip source\n")
+    query["source"] = source
+    return query
 
 
 class BlinkLiveviewProxyClipsView(HomeAssistantView):
@@ -1815,7 +2352,7 @@ class BlinkLiveviewProxyClipsView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return recent local Sync Module clip metadata from the local proxy."""
+        """Return recent clip metadata from the local proxy."""
         camera_slug = request.query.get("camera") or None
         if camera_slug:
             _camera(self.hass, camera_slug)
@@ -1823,13 +2360,7 @@ class BlinkLiveviewProxyClipsView(HomeAssistantView):
         elif not request.get(KEY_AUTHENTICATED, False):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
-        allowed = {"camera", "hours", "pages", "limit"}
-        query = {
-            key: value
-            for key, value in request.query.items()
-            if key in allowed
-        }
-        query["source"] = "local"
+        query = _clip_query(request, allow_both=True)
         upstream = await _open_proxy_response(_client(self.hass), "/clips", query)
         try:
             body = await upstream.read()
@@ -1852,7 +2383,7 @@ class BlinkLiveviewProxyClipsView(HomeAssistantView):
 
 
 class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
-    """Proxy one local Sync Module clip download."""
+    """Proxy one clip download, from the Sync Module or from Blink's cloud."""
 
     requires_auth = False
     url = "/api/blink_liveview_proxy/clips/{clip_id}.mp4"
@@ -1862,7 +2393,7 @@ class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request, clip_id: str) -> web.StreamResponse:
-        """Download one local Sync Module clip."""
+        """Download one clip."""
         camera_slug = request.query.get("camera") or None
         if camera_slug:
             _camera(self.hass, camera_slug)
@@ -1870,24 +2401,53 @@ class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
         elif not request.get(KEY_AUTHENTICATED, False):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
-        allowed = {"camera", "hours", "pages", "limit"}
-        query = {
-            key: value
-            for key, value in request.query.items()
-            if key in allowed
-        }
-        query["source"] = "local"
+        query = _clip_query(request, allow_both=False)
         return await _proxy_stream(
             self.hass,
             request,
             f"/clips/{clip_id}.mp4",
             "video/mp4",
             query,
+            cache_control="private, max-age=86400",
+        )
+
+
+class BlinkLiveviewProxyClipThumbnailView(HomeAssistantView):
+    """Proxy one clip's first frame. The proxy cuts and keeps it.
+
+    Same authorization as the clip itself. A proxy older than 0.7.0 has no
+    such route and answers 404, which the viewer turns into a placeholder.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/clips/{clip_id}.jpg"
+    name = "api:blink_liveview_proxy:clip_thumbnail"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request: web.Request, clip_id: str) -> web.StreamResponse:
+        """Return one clip thumbnail."""
+        camera_slug = request.query.get("camera") or None
+        if camera_slug:
+            _camera(self.hass, camera_slug)
+            _authorize_browser_request(self.hass, request, camera_slug)
+        elif not request.get(KEY_AUTHENTICATED, False):
+            raise web.HTTPForbidden(text="Missing camera token\n")
+
+        query = _clip_query(request, allow_both=False)
+        return await _proxy_stream(
+            self.hass,
+            request,
+            f"/clips/{clip_id}.jpg",
+            "image/jpeg",
+            query,
+            cache_control="private, max-age=86400",
         )
 
 
 class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
-    """Serve the local Sync Module clips viewer."""
+    """Serve the clips viewer."""
 
     requires_auth = False
     url = "/api/blink_liveview_proxy/clips/viewer"
@@ -1897,7 +2457,7 @@ class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return the local clips viewer HTML."""
+        """Return the clips viewer HTML."""
         camera_slug = request.query.get("camera") or None
         access_token = ""
         if camera_slug:
@@ -1909,7 +2469,7 @@ class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
         return web.Response(
-            text=_clips_viewer_html(camera_slug, access_token),
+            text=_clips_viewer_html(camera_slug, access_token, _camera_inventory(self.hass)),
             content_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
@@ -2152,11 +2712,19 @@ async def _prerequisite_facts(
     status: dict[str, Any],
     proxy_version: str | None,
     own_version: str,
+    secure_context: bool | None = None,
 ) -> dict[str, Any]:
-    """Collect everything prerequisites.build() decides from, and nothing else."""
+    """Collect everything prerequisites.build() decides from, and nothing else.
+
+    All of this is server-side except secure_context, which nothing here can
+    observe: whether the microphone is available depends on the address in the
+    reader's browser, so the panel measures it and passes it in. None means it
+    did not say, which is a state of its own rather than a false.
+    """
     from homeassistant.const import __version__ as HA_VERSION
 
     return {
+        "secure_context": secure_context,
         "ha_version": HA_VERSION,
         "minimum_ha": MINIMUM_HA_VERSION,
         "required_blinkpy": REQUIRED_BLINKPY_VERSION,
@@ -2173,24 +2741,60 @@ async def _prerequisite_facts(
     }
 
 
-async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
-    """Build the admin panel's redacted, read-only snapshot."""
+async def _panel_payload(
+    hass: HomeAssistant, secure_context: bool | None = None
+) -> dict[str, Any]:
+    """Build the admin panel's redacted, read-only snapshot.
+
+    Answers before a config entry exists too. The panel is registered at
+    integration setup so that it is there on the first restart after
+    installing - exactly when someone most needs the install steps - and a
+    503 at that moment was the one thing it showed. Without an entry every
+    proxy-side check reads "not checked", the Home Assistant-side ones are
+    real, and `configured` tells the panel which page to draw.
+    """
     from homeassistant.loader import async_get_integration
 
-    entry_id, runtime = _runtime_entry(hass)
+    integration = await async_get_integration(hass, DOMAIN)
+    own_version = str(integration.version or "")
+
+    try:
+        entry_id, runtime = _runtime_entry(hass)
+    except web.HTTPServiceUnavailable:
+        checks = prerequisites.build(
+            await _prerequisite_facts(hass, {}, None, own_version, secure_context)
+        )
+        return {
+            "configured": False,
+            "entry_id": None,
+            "title": "Blink Live View Proxy",
+            "base_url": "",
+            "health": {},
+            "status": {},
+            "versions": {"integration": own_version, "proxy": "unknown", "behind": False},
+            "update": {"available": False, "blocker": None, "method": None},
+            "environment": {},
+            "prerequisites": {
+                "checks": checks,
+                "summary": prerequisites.summarize(checks),
+            },
+            "cameras": [],
+        }
+
     coordinator = runtime["coordinator"]
     data = coordinator.data or {}
     status = data.get("status") if isinstance(data.get("status"), dict) else {}
-    integration = await async_get_integration(hass, DOMAIN)
-    own_version = str(integration.version or "")
     proxy_version = infer_version(status)
     entry = hass.config_entries.async_get_entry(entry_id)
     checks = prerequisites.build(
-        await _prerequisite_facts(hass, status, proxy_version, own_version)
+        await _prerequisite_facts(
+            hass, status, proxy_version, own_version, secure_context
+        )
     )
     return {
+        "configured": True,
         "entry_id": entry_id,
-        "title": entry.title if entry else "Blink Liveview Proxy",
+        "title": entry.title if entry else "Blink Live View Proxy",
         "base_url": str(entry.data.get(CONF_BASE_URL, "")) if entry else "",
         "health": data.get("health") or {},
         "status": status,
@@ -2216,7 +2820,7 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
 PANEL_UPDATE_MESSAGES = {
     "already_running": "An update is already running. Check again in a few minutes.",
     "entry_gone": "The integration entry is no longer loaded.",
-    "no_addon": "Supervisor could not find the Blink Liveview Proxy add-on.",
+    "no_addon": "Supervisor could not find the Blink Live View Proxy add-on.",
     "not_supported": "This proxy installation cannot update itself.",
     "update_failed": "The update could not be started. Check the Home Assistant and proxy logs.",
 }
@@ -2233,9 +2837,18 @@ class BlinkLiveviewProxyPanelView(HomeAssistantView):
         self.hass = hass
 
     @require_admin
-    async def get(self, _request: web.Request) -> web.Response:
+    async def get(self, request: web.Request) -> web.Response:
+        # Whether the microphone is reachable is a property of the address in
+        # the reader's browser, which nothing server-side can see. The panel
+        # measures window.isSecureContext and says so here; anything else,
+        # including a panel too old to send it, leaves the check unanswered.
+        reported = request.query.get("secure_context")
+        secure_context = (
+            None if reported not in ("0", "1") else reported == "1"
+        )
         return web.json_response(
-            await _panel_payload(self.hass), headers=AUTH_VIEW_HEADERS
+            await _panel_payload(self.hass, secure_context),
+            headers=AUTH_VIEW_HEADERS,
         )
 
 

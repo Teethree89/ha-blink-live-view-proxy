@@ -1,8 +1,9 @@
-name: "Blink Liveview Proxy"
+name: "Blink Live View Proxy"
 description: >-
-  Local MPEG-TS live-view proxy and clip archive for Blink cameras.
+  Unofficial local live-view proxy and clip archive for Blink cameras. Not
+  affiliated with, endorsed by, or supported by Amazon or Blink.
   Install the matching integration via HACS (or from custom_components/ in this repo).
-version: "0.6.2"
+version: "0.7.0-rc.4"
 slug: "blink_liveview_proxy"
 init: false
 # armhf and armv7 are deliberately absent: Supervisor deprecated both, and
@@ -21,6 +22,9 @@ options:
   port: 8088
   low_latency: false
   cameras: []
+  ptt_disabled_product_types: []
+  ptt_disabled_camera_types: []
+  ptt_force_enabled_slugs: []
 schema:
   blink_username: str
   blink_password: str
@@ -34,10 +38,22 @@ schema:
       name: str?
       id: int?
       serial: str?
+  # Which cameras are offered push-to-talk. A systemd or Docker install could
+  # always set these in config.json; an add-on install could not reach them at
+  # all, which is why they are here. Each one left empty means "keep the
+  # proxy's own default" rather than "allow everything", so an empty box can
+  # never silently switch push-to-talk on for a camera family that cannot do
+  # it.
+  ptt_disabled_product_types:
+    - str
+  ptt_disabled_camera_types:
+    - str
+  ptt_force_enabled_slugs:
+    - str
 ports:
   8088/tcp: null
 ports_description:
-  8088/tcp: "Blink Liveview Proxy HTTP API"
+  8088/tcp: "Blink Live View Proxy HTTP API"
 # Permissions, and why each one is here.
 #
 # hassio_api is REQUIRED. While the proxy waits for a 2FA code it has to read
@@ -65,6 +81,18 @@ ports_description:
 # config directory, and the integration's config flow pre-fills the token from
 # it, so no one has to read a token out of one screen and type it into another.
 # Nothing else is written there, and the file holds only that token.
+# What is worth keeping in a backup, and what is not.
+#
+# All three of these are rebuildable and none is needed to restore an install:
+# the clip cache is clips fetched from Blink with their thumbnails, capped at
+# 512 MB; the live-view cache is recordings of sessions already watched; and
+# hls/ is segments of a stream that is over. Half a gigabyte of video does not
+# belong in every snapshot the user takes. The Blink session, the generated
+# token and the config stay in the backup, which is what a restore needs.
+backup_exclude:
+  - clips/
+  - liveviews/
+  - hls/
 hassio_api: true
 map:
   - data:rw

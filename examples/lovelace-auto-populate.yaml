@@ -1,4 +1,4 @@
-# Blink Liveview Proxy — self-populating camera wall
+# Blink Live View Proxy — self-populating camera wall
 #
 # Builds a tile for every camera the proxy discovered, with no per-camera YAML.
 # Add a camera in Blink, restart the proxy, and it appears here on its own.
@@ -63,10 +63,10 @@ views:
             state:
               - value: "on"
                 color: "#22c55e"
-                icon: mdi:cctv
+                icon: blink:logo
               - value: "off"
                 color: "#ef4444"
-                icon: mdi:cctv-off
+                icon: blink:logo
             styles:
               card:
                 - height: 74px

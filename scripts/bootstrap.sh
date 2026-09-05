@@ -11,7 +11,7 @@
 # should not run whatever was pushed a minute ago, and the timer that reuses
 # this script would otherwise track every commit.
 #
-#   VERSION=v0.3.0   pin a specific tag
+#   VERSION=0.7.0-rc.1   pin a specific stable or prerelease tag
 #   SRC_DIR=...      where the checkout lives (default /opt/src/...)
 #   FORCE=1          reinstall even when the tag is already installed
 #
@@ -25,9 +25,37 @@ SRC_DIR="${SRC_DIR:-/opt/src/ha-blink-live-view-proxy}"
 OPT_DIR="${OPT_DIR:-/opt/blink-liveview-proxy}"
 VERSION="${VERSION:-}"
 
-# Newest tag by version order, not alphabetical: v0.10.0 must beat v0.9.0.
+# Sort stable and prerelease tags by semantic version. Both the historical
+# vX.Y.Z spelling and HACS-friendly X.Y.Z-rc.N spelling are accepted. Plain
+# sort -V is not enough: it considers 0.7.0-rc.1 newer than final 0.7.0.
+sort_release_tags() {
+  python3 -c '
+import re
+import sys
+
+def key(tag):
+    value = tag.removeprefix("v").split("+", 1)[0]
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?", value)
+    if not match:
+        return None
+    release = tuple(int(part) for part in match.group(1, 2, 3))
+    prerelease = match.group(4)
+    if prerelease is None:
+        return (*release, 1, ())
+    identifiers = tuple(
+        (0, int(part)) if part.isdigit() else (1, part.lower())
+        for part in re.findall(r"[A-Za-z]+|\d+", prerelease)
+    )
+    return (*release, 0, identifiers)
+
+tags = ((key(line.strip()), line.strip()) for line in sys.stdin)
+for _, tag in sorted(item for item in tags if item[0] is not None):
+    print(tag)
+'
+}
+
 newest_tag() {
-  git -C "$SRC_DIR" tag --list 'v*' | sort -V | tail -n 1
+  git -C "$SRC_DIR" tag --list | sort_release_tags | tail -n 1
 }
 
 # What is installed right now, as the proxy itself reports it. Absent means an
@@ -42,7 +70,11 @@ should_install() {
   local target="$1" installed="$2"
   [ -n "${FORCE:-}" ] && return 0
   [ -z "$installed" ] && return 0
-  [ "v$installed" != "$target" ]
+  [ "${target#v}" = "${installed#v}" ] && return 1
+  # An explicit pin may intentionally move either direction. Automatic runs
+  # only move forward, so removing a prerelease tag cannot downgrade a host.
+  [ -n "$VERSION" ] && return 0
+  [ "$(printf '%s\n%s\n' "$installed" "$target" | sort_release_tags | tail -n 1)" = "$target" ]
 }
 
 main() {

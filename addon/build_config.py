@@ -25,8 +25,25 @@ config = {
     "hls_dir": "/data/hls",
     "hls_transcode": bool(options.get("low_latency", False)),
     "liveview_cache_dir": "/data/liveviews",
+    "clip_cache_dir": "/data/clips",
     "cameras": cameras,
 }
+
+# Push-to-talk gating, forwarded only when it was actually set.
+#
+# An empty list here means "the add-on user did not say", not "allow
+# everything": writing [] through would override the proxy's own defaults and
+# offer Hold Talk on camera families where it cannot work. Blank boxes are the
+# state every add-on starts in, so this is the difference between exposing the
+# option and breaking the default.
+for key in (
+    "ptt_disabled_product_types",
+    "ptt_disabled_camera_types",
+    "ptt_force_enabled_slugs",
+):
+    value = options.get(key) or []
+    if value:
+        config[key] = value
 
 json.dump(config, sys.stdout, indent=2)
 print()

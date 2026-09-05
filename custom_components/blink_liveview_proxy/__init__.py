@@ -6,7 +6,7 @@ import logging
 
 from typing import Any
 
-from homeassistant.components import panel_custom
+from homeassistant.components import frontend, panel_custom
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
@@ -17,11 +17,14 @@ from .api import BlinkLiveviewProxyClient
 from .const import (
     ASSET_URL_BASE,
     CONF_BASE_URL,
+    CONF_CLIP_RECORDING,
     CONF_STREAM_SECONDS,
     CONF_TOKEN,
+    DEFAULT_CLIP_RECORDING,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
     FRONTEND_RESOURCE_URL,
+    ICONSET_MODULE_URL,
     LEGACY_FRONTEND_RESOURCE_URL,
     PLATFORMS,
 )
@@ -40,25 +43,47 @@ AUTH_PANEL_MODULE_URL = f"{ASSET_URL_BASE}/blink-proxy-auth-panel.js"
 AUTH_PANEL_PATH = "blink-liveview-proxy-auth"
 
 
+async def _async_version(hass: HomeAssistant) -> str:
+    """This integration's version, for cache-busting its own frontend files."""
+    from homeassistant.loader import async_get_integration
+
+    integration = await async_get_integration(hass, DOMAIN)
+    return str(integration.version or "0")
+
+
 async def _async_register_auth_panel(hass: HomeAssistant) -> None:
     """Register the admin dashboard while preserving its original URL."""
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get("_auth_panel_registered"):
         return
+    # The sidebar draws its icon with ha-icon, which hands any prefix it does
+    # not know to window.customIcons. This module registers the "blink" set on
+    # every page load - the same route HACS takes for its own entry - so the
+    # panel carries the one-colour mark from the wordmark. The set is idempotent
+    # and the URL manager is a set, so a reload adds nothing twice.
+    #
+    # Both URLs carry the version, for the reason HACS puts ?hacstag= on
+    # everything it registers. no-cache and an ETag make a browser revalidate,
+    # which is not the layer that bites: once a document has imported a
+    # module it stays in that document's module registry for as long as the
+    # document lives, and the companion app keeps its webview alive across
+    # app switches. A new version is a new URL, so it is a different module
+    # and an upgrade cannot leave stale frontend code resident.
+    version = await _async_version(hass)
+    frontend.add_extra_js_url(hass, f"{ICONSET_MODULE_URL}?v={version}")
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=AUTH_PANEL_PATH,
         webcomponent_name="blink-proxy-auth-panel",
-        sidebar_title="Blink Proxy",
-        sidebar_icon="mdi:cctv",
-        module_url=AUTH_PANEL_MODULE_URL,
+        sidebar_title="Blink Live View Proxy",
+        sidebar_icon="blink:logo",
+        module_url=f"{AUTH_PANEL_MODULE_URL}?v={version}",
         require_admin=True,
-        config_panel_domain=DOMAIN,
     )
     domain_data["_auth_panel_registered"] = True
 
 
-async def _async_try_register_resource(hass: HomeAssistant) -> bool:
+async def _async_try_register_resource(hass: HomeAssistant, version: str) -> bool:
     """Put the dialog module in Lovelace's resources. False if it could not.
 
     Without this the card's fire-dom-event payload goes out and nothing is
@@ -91,14 +116,22 @@ async def _async_try_register_resource(hass: HomeAssistant) -> bool:
         )
         return True
 
+    target = f"{FRONTEND_RESOURCE_URL}?v={version}"
     try:
         # Storage-backed resources are lazy; async_get_info loads them.
         await resources.async_get_info()
         legacy: dict | None = None
         for item in resources.async_items() or []:
-            # Existing entries may carry a cache-busting query string.
-            url = str(item.get("url", "")).split("?", 1)[0]
+            raw = str(item.get("url", ""))
+            url = raw.split("?", 1)[0]
             if url == FRONTEND_RESOURCE_URL:
+                # Right file, possibly a previous version. Moving the query
+                # along is what makes an upgrade actually reach the browser.
+                if raw != target and item.get("id"):
+                    await resources.async_update_item(item["id"], {"url": target})
+                    LOGGER.info(
+                        "Pointed the Lovelace resource at %s", target
+                    )
                 return True
             if url == LEGACY_FRONTEND_RESOURCE_URL:
                 legacy = item
@@ -107,19 +140,15 @@ async def _async_try_register_resource(hass: HomeAssistant) -> bool:
             # Rewrite in place. Adding the new URL alongside would load the
             # module twice and leave a stale entry nobody knows to remove -
             # and the stale one is the one the service worker holds forever.
-            await resources.async_update_item(
-                legacy["id"], {"url": FRONTEND_RESOURCE_URL}
-            )
+            await resources.async_update_item(legacy["id"], {"url": target})
             LOGGER.info(
                 "Moved the Lovelace resource off the cached path: %s -> %s",
                 LEGACY_FRONTEND_RESOURCE_URL,
-                FRONTEND_RESOURCE_URL,
+                target,
             )
             return True
 
-        await resources.async_create_item(
-            {"res_type": "module", "url": FRONTEND_RESOURCE_URL}
-        )
+        await resources.async_create_item({"res_type": "module", "url": target})
     except Exception:  # noqa: BLE001 - never block setup over a dashboard nicety
         LOGGER.exception(
             "Could not register the dialog resource automatically. Add it by "
@@ -129,7 +158,7 @@ async def _async_try_register_resource(hass: HomeAssistant) -> bool:
         )
         return True
 
-    LOGGER.info("Registered the Lovelace resource %s", FRONTEND_RESOURCE_URL)
+    LOGGER.info("Registered the Lovelace resource %s", target)
     return True
 
 
@@ -142,7 +171,8 @@ async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
     debug level - so the symptom was a dashboard whose buttons did nothing and
     a log with no clue in it.
     """
-    if await _async_try_register_resource(hass):
+    version = await _async_version(hass)
+    if await _async_try_register_resource(hass, version):
         return
 
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -152,7 +182,7 @@ async def _async_register_frontend_resource(hass: HomeAssistant) -> None:
 
     async def _retry(_now: Any) -> None:
         domain_data["_resource_retry_armed"] = False
-        if not await _async_try_register_resource(hass):
+        if not await _async_try_register_resource(hass, version):
             LOGGER.warning(
                 "Lovelace never became reachable, so the dialog resource could "
                 "not be registered. Add it by hand under Settings > Dashboards "
@@ -198,6 +228,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "client": client,
         "coordinator": coordinator,
         "stream_seconds": int(merged.get(CONF_STREAM_SECONDS, DEFAULT_STREAM_SECONDS)),
+        "clip_recording": bool(merged.get(CONF_CLIP_RECORDING, DEFAULT_CLIP_RECORDING)),
     }
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 

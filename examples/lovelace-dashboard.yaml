@@ -1,4 +1,4 @@
-# Blink Liveview Proxy — full example dashboard
+# Blink Live View Proxy — full example dashboard
 #
 # Every feature the integration exposes, on one camera. Copy the camera block
 # once per camera and change `front_door` to that camera's proxy slug, or use
@@ -61,10 +61,10 @@ views:
                 state:
                   - value: "on"
                     color: "#22c55e"
-                    icon: mdi:cctv
+                    icon: blink:logo
                   - value: "off"
                     color: "#ef4444"
-                    icon: mdi:cctv-off
+                    icon: blink:logo
                 styles:
                   card:
                     - height: 74px
@@ -162,7 +162,7 @@ views:
       #   image-refresh ...... pull a fresh snapshot from Blink
       #   motion-sensor ...... toggle motion detection
       #
-      # Push-to-talk, "End & Save" and "Save MP4" live inside the live-view
+      # Push-to-talk, "End" and "Save MP4" live inside the live-view
       # dialog. PTT only appears for cameras the proxy reports as supporting
       # it; Mini/owl cameras are hidden by default and can be opted back in
       # with ptt_force_enabled_slugs in the proxy config.
@@ -244,15 +244,15 @@ views:
                     - background: rgba(2, 6, 23, 0.55)
                     - border-radius: 999px
                     - border: 0
-                    - width: 36px
-                    - height: 36px
+                    - width: 40px
+                    - height: 40px
                     - padding: 0
                   icon:
                     - color: white
-                    - width: 20px
+                    - width: 22px
                 style:
                   bottom: 8px
-                  right: 100px
+                  right: 104px
                   transform: none
                   z-index: 2
 
@@ -270,15 +270,15 @@ views:
                     - background: rgba(2, 6, 23, 0.55)
                     - border-radius: 999px
                     - border: 0
-                    - width: 36px
-                    - height: 36px
+                    - width: 40px
+                    - height: 40px
                     - padding: 0
                   icon:
                     - color: white
-                    - width: 20px
+                    - width: 22px
                 style:
                   bottom: 8px
-                  right: 54px
+                  right: 56px
                   transform: none
                   z-index: 2
 
@@ -300,11 +300,11 @@ views:
                     - background: rgba(2, 6, 23, 0.55)
                     - border-radius: 999px
                     - border: 0
-                    - width: 36px
-                    - height: 36px
+                    - width: 40px
+                    - height: 40px
                     - padding: 0
                   icon:
-                    - width: 20px
+                    - width: 22px
                     - color: >
                         [[[
                           return entity && entity.state === 'on'

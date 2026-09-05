@@ -1,12 +1,13 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/logo.png" alt="Blink Liveview Proxy" width="520">
+  <img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/logo.png" alt="Blink Live View Proxy" width="520">
 </p>
 
-# Blink Liveview Proxy
+# Blink Live View Proxy
 
 Unofficial Home Assistant custom integration plus a small local Blink proxy
 service for direct Blink live view, push-to-talk experiments, last-live-view
-downloads, and local Sync Module clip browsing.
+downloads, and clip browsing from both a Sync Module's local storage and
+Blink's cloud.
 
 This project exists because the official Home Assistant Blink integration is
 good for snapshots, motion switches, arming, sensors, and normal Blink services,
@@ -31,14 +32,25 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Optional low-latency mode: one-second HLS segments instead of four-second
   ones, at the cost of an encode per open live view.
 - Configurable direct player duration, default `60` seconds.
-- "End & Save" and "Save MP4" for the most recent watched live view.
-- Push-to-talk on tested regular Blink cameras and doorbells.
-- PTT hidden on Blink Mini/`owl` cameras by default, and unavailable on
-  RTSP-transport cameras, which have no upstream audio channel.
+- "End" then "Save MP4" for the live view you just watched, and "Start
+  Again" to reopen it.
+- Push-to-talk on tested regular Blink cameras and doorbells, Blink Mini/`owl`
+  included — **from an HTTPS address only**, because the browser will not open
+  a microphone on a plain-HTTP page. The panel's Overview says which one you
+  are on.
+- PTT not offered on the families that cannot use it: `xt` and `white`, which
+  Blink serves over RTSP, a transport with no upstream audio channel at all,
+  and `superior` (Wired Floodlight), where it is the audio format rather than
+  the transport. Any single camera can be forced back on with
+  `ptt_force_enabled_slugs`.
 - Fresh snapshot button using the official HA Blink camera entity.
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.
-- Local Sync Module clip viewer/downloader.
+- Clip viewer over both inventories — a Sync Module's local storage and Blink's
+  cloud — with first-frame thumbnails, a player that seeks, downloads that
+  never fetch the same clip from Blink twice, and a source selector. Cloud
+  clips are listed for free and fetched only when you ask, because a cloud
+  thumbnail costs a whole clip download.
 - Admin-only browser authentication and deliberate reauthentication through
   Home Assistant, with the Blink OAuth challenge kept in one proxy process.
 - Three ways to run the proxy — add-on, systemd, or a standalone Docker image —
@@ -47,14 +59,21 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
   local HTTPS origin.
 
 See the [roadmap](docs/ROADMAP.md) for what is planned, what is deliberately
-out of scope, and the rough edges worth knowing about.
+out of scope, and the rough edges worth knowing about, and the [HACS
+submission plan](docs/HACS_SUBMISSION.md) for what still stands between this
+and being listed in HACS by default.
 
 ## Known Limits
 
 - This is not an official Amazon/Blink integration.
-- Blink cloud clip browsing is intentionally not surfaced in HA.
+- Cloud clips need a Blink subscription — that is Blink's rule, not this
+  project's. Without one, motion clips only exist on a Sync Module's local
+  storage.
 - Motion zones and deeper camera settings are out of scope for now.
-- Push-to-talk is experimental and model-sensitive.
+- Push-to-talk is experimental and model-sensitive, and needs an HTTPS address
+  to work at all. On plain HTTP the browser refuses the microphone, and the
+  button currently accepts the press before failing where the message cannot
+  be seen — check Overview if Hold Talk seems to do nothing.
 - Live view still depends on Blink cloud APIs and camera/cloud limits.
 - The proxy is a separate service; the HA custom integration does not log in to
   Blink by itself.
@@ -95,7 +114,7 @@ Its Python dependencies are in [`proxy/requirements.txt`](proxy/requirements.txt
 release that recognises Blink's current 2FA challenge, and an older one fails
 login while still texting you a code.
 
-**The integration**: Home Assistant **2024.6.0 or newer**, installed through
+**The integration**: Home Assistant **2024.11.0 or newer**, installed through
 HACS or copied into `custom_components/`. It adds no Python dependencies of its
 own — it uses Home Assistant's `aiohttp` — and depends only on built-in
 `http`, `frontend` and `panel_custom`.
@@ -106,15 +125,21 @@ every example, plus
 self-populating one. Both from HACS → Frontend. The player and clip viewer need
 neither.
 
-**Account and hardware**: a Blink account with cameras, a Sync Module with local
-storage if you want clips, and — optional but recommended — the official Blink
+**Account and hardware**: a Blink account with cameras; for clips, either a
+Sync Module with local storage or a Blink subscription, which is what makes
+cloud clips exist; and — optional but recommended — the official Blink
 integration for snapshots, motion and battery. This project deliberately does
 not duplicate those.
+
+**For push-to-talk only**: an HTTPS address for Home Assistant, or
+`http://localhost`. Browsers only expose a microphone in a secure context, so
+Hold Talk cannot work over `http://<address>:8123` however the proxy itself is
+reached. Nothing else here needs it.
 
 **For development**: `pyyaml` and `proxy/requirements.txt` for the tests, `ruff`
 for the lint, and `node` for `node --check` on the frontend files.
 
-Once it is installed, the **Blink Proxy** sidebar panel checks every one of
+Once it is installed, the **Blink Live View Proxy** sidebar panel checks every one of
 these against the running install and keeps the setup steps for each next to
 the result — see the [Dashboard Guide](docs/DASHBOARD.md#requirements-at-a-glance).
 
@@ -129,7 +154,7 @@ directly from the add-on store. No separate Linux host or Python setup required.
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
-2. Install **Blink Liveview Proxy** from the add-on store.
+2. Install **Blink Live View Proxy** from the add-on store.
 3. Open the add-on **Configuration** tab. Set `blink_username` and
    `blink_password`, leave `blink_2fa_code` and `proxy_api_token` empty, then
    start the add-on once. Cameras are discovered, and the add-on generates its
@@ -159,17 +184,19 @@ That keeps a checkout on the host and installs the newest **tag**. The Home
 Assistant integration can then offer a repair **Fix** button when it is newer
 than the proxy; the button starts the updater installed on this host. Re-run
 the line yourself to upgrade a proxy that predates that endpoint.
-`VERSION=v0.3.0` pins one, and `INSTALL_AUTOUPDATE=1` enables a daily timer that
-runs the same check without being asked. From a checkout you already have,
+`VERSION=0.7.0-rc.1` pins either a stable or prerelease tag, and
+`INSTALL_AUTOUPDATE=1` enables a daily timer that runs the same check without
+being asked. Stable releases win over their prereleases, and automatic checks
+never downgrade an installed version. From a checkout you already have,
 `sudo scripts/install-proxy.sh` does the same thing.
 
 It prints the URL to give Home Assistant and the one command that reads the
 token back. Then, in Home Assistant:
 
 1. Install the integration through HACS (see below) and restart HA.
-2. Add `Blink Liveview Proxy` from `Settings → Devices & services`, using the
+2. Add `Blink Live View Proxy` from `Settings → Devices & services`, using the
    printed URL and token.
-3. Open **Blink Proxy** in the sidebar, select **Authentication**, and sign in.
+3. Open **Blink Live View Proxy** in the sidebar, select **Authentication**, and sign in.
 
 Re-running the script upgrades in place, keeping the token, config, and Blink
 session. The Lovelace helper resource is registered for you; add it by hand
@@ -184,7 +211,7 @@ it misbehaves in the [operations guide](docs/OPERATIONS.md).
 
 ### Browser authentication and reauthentication
 
-The custom integration registers an admin-only **Blink Proxy** dashboard in the
+The custom integration registers an admin-only **Blink Live View Proxy** dashboard in the
 Home Assistant sidebar. Its Authentication tab needs a proxy API token on both sides, which
 both install paths now provision for you: the installer writes one to the
 service's environment file, and the add-on generates one and shares it with the
@@ -225,15 +252,16 @@ Install the Home Assistant integration half through HACS:
 
 1. In HACS open the three-dot menu → **Custom repositories**.
 2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
-3. Download it, restart Home Assistant, then add `Blink Liveview Proxy` from
+3. Download it, restart Home Assistant, then add `Blink Live View Proxy` from
    `Settings → Devices & services`.
 
 HACS installs only `custom_components/blink_liveview_proxy`. You still need
 either the add-on (Option A) or the Linux proxy service (Option B) running
 alongside it.
 
-Default HACS listing can wait until the project has wider testing, a release,
-brand assets, and passing validation history.
+A default HACS listing — findable by typing "blink" into HACS, no URL to
+paste — is the next step. What it takes, and where it stands, is in
+[docs/HACS_SUBMISSION.md](docs/HACS_SUBMISSION.md).
 
 ## Proxy API Layout
 

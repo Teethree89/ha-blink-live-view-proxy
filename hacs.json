@@ -1,5 +1,5 @@
 {
-  "name": "Blink Liveview Proxy",
+  "name": "Blink Live View Proxy",
   "render_readme": true,
-  "homeassistant": "2024.6.0"
+  "homeassistant": "2024.11.0"
 }

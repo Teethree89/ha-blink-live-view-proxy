@@ -6,11 +6,17 @@ per camera.
 
 ## Generate YAML in Home Assistant
 
-Open the admin-only **Blink Proxy** sidebar panel and select **YAML**. Choose a
+Open the admin-only **Blink Live View Proxy** sidebar panel and select **YAML**. Choose a
 whole dashboard, one view, or a card; optionally select one camera; then select
 **Generate YAML** and **Copy YAML**. This uses the integration's current camera
 inventory, so it does not ask for a proxy URL or put the proxy token in the
 browser. The output needs `button-card`, like the command-line generator.
+
+A whole dashboard or a view comes out as a **sections** view: up to three
+tiles side by side on a desktop, one column on a phone. A card is a fixed
+two-column grid for dropping into a layout you already control; on a phone
+that gives each tile half the screen, so prefer a view where the cameras are
+the point of the page.
 
 The panel's **Cameras & entities** tab is also a live inventory: it shows each
 camera's type, model, serial, network, push-to-talk availability, and related
@@ -18,7 +24,7 @@ Home Assistant entities. Select an entity to open its native More Info dialog.
 
 ## Requirements at a glance
 
-The **Blink Proxy** panel's Overview tab checks all of this against the running
+The **Blink Live View Proxy** panel's Overview tab checks all of this against the running
 install and says what to do about anything it finds — the Home Assistant
 version, the official Blink integration, the proxy's blinkpy and ffmpeg, the
 dialog resource below, and both frontend cards. Each row keeps its setup steps
@@ -40,7 +46,7 @@ Install them from **HACS → Frontend** before pasting the matching dashboard:
 
 | Option | Required frontend cards | Updates when cameras change? |
 |---|---|---|
-| Blink Proxy YAML tab | **button-card** | No — generate again |
+| Blink Live View Proxy YAML tab | **button-card** | No — generate again |
 | Hand-edited example | **button-card** | No — copy/edit a tile |
 | Generated dashboard, view, or card | **button-card** | No — rerun the generator |
 | Self-populating dashboard | **auto-entities** and **button-card** | Yes |
@@ -142,10 +148,17 @@ proxy service or add-on described in the package example.
 `camera.blink_live_<slug>` and `camera.<slug>`. Pass them when your entities
 were renamed.
 
-Push-to-talk, **End & Save** and **Save MP4** are inside the live-view dialog,
+Push-to-talk, **End** and **Save MP4** are inside the live-view dialog,
 not on the tile. PTT only appears for cameras the proxy reports as supporting
-it; Mini/`owl` cameras are hidden by default and can be opted back in per
-camera with `ptt_force_enabled_slugs`.
+it; `xt`, `white` and `superior` are refused by default and any single camera
+can be opted back in with `ptt_force_enabled_slugs`. Mini/`owl` cameras are
+offered it — they used to be denied by default, before one was confirmed
+audible.
+
+Being offered it is not the same as being able to use it: the browser only
+hands over a microphone on an HTTPS page, so Hold Talk cannot work from
+`http://<address>:8123` no matter which camera it is. Overview has a row for
+this.
 
 ## Option 1 — Copy one camera and edit
 
@@ -181,7 +194,7 @@ python3 scripts/generate-dashboard.py --format card --camera front_door
 | `--format` | Produces | Paste into |
 |---|---|---|
 | `dashboard` | `views:` — a complete dashboard | Raw configuration editor, replacing everything |
-| `view` | one `- title: Cameras` item | Raw configuration editor, under the existing `views:` |
+| `view` | one `- title: Cameras` sections view | Raw configuration editor, under the existing `views:` |
 | `card` | one `vertical-stack` card | + Add card → Manual |
 | `card --camera SLUG` | one `picture-elements` tile | + Add card → Manual |
 

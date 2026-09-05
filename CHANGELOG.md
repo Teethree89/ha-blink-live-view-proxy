@@ -8,6 +8,412 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.7.0-rc.4] — 2026-09-05
+
+Everything found in the rc.2 and rc.3 testing pass, closed. Nine of these
+arrived as pull requests from @bbolinger and @fritzzetik against the release
+branch, each measured on real hardware before it was written.
+
+### Fixed
+
+- **A clip id that we did not issue is refused.** The download and thumbnail
+  handlers turned the id straight from the URL into a filename under the cache
+  directory, and aiohttp decodes a `%2F` inside a match_info value — so an id
+  of `..%2Fsecret` read `secret.mp4` from the directory *above* the cache and
+  served it. A clip id is a 24-character hex digest and nothing else can name
+  a clip the listing handed out, so anything else is a 404 before it reaches
+  the cache or Blink. No released version shipped `clip_cache.py`, so this
+  never left the release branch, but the systemd unit has no `User=` and runs
+  as root, which is what made it worth taking first. Found and fixed by
+  @bbolinger ([#33]).
+- **Save hands back the live view you just watched, not an older one.** When
+  an MPEG-TS session ends it deletes the previous cached file and repoints
+  `last_liveviews` at the new one. `HlsSession` finalized its own copy and did
+  neither, so the memo kept the first file it ever saw and every Save after
+  the first returned a stale recording — on iPhones and iPads, which can only
+  take the HLS path, that meant every Save after the first was wrong. It also
+  stops the per-camera cache growing a file per session. Found and fixed by
+  @bbolinger ([#34]).
+- **The clips toolbar clears the status bar on a phone.** The live-view dialog
+  pads for the notch on purpose; the clips viewer is a different page whose
+  toolbar is the first thing at the top, so the Source, Window and Camera
+  selectors sat under the clock. Seen on an iPhone in the companion app, in
+  portrait. Found and fixed by @bbolinger ([#35]).
+- **The Configure gear opens the options form again.** With
+  `config_panel_domain` set on the sidebar panel, Home Assistant turns the gear
+  on the integration page into a link to that panel — so live-view duration and
+  the proxy token could only be reached by removing and re-adding the entry.
+  The panel keeps its sidebar entry; the gear goes back to the options form.
+  Found and fixed by @bbolinger ([#36]).
+- **The clips viewer covers every camera, not just the one that opened it.**
+  The Clips button handed the viewer a token good for one camera, so the Camera
+  select was disabled and the list pinned — which on a phone reads as a control
+  that does not respond. The viewer now asks the dialog for every live camera's
+  token over `postMessage`, opens on All cameras, and filters the merged list
+  on the client. The select is filled from the inventory rather than from
+  whichever cameras happened to have clips, so a camera with nothing in the
+  window no longer relabels itself "All cameras" over an empty list. Found and
+  fixed by @bbolinger ([#37]).
+- **Push-to-talk is not offered where it cannot work.** `xt` and `white` are
+  handed `rtsps://`, and push-to-talk goes through `send_session_command()`,
+  which exists only on the IMMI path — so the button was offered, was
+  pressable, and could only fail, in the gutter position 0.7.0's phone layout
+  gives it. Gated on `product_type` rather than `camera_type`, and that
+  distinction is the finding: an `xt` reports `camera_type: default` and so
+  does a `catalina`, which genuinely has push-to-talk, so gating on
+  `camera_type` would have taken the feature away from a family that has it.
+  Measured by @fritzzetik against a live `xt`; `white` is @bbolinger's
+  measurement ([#31]).
+- **A deliberate push-to-talk refusal no longer writes a traceback.**
+  `BlinkRtspLiveStream` raises `NotImplementedError` from
+  `send_session_command()` on purpose, with a message written for a reader.
+  The catch-all in `ptt_handler` treated that decision as a fault and called
+  `LOGGER.exception`, so anyone chasing a real push-to-talk problem stopped at
+  a full stack trace for a documented refusal. Handled the way `"IMMI target
+  is not connected"` already was — message kept, traceback dropped, logged at
+  `info`. Still reachable on purpose through `ptt_force_enabled_slugs`, which
+  is why it was worth keeping alongside the gating. By @fritzzetik ([#32]).
+- **A failed live-view session no longer masks itself as a 500.**
+  `LiveViewHandle.close()` awaits the feed task, which re-raises whatever
+  killed it — and every caller runs `close()` from a `finally`. So a session
+  Blink refused came back out of the teardown, replaced the real failure, and
+  the request ended as a bare `500` with the actual cause sitting further up
+  the log and nothing pointing at it. The feed task's failure is the session's
+  failure, it has already happened, and no teardown can act on it: it is now
+  reported in full — named as the reason the live view stopped, with the usual
+  causes and what to do — and not re-raised. `mpegts_handler`, `HlsSession`
+  and the CLI were all exposed to this; cancellation still propagates
+  untouched. Seen once and reported by @bbolinger.
+
+### Added
+
+- **Overview says whether push-to-talk can work here at all.** Browsers only
+  open a microphone in a secure context — an HTTPS page, or `http://localhost`
+  — and Home Assistant's own default, `http://<address>:8123`, is not one. The
+  failure was the worst kind: Hold Talk is enabled from whether the *camera*
+  supports it, so on plain HTTP the button is offered, looks live, and does
+  nothing, because the refusal is written to a status line the player has
+  already hidden by the time the button becomes usable, and nothing reaches the
+  proxy log because nothing was ever sent. Four separate refusals landed in
+  that same invisible place. Only the browser can answer this, so the panel
+  measures it and the readout reports it, with a panel too old to send it
+  leaving the row unanswered rather than guessing. Never blocking: live view,
+  clips, downloads and snapshots are all unaffected. Found by @fritzzetik,
+  who read the page source to find it, and reproduced independently by
+  @bbolinger on a Wired Floodlight. Making the button disable and label itself
+  is still to come.
+- **The clips viewer picks its source.** A Source select leads the toolbar —
+  Sync Module, cloud, or both — kept in the browser and settable from the URL
+  with `?source=`, so a cloud-only account lands where its clips are instead of
+  paging past an inventory it does not have. The empty state now names the
+  source that came back empty rather than giving one sentence for either. By
+  @bbolinger ([#38]).
+- **The newest six cloud clips draw their thumbnails without being asked.** A
+  cloud thumbnail costs a clip download, so none were drawn until someone
+  played a clip or pressed Load cloud thumbnails — which opened a cloud-only
+  account on a screen of grey tiles with nothing to tell one recent event from
+  another. Six is about one phone screen, they stay lazy so a tile is only
+  fetched once it scrolls into view, and the proxy still fetches one clip at a
+  time, which bounds it. Load cloud thumbnails now counts only the clips still
+  waiting and hides when there are none. By @bbolinger ([#39]).
+
+### Documentation
+
+- **The docs no longer contradict what shipped.** The README still said cloud
+  clip browsing was "intentionally not surfaced" and that push-to-talk was
+  hidden on Blink Minis by default — both true until this release cycle, both
+  wrong now, and the second would have told the tester who confirmed a Mini
+  audible that his camera could not do it. `docs/API.md`, `docs/ROADMAP.md`,
+  `docs/KNOWN_LIMITATIONS.md` and `docs/DASHBOARD.md` carried the same two
+  claims. All corrected, and the HTTPS requirement for push-to-talk is now
+  stated wherever push-to-talk is described. The README drift was flagged by
+  @bbolinger.
+- **The add-on's internal hostname is not always a repository hash.** For an
+  add-on built locally, under `/addons/<name>/` rather than installed from the
+  store, the slug prefix is literally `local` —
+  `http://local-blink-liveview-proxy:8088` — which reads like a placeholder
+  next to a hash example, and sent at least one person looking for a hash that
+  was not there. Said in both places that show the pattern. Noted by
+  @fritzzetik on [#30].
+
+### Not fixed in this release
+
+- **Hold Talk still accepts the press on a plain-HTTP page** before failing
+  where the message cannot be seen. Overview now explains it; the button
+  itself should disable and label itself the way it already does for a camera
+  that does not support push-to-talk.
+- **Push-to-talk on a Wired Floodlight (`superior`)** does not work: it gets
+  IMMI, so the path exists, but the audio shape the camera expects is not the
+  one we send, and pressing it costs the live view for about three minutes.
+  It is denied by default for now; a capture of what Blink's own app sends to
+  a `superior` would make it fixable. Measured by @bbolinger.
+
+[#30]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/30
+[#31]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/31
+[#32]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/32
+[#33]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/33
+[#34]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/34
+[#35]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/35
+[#36]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/36
+[#37]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/37
+[#38]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/38
+[#39]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/39
+
+## [0.7.0-rc.3] — 2026-09-05
+
+- **An add-on install is offered an address that actually reaches the add-on.**
+  The setup form pre-filled `http://homeassistant.local:8088`, a host address —
+  and the add-on publishes no host port unless someone maps `8088` by hand, so
+  the one path documented as a single click was the one path that could not
+  work: `cannot_connect` on the first screen, with a healthy proxy sitting
+  behind it ([#30](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/30)).
+  The add-on now writes the address it is reachable on next to the token it
+  already shared — its own hostname on Home Assistant's internal network, and
+  the port this start is really listening on. The config flow prefers that,
+  falls back to deriving the hostname from Supervisor's add-on inventory (so an
+  older add-on is fixed by updating the integration alone), and only then tries
+  `homeassistant.local`. Each candidate is probed before it is offered, so the
+  address in the form is one that answered. Nothing needs a published port:
+  every request to the proxy is made by Home Assistant, never by the browser.
+- **Live view has a sound button.** Autoplay policy means a stream that starts
+  on its own starts muted, and the only way to sound was to tap the picture and
+  find the native control bar — so live view read as silent while a saved clip
+  of the same camera played with audio. The control bar now carries Unmute
+  next to Hold Talk and End, the choice is remembered for the next live view,
+  and a browser that refuses an unmuted start falls back to the muted one
+  rather than to a still frame. Reported by @bbolinger.
+- **An unsatisfiable byte range is answered as one.** The integration mapped
+  every status it did not recognise to `502`, so a `416` the proxy answered
+  correctly reached the browser as a gateway error with `Content-Range`
+  stripped — the one header that says what range would have worked. Reported
+  by @bbolinger.
+- **The clip and live-view caches stay out of Home Assistant backups.** Up to
+  512 MB of cached clips, plus every recorded live view, rode into each add-on
+  snapshot. Both directories are rebuildable from Blink and are not needed to
+  restore an install, so `backup_exclude` now leaves them out. Reported by
+  @bbolinger.
+- **An add-on install can reach the push-to-talk gating.**
+  `ptt_disabled_product_types`, `ptt_disabled_camera_types` and
+  `ptt_force_enabled_slugs` were settable in a systemd or Docker `config.json`
+  and unreachable from the add-on, which is where the cameras that cannot use
+  Hold Talk are hardest to work around. They are add-on options now. Each is
+  empty by default and an empty list means "keep the proxy's default", so
+  clearing a box can never switch push-to-talk on for a family that cannot use
+  it. Reported by @bbolinger and @fritzzetik.
+- **Push-to-talk is no longer hidden from Blink Minis.** The shipped defaults
+  denied `mini` and `owl`, set before anyone had put one on the air. The
+  family has a speaker, Blink's own app talks to it, and it has been confirmed
+  audible here, so the default was refusing a control that works. Both lists
+  ship empty; what belongs on them is a family that genuinely cannot do it.
+- **The clip viewer lists cloud clips, without fetching them.** An account
+  whose Sync Module has no local storage saw an empty viewer, which was every
+  tester on this PR. Cloud clips are listed now — metadata only, one paged
+  call. They draw a placeholder rather than a thumbnail, because a thumbnail
+  is the first frame of the clip and a screenful of them would pull every clip
+  in the window off Blink's servers. A cloud clip is fetched when someone
+  plays it, and its tile fills in afterwards at no further cost; **Load cloud
+  thumbnails** does the rest in one go and says how many clips that is before
+  it starts. Local clips are unaffected: they come off your own Sync Module
+  and are drawn without asking. Raised by @bbolinger, whose account is
+  cloud-only.
+- **A tag cannot ship a version that disagrees with it.** `v0.7.0-rc.1`
+  declared `0.7.0` in all three version files. They agreed with each other, so
+  the version test passed, and every host installed from that tag read itself
+  as the final release and would never update again. The image workflow now
+  compares all three against the tag before it builds or pushes anything.
+  Reported by @bbolinger.
+
+## [0.7.0-rc.2] — 2026-09-04
+
+- **Prereleases now identify and update themselves as prereleases.** The HACS
+  integration, Supervisor add-on and proxy all report `0.7.0-rc.2`, so the
+  dashboard no longer calls an RC the final `0.7.0`. Version comparisons order
+  RC iterations correctly, the host updater considers both stable and
+  prerelease tags without ever automatically downgrading, and tagged RC
+  container images publish under their version without replacing `latest`.
+
+## [0.7.0-rc.1] — 2026-09-04
+
+Release preparation ahead of 1.0: the product gets its proper name, the clip
+viewer gets thumbnails and a layout that holds still, phones get a live view
+that fits the screen, and the three things standing between this and a
+default HACS listing are gone.
+
+- **It is called Blink Live View Proxy now, everywhere you can read it.** The
+  wordmark always said so; the manifest, HACS, the add-on store, the config
+  flow, the sidebar and the docs said "Liveview". Nothing that code depends
+  on moved: the domain is still `blink_liveview_proxy`, every URL and entity
+  id is unchanged, and the health sensor keeps
+  `binary_sensor.blink_liveview_proxy` on a fresh install too — it names its
+  own object id rather than letting the new name derive a second one.
+- **The sidebar entry carries the logo.** A `blink:` icon set ships with the
+  integration and is loaded on every page the way HACS loads its own, so the
+  one-colour mark from the wordmark is what the sidebar draws, and
+  `blink:logo` works anywhere an icon name does. The generated dashboards use
+  it on the proxy pill, in both states: the pill used to swap to
+  `mdi:cctv-off` when the proxy was down, which is not a variant of the mark
+  but a different object, so the tile stopped looking like this integration
+  exactly when someone was reading it. Colour carries the state instead, which
+  is only safe because `show_state` prints the word underneath. A slashed
+  variant of the mark was drawn and rejected: with no knocked-out gap the
+  slash merges into the rings and is unreadable at the 24 and 40px the sidebar
+  and the pill actually draw.
+- **The add-on store entry says it is unofficial.** The README said so twice
+  and the add-on description did not, which is the one place someone sees this
+  next to Amazon's own listings with no other context.
+- **Every string in the config flow, the options flow and the three repair
+  issues rendered as its raw key.** `strings.json` is a build-time file that
+  Home Assistant compiles for core integrations and reads from nowhere at
+  runtime; a custom integration has to ship `translations/en.json`, and this
+  one never had. It does now, and a test keeps the two identical.
+- **The Home Assistant floor is 2024.11.0, which is what it always needed.**
+  The options flow reads `OptionsFlow.config_entry`, a property that appeared
+  in 2024.11. `hacs.json` promised 2024.6.0, so on the four releases between
+  the integration installed cleanly and raised the moment Options opened.
+  A test now holds `hacs.json` and the panel's own floor to one number.
+- **CI no longer ignores the brands check, because it passes.** The icon
+  lives in `brand/` beside the manifest, which is what the check looks for
+  first since Home Assistant 2026.3 stopped taking custom icons in its brands
+  repository. An ignore anywhere disqualifies a HACS default submission, and
+  this was the last one.
+- **Clips have thumbnails.** Each row in the clip viewer shows the clip's
+  first frame, with a spinner until it arrives. The proxy cuts it with ffmpeg
+  from a copy of the clip it now keeps: a Sync Module clip cannot be read in
+  part — blinkpy has the module upload the whole thing to Blink's cloud and
+  polls until it lands — so each clip is fetched exactly once, one at a time,
+  and kept under a 512 MB cap (`clip_cache_dir`, `clip_cache_max_mb`; the
+  add-on and the image use `/data/clips`, a systemd install lands beside its
+  live-view cache). Thumbnails load only for the rows on screen. A proxy
+  older than 0.7.0 lists clips without them and the row shows a placeholder.
+- **Preview and Download no longer go to Blink every time,** and the player
+  can seek: a cached clip is served as a file, which answers byte ranges,
+  and Home Assistant forwards them. That is also what Safari requires before
+  it will play an MP4 at all — on an iPhone, Preview used to do nothing.
+- **The clip viewer holds still.** The page grew with the list, so the
+  preview stretched to the height of sixty rows with the video somewhere in
+  the middle. It is two panes now: the list scrolls on its own, the player
+  is locked to the viewport beside it and centred, and on a phone the video
+  sits on top with the list underneath. Arrow keys move through the list.
+- **Live view fits a phone in portrait.** The dialog was sized in `100vh`,
+  which on a phone is the height with the browser toolbar hidden, so the
+  bottom of the video and its controls sat behind the toolbar until the
+  phone was turned sideways. It uses the visible height now, and keeps the
+  header and controls clear of the notch and the home bar.
+- **Generated dashboards stack on a phone.** Whole-dashboard and view output,
+  from the YAML tab and the generator alike, is a sections view with up to
+  three tiles across on a desktop and one column on a phone; the flat card
+  list before it squeezed a tile and its four buttons into half a phone
+  screen. The buttons are 40px, Home Assistant's own touch size, up from 36.
+- **The panel says what to do before the integration is set up.** It is in
+  the sidebar from the first restart after installing, which is exactly when
+  someone needs the install steps, and a 503 was the one thing it showed.
+  Overview now lays out the three ways to run the proxy, offers to start
+  the config flow, and runs the checks that do not need a proxy.
+
+Found by testing it on a real install, and fixed here:
+
+- **The phone's safe areas were white around a live view.** The full-screen
+  shell took the notch and home-indicator insets as padding, and that padding
+  exposed Home Assistant's light-theme card background: below the picture in
+  portrait, and beside and below it in landscape. The player now paints through
+  those insets while the floating controls carry their own safe-area offsets.
+  In landscape, the close button measures the letterboxed video and sits just
+  outside its left edge instead of overlapping the picture. In portrait, Hold
+  Talk and End move into the empty space below the video when that gutter is
+  deep enough to clear both the native controls and the home indicator.
+- **The sidebar icon was blank until a hard refresh** — and on the iOS
+  companion app there is no way to force one. `add_extra_js_url` puts the icon
+  set in `index.html`, which is right for a fresh page load and useless to a
+  tab that was already open when the integration was installed: Home Assistant
+  renames the sidebar entry over the websocket, so it looks updated, while the
+  script tag never arrives. The set is now loaded from the dialog resource and
+  the panel as well, and once it registers it repaints any `blink:` icon that
+  already gave up — `ha-icon` resolves a custom prefix once and never asks
+  again, so re-assigning the name is what makes it look a second time.
+- **A burst of thumbnails could come back 502, and stayed broken.** Every
+  visible row asked at once, all of it queued behind the proxy's one-at-a-time
+  Blink fetch, the last waited most of a minute, and Blink started throttling
+  the run of `prepare_download` calls. The viewer now keeps its own two-deep
+  queue so rows fill top-down, and retries a failed thumbnail twice before
+  showing a placeholder. A proxy that is merely still signing in answers 503
+  now instead of being collapsed into a 502 — the difference between "try
+  again" and "the gateway is broken".
+- **The clip rows are their own placeholder now, not a spinner.** There is no
+  `<img>` in a row any more: the picture arrives as a background on a div of
+  fixed size, and a background image takes no part in layout, so a row cannot
+  change height when it loads. With an img the tile took its height from the
+  one child whose size is unknown until the network answers, and a list of
+  cold rows was a stack of squat rows that each jumped to full height as its
+  own picture landed. A shimmer runs over the tile until then. The spinner all
+  this replaced was 22px on a 132px tile, moving between two colours 1.21:1
+  apart — present, correct, and invisible, which for a loading state is the
+  whole failure.
+- **Frontend files carry the version in their URL now**, the way HACS puts
+  `?hacstag=` on everything it registers — the dialog resource, the panel
+  module and the icon set. They were served `no-cache` with an ETag, which
+  makes a *browser* revalidate and is not the layer that matters: once a
+  document has imported a module it stays in that document's registry for as
+  long as the document lives, and the companion app keeps its webview alive
+  across app switches. So an upgrade could leave old frontend code resident
+  with no way to shift it but quitting the app. A new version is a new URL,
+  which is a different module, so it cannot happen again. An entry from an
+  older version — or from before the version existed — is moved to the
+  current one rather than duplicated.
+- **The dialog has no header any more, just a floating close button.** It was
+  a fixed 56px of every screen, spent on a camera name the viewer had tapped
+  a moment earlier and can see in the picture. On a phone in landscape that
+  was most of the height the video needed, and the bottom of the picture —
+  along with iOS's native controls — fell off the screen because of it. The
+  name survives as the dialog's accessible name and in the player's own
+  loading panel; the button costs nothing and the safe-area insets it used to
+  absorb are now the shell's, which in landscape are zero exactly where the
+  height was wanted.
+- **The live-view dialog was taller than an iPhone's screen.** `100dvh` is
+  still not what the companion app's webview actually shows, so the bottom of
+  the shell — where iOS puts the native video controls, AirPlay included — sat
+  below the fold. The dialog now takes its height from `window.innerHeight`
+  and follows it on resize, rotation and Safari's sliding toolbars. On a phone
+  the video element also shrink-wraps the picture rather than filling all that
+  black, so those controls sit under the video where they belong. That has to
+  be done with flex: the stage is a grid whose only row carries no explicit
+  size, and a `max-height: 100%` measured against a row that grows to fit its
+  own content clamps nothing — which cropped the bottom off a landscape live
+  view. A flex container has a definite height here, so the picture is
+  letterboxed instead of overflowing.
+
+- **"End & Save" is now just "End".** It was doing three things — stop the
+  stream, wait for its recording to be finalized, download it — and the
+  waiting could not work on the HLS path: a session is only finalized when it
+  stops, and it did not stop until the idle timeout, which is three quarters
+  of a minute on a tuned install. The poll gave up in seven seconds and
+  reported a failure for a recording that did arrive, forty seconds later.
+  Ending and saving are separate now: **End** stops the stream, and the
+  **Save MP4** and **Start Again** buttons that already existed take it from
+  there. All the polling is deleted.
+- **A live view now ends when you close it, not up to a minute later.** The
+  player asks the proxy to end the session — on closing the dialog as well as
+  on End — where before only the MPEG-TS path stopped promptly, because its
+  stream ends with the connection. On HLS the camera went on streaming to
+  nobody for the whole idle timeout, which on a battery camera is battery.
+  Every path a live view can finish by goes through the same call, so the
+  recording is always finalized before Save MP4 is offered.
+- **"End & Save" never worked on an iPhone, and "Save MP4" there was lying.**
+  The cached copy of a live view was written only by the MPEG-TS handler, and
+  iOS has no Media Source Extensions so it always takes the HLS path, which
+  wrote none. End & Save waited for a recording that was never going to
+  appear and gave up; Save MP4 then handed back whatever older session
+  happened to still be in the cache — the wrong clip, with nothing to say so.
+  The HLS session now writes the same cached copy as a second ffmpeg output,
+  always a straight copy even when low-latency mode is re-encoding the
+  playlist, finalized only once ffmpeg has actually written something.
+- **The live-view buttons are centred on a phone.** Hold Talk and End & Save
+  sat in the top-right corner, on top of the native mute and AirPlay controls
+  now that the picture reaches the edges.
+
+Two halves again: the thumbnails need proxy 0.7.0. The integration's repair
+notice and the Overview tab say so and offer the update where the install
+supports it.
+
 ## [0.6.2] — 2026-09-03
 
 Four ways the frontend could silently do nothing, and the update button now
@@ -252,7 +658,10 @@ Browser authentication, and setup that provisions itself.
   answer while authentication is pending; camera, live-view and clip routes
   answer `503` until a session exists. A login that needs a human no longer
   exits the process, which removes the restart cycle that could text a code each
-  time.
+  time. The session work this rests on — one login per start, a `hardware_id`
+  kept across the challenge, and the code redeemed inside the running session —
+  is @fritzzetik's (`e3004c8`), and should have been credited here when it
+  shipped.
 - **Access control for the credential routes.** `/auth/*` requires the proxy
   token as an `Authorization: Bearer` header, rejects it in a query string, and
   refuses to run at all when no token is configured. The Home Assistant routes

@@ -16,7 +16,6 @@ are replaced with a recorder. Run from the repo root:
 from __future__ import annotations
 
 import asyncio
-import ast
 import inspect
 import json
 import pathlib
@@ -357,6 +356,22 @@ def test_integration_decision() -> None:
     check(not version_check.is_behind("0.5", "0.5.0"), "omitted trailing zeroes compare equally")
     check(not version_check.is_behind("0.6.0", "0.5.1"), "a newer proxy is never called behind")
     check(
+        version_check.is_behind("0.6.2", "0.7.0-rc.1"),
+        "a stable proxy behind a prerelease integration is offered the prerelease",
+    )
+    check(
+        version_check.is_behind("0.7.0-rc.1", "0.7.0-rc.2"),
+        "prerelease iterations are ordered",
+    )
+    check(
+        version_check.is_behind("0.7.0-rc.2", "0.7.0"),
+        "the final release follows its prereleases",
+    )
+    check(
+        not version_check.is_behind("0.7.0", "0.7.0-rc.2"),
+        "a final proxy is newer than its prerelease integration",
+    )
+    check(
         not version_check.is_behind(None, "0.5.1") and not version_check.is_behind("0.4.0", None),
         "an unreadable version on either side is not a guess to act on",
     )
@@ -450,23 +465,11 @@ def test_strings_and_flow() -> None:
         "current and minimum-supported Home Assistant can both update the add-on",
     )
 
-    tree = ast.parse(updates)
-    slug_function = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_addon_slug"
-    )
-    namespace = {"DOMAIN": "blink_liveview_proxy"}
-    exec(compile(ast.Module([slug_function], []), str(updates_path), "exec"), namespace)
-    addon_slug = namespace["_addon_slug"]
+    # The slug rule itself lives in supervisor.py, shared with the config
+    # flow, and is covered there - see tests/test_addon_address.py.
     check(
-        addon_slug({"local_blink_liveview_proxy": {}})
-        == "local_blink_liveview_proxy",
-        "a repository-prefixed add-on slug is found",
-    )
-    check(
-        addon_slug({"unrelated": {}}) is None,
-        "an unrelated add-on is never selected",
+        "from .supervisor import addon_slug" in updates,
+        "the add-on is identified by the same rule the config flow uses",
     )
 
 

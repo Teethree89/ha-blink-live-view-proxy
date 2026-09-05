@@ -20,547 +20,560 @@
 views:
   - title: Cameras
     path: cameras
-    cards:
-      - type: horizontal-stack
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 3
         cards:
-          - type: custom:button-card
-            entity: binary_sensor.blink_liveview_proxy
-            name: Proxy
-            show_state: true
-            icon: mdi:cctv
-            state:
-              - value: "on"
-                color: "#22c55e"
-                icon: mdi:cctv
-              - value: "off"
-                color: "#ef4444"
-                icon: mdi:cctv-off
-            styles:
-              card:
-                - height: 74px
-              name:
-                - font-size: 12px
-      # Back Yard — catalina (push-to-talk available)
-      - type: picture-elements
-        camera_image: camera.back_yard
-        camera_view: auto
-        aspect_ratio: 16x9
-        elements:
-          - type: custom:button-card
-            entity: camera.blink_live_back_yard
-            show_icon: false
-            show_name: false
-            show_state: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy:
-                slug: back_yard
-                entity_id: camera.blink_live_back_yard
-                title: Back Yard
-            styles:
-              card:
-                - height: 100%
-                - padding: 0
-                - border: 0
-                - box-shadow: none
-                - background: rgba(0, 0, 0, 0)
-            style:
-              top: 0
-              left: 0
-              width: 100%
-              height: 100%
-              transform: none
-              z-index: 1
-          - type: custom:button-card
-            show_icon: false
-            show_state: false
-            name: Back Yard
-            styles:
-              card:
-                - background: rgba(0, 0, 0, 0)
-                - border: 0
-                - box-shadow: none
-                - padding: 0
-              name:
-                - color: white
-                - font-size: 14px
-                - font-weight: 600
-                - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
-            style:
-              bottom: 8px
-              left: 12px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:filmstrip
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy_clips:
-                slug: back_yard
-                title: Back Yard Clips
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 100px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:image-refresh
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_snapshot_refresh:
-                slug: back_yard
-                source_entity_id: camera.back_yard
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 54px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            entity: switch.back_yard_camera_motion_detection
-            show_name: false
-            icon: >
-              [[[
-                return entity && entity.state === 'on'
-                  ? 'mdi:motion-sensor'
-                  : 'mdi:motion-sensor-off';
-              ]]]
-            tap_action:
-              action: toggle
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - width: 20px
-                - color: >
-                    [[[
-                      return entity && entity.state === 'on'
-                        ? '#38bdf8'
-                        : '#94a3b8';
-                    ]]]
-            style:
-              bottom: 8px
-              right: 8px
-              transform: none
-              z-index: 2
-      # Driveway — catalina (push-to-talk available)
-      - type: picture-elements
-        camera_image: camera.driveway
-        camera_view: auto
-        aspect_ratio: 16x9
-        elements:
-          - type: custom:button-card
-            entity: camera.blink_live_driveway
-            show_icon: false
-            show_name: false
-            show_state: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy:
-                slug: driveway
-                entity_id: camera.blink_live_driveway
-                title: Driveway
-            styles:
-              card:
-                - height: 100%
-                - padding: 0
-                - border: 0
-                - box-shadow: none
-                - background: rgba(0, 0, 0, 0)
-            style:
-              top: 0
-              left: 0
-              width: 100%
-              height: 100%
-              transform: none
-              z-index: 1
-          - type: custom:button-card
-            show_icon: false
-            show_state: false
-            name: Driveway
-            styles:
-              card:
-                - background: rgba(0, 0, 0, 0)
-                - border: 0
-                - box-shadow: none
-                - padding: 0
-              name:
-                - color: white
-                - font-size: 14px
-                - font-weight: 600
-                - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
-            style:
-              bottom: 8px
-              left: 12px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:filmstrip
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy_clips:
-                slug: driveway
-                title: Driveway Clips
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 100px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:image-refresh
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_snapshot_refresh:
-                slug: driveway
-                source_entity_id: camera.driveway
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 54px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            entity: switch.driveway_camera_motion_detection
-            show_name: false
-            icon: >
-              [[[
-                return entity && entity.state === 'on'
-                  ? 'mdi:motion-sensor'
-                  : 'mdi:motion-sensor-off';
-              ]]]
-            tap_action:
-              action: toggle
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - width: 20px
-                - color: >
-                    [[[
-                      return entity && entity.state === 'on'
-                        ? '#38bdf8'
-                        : '#94a3b8';
-                    ]]]
-            style:
-              bottom: 8px
-              right: 8px
-              transform: none
-              z-index: 2
-      # Front Door — lotus (push-to-talk available)
-      - type: picture-elements
-        camera_image: camera.front_door
-        camera_view: auto
-        aspect_ratio: 16x9
-        elements:
-          - type: custom:button-card
-            entity: camera.blink_live_front_door
-            show_icon: false
-            show_name: false
-            show_state: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy:
-                slug: front_door
-                entity_id: camera.blink_live_front_door
-                title: Front Door
-            styles:
-              card:
-                - height: 100%
-                - padding: 0
-                - border: 0
-                - box-shadow: none
-                - background: rgba(0, 0, 0, 0)
-            style:
-              top: 0
-              left: 0
-              width: 100%
-              height: 100%
-              transform: none
-              z-index: 1
-          - type: custom:button-card
-            show_icon: false
-            show_state: false
-            name: Front Door
-            styles:
-              card:
-                - background: rgba(0, 0, 0, 0)
-                - border: 0
-                - box-shadow: none
-                - padding: 0
-              name:
-                - color: white
-                - font-size: 14px
-                - font-weight: 600
-                - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
-            style:
-              bottom: 8px
-              left: 12px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:filmstrip
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy_clips:
-                slug: front_door
-                title: Front Door Clips
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 100px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:image-refresh
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_snapshot_refresh:
-                slug: front_door
-                source_entity_id: camera.front_door
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 54px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            entity: switch.front_door_camera_motion_detection
-            show_name: false
-            icon: >
-              [[[
-                return entity && entity.state === 'on'
-                  ? 'mdi:motion-sensor'
-                  : 'mdi:motion-sensor-off';
-              ]]]
-            tap_action:
-              action: toggle
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - width: 20px
-                - color: >
-                    [[[
-                      return entity && entity.state === 'on'
-                        ? '#38bdf8'
-                        : '#94a3b8';
-                    ]]]
-            style:
-              bottom: 8px
-              right: 8px
-              transform: none
-              z-index: 2
-      # Kitchen — owl
-      - type: picture-elements
-        camera_image: camera.kitchen
-        camera_view: auto
-        aspect_ratio: 16x9
-        elements:
-          - type: custom:button-card
-            entity: camera.blink_live_kitchen
-            show_icon: false
-            show_name: false
-            show_state: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy:
-                slug: kitchen
-                entity_id: camera.blink_live_kitchen
-                title: Kitchen
-            styles:
-              card:
-                - height: 100%
-                - padding: 0
-                - border: 0
-                - box-shadow: none
-                - background: rgba(0, 0, 0, 0)
-            style:
-              top: 0
-              left: 0
-              width: 100%
-              height: 100%
-              transform: none
-              z-index: 1
-          - type: custom:button-card
-            show_icon: false
-            show_state: false
-            name: Kitchen
-            styles:
-              card:
-                - background: rgba(0, 0, 0, 0)
-                - border: 0
-                - box-shadow: none
-                - padding: 0
-              name:
-                - color: white
-                - font-size: 14px
-                - font-weight: 600
-                - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
-            style:
-              bottom: 8px
-              left: 12px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:filmstrip
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_liveview_proxy_clips:
-                slug: kitchen
-                title: Kitchen Clips
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 100px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            icon: mdi:image-refresh
-            show_name: false
-            tap_action:
-              action: fire-dom-event
-              blink_snapshot_refresh:
-                slug: kitchen
-                source_entity_id: camera.kitchen
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - color: white
-                - width: 20px
-            style:
-              bottom: 8px
-              right: 54px
-              transform: none
-              z-index: 2
-          - type: custom:button-card
-            entity: switch.kitchen_camera_motion_detection
-            show_name: false
-            icon: >
-              [[[
-                return entity && entity.state === 'on'
-                  ? 'mdi:motion-sensor'
-                  : 'mdi:motion-sensor-off';
-              ]]]
-            tap_action:
-              action: toggle
-            styles:
-              card:
-                - background: rgba(2, 6, 23, 0.55)
-                - border-radius: 999px
-                - border: 0
-                - width: 36px
-                - height: 36px
-                - padding: 0
-              icon:
-                - width: 20px
-                - color: >
-                    [[[
-                      return entity && entity.state === 'on'
-                        ? '#38bdf8'
-                        : '#94a3b8';
-                    ]]]
-            style:
-              bottom: 8px
-              right: 8px
-              transform: none
-              z-index: 2
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: binary_sensor.blink_liveview_proxy
+                name: Proxy
+                show_state: true
+                icon: blink:logo
+                state:
+                  - value: "on"
+                    color: "#22c55e"
+                    icon: blink:logo
+                  - value: "off"
+                    color: "#ef4444"
+                    icon: blink:logo
+                styles:
+                  card:
+                    - height: 74px
+                  name:
+                    - font-size: 12px
+      - type: grid
+        cards:
+          # Back Yard — catalina (push-to-talk available)
+          - type: picture-elements
+            camera_image: camera.back_yard
+            camera_view: auto
+            aspect_ratio: 16x9
+            elements:
+              - type: custom:button-card
+                entity: camera.blink_live_back_yard
+                show_icon: false
+                show_name: false
+                show_state: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy:
+                    slug: back_yard
+                    entity_id: camera.blink_live_back_yard
+                    title: Back Yard
+                styles:
+                  card:
+                    - height: 100%
+                    - padding: 0
+                    - border: 0
+                    - box-shadow: none
+                    - background: rgba(0, 0, 0, 0)
+                style:
+                  top: 0
+                  left: 0
+                  width: 100%
+                  height: 100%
+                  transform: none
+                  z-index: 1
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Back Yard
+                styles:
+                  card:
+                    - background: rgba(0, 0, 0, 0)
+                    - border: 0
+                    - box-shadow: none
+                    - padding: 0
+                  name:
+                    - color: white
+                    - font-size: 14px
+                    - font-weight: 600
+                    - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
+                style:
+                  bottom: 8px
+                  left: 12px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:filmstrip
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy_clips:
+                    slug: back_yard
+                    title: Back Yard Clips
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 104px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:image-refresh
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_snapshot_refresh:
+                    slug: back_yard
+                    source_entity_id: camera.back_yard
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 56px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                entity: switch.back_yard_camera_motion_detection
+                show_name: false
+                icon: >
+                  [[[
+                    return entity && entity.state === 'on'
+                      ? 'mdi:motion-sensor'
+                      : 'mdi:motion-sensor-off';
+                  ]]]
+                tap_action:
+                  action: toggle
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - width: 22px
+                    - color: >
+                        [[[
+                          return entity && entity.state === 'on'
+                            ? '#38bdf8'
+                            : '#94a3b8';
+                        ]]]
+                style:
+                  bottom: 8px
+                  right: 8px
+                  transform: none
+                  z-index: 2
+      - type: grid
+        cards:
+          # Driveway — catalina (push-to-talk available)
+          - type: picture-elements
+            camera_image: camera.driveway
+            camera_view: auto
+            aspect_ratio: 16x9
+            elements:
+              - type: custom:button-card
+                entity: camera.blink_live_driveway
+                show_icon: false
+                show_name: false
+                show_state: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy:
+                    slug: driveway
+                    entity_id: camera.blink_live_driveway
+                    title: Driveway
+                styles:
+                  card:
+                    - height: 100%
+                    - padding: 0
+                    - border: 0
+                    - box-shadow: none
+                    - background: rgba(0, 0, 0, 0)
+                style:
+                  top: 0
+                  left: 0
+                  width: 100%
+                  height: 100%
+                  transform: none
+                  z-index: 1
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Driveway
+                styles:
+                  card:
+                    - background: rgba(0, 0, 0, 0)
+                    - border: 0
+                    - box-shadow: none
+                    - padding: 0
+                  name:
+                    - color: white
+                    - font-size: 14px
+                    - font-weight: 600
+                    - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
+                style:
+                  bottom: 8px
+                  left: 12px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:filmstrip
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy_clips:
+                    slug: driveway
+                    title: Driveway Clips
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 104px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:image-refresh
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_snapshot_refresh:
+                    slug: driveway
+                    source_entity_id: camera.driveway
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 56px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                entity: switch.driveway_camera_motion_detection
+                show_name: false
+                icon: >
+                  [[[
+                    return entity && entity.state === 'on'
+                      ? 'mdi:motion-sensor'
+                      : 'mdi:motion-sensor-off';
+                  ]]]
+                tap_action:
+                  action: toggle
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - width: 22px
+                    - color: >
+                        [[[
+                          return entity && entity.state === 'on'
+                            ? '#38bdf8'
+                            : '#94a3b8';
+                        ]]]
+                style:
+                  bottom: 8px
+                  right: 8px
+                  transform: none
+                  z-index: 2
+      - type: grid
+        cards:
+          # Front Door — lotus (push-to-talk available)
+          - type: picture-elements
+            camera_image: camera.front_door
+            camera_view: auto
+            aspect_ratio: 16x9
+            elements:
+              - type: custom:button-card
+                entity: camera.blink_live_front_door
+                show_icon: false
+                show_name: false
+                show_state: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy:
+                    slug: front_door
+                    entity_id: camera.blink_live_front_door
+                    title: Front Door
+                styles:
+                  card:
+                    - height: 100%
+                    - padding: 0
+                    - border: 0
+                    - box-shadow: none
+                    - background: rgba(0, 0, 0, 0)
+                style:
+                  top: 0
+                  left: 0
+                  width: 100%
+                  height: 100%
+                  transform: none
+                  z-index: 1
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Front Door
+                styles:
+                  card:
+                    - background: rgba(0, 0, 0, 0)
+                    - border: 0
+                    - box-shadow: none
+                    - padding: 0
+                  name:
+                    - color: white
+                    - font-size: 14px
+                    - font-weight: 600
+                    - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
+                style:
+                  bottom: 8px
+                  left: 12px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:filmstrip
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy_clips:
+                    slug: front_door
+                    title: Front Door Clips
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 104px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:image-refresh
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_snapshot_refresh:
+                    slug: front_door
+                    source_entity_id: camera.front_door
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 56px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                entity: switch.front_door_camera_motion_detection
+                show_name: false
+                icon: >
+                  [[[
+                    return entity && entity.state === 'on'
+                      ? 'mdi:motion-sensor'
+                      : 'mdi:motion-sensor-off';
+                  ]]]
+                tap_action:
+                  action: toggle
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - width: 22px
+                    - color: >
+                        [[[
+                          return entity && entity.state === 'on'
+                            ? '#38bdf8'
+                            : '#94a3b8';
+                        ]]]
+                style:
+                  bottom: 8px
+                  right: 8px
+                  transform: none
+                  z-index: 2
+      - type: grid
+        cards:
+          # Kitchen — owl
+          - type: picture-elements
+            camera_image: camera.kitchen
+            camera_view: auto
+            aspect_ratio: 16x9
+            elements:
+              - type: custom:button-card
+                entity: camera.blink_live_kitchen
+                show_icon: false
+                show_name: false
+                show_state: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy:
+                    slug: kitchen
+                    entity_id: camera.blink_live_kitchen
+                    title: Kitchen
+                styles:
+                  card:
+                    - height: 100%
+                    - padding: 0
+                    - border: 0
+                    - box-shadow: none
+                    - background: rgba(0, 0, 0, 0)
+                style:
+                  top: 0
+                  left: 0
+                  width: 100%
+                  height: 100%
+                  transform: none
+                  z-index: 1
+              - type: custom:button-card
+                show_icon: false
+                show_state: false
+                name: Kitchen
+                styles:
+                  card:
+                    - background: rgba(0, 0, 0, 0)
+                    - border: 0
+                    - box-shadow: none
+                    - padding: 0
+                  name:
+                    - color: white
+                    - font-size: 14px
+                    - font-weight: 600
+                    - text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8)
+                style:
+                  bottom: 8px
+                  left: 12px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:filmstrip
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_liveview_proxy_clips:
+                    slug: kitchen
+                    title: Kitchen Clips
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 104px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                icon: mdi:image-refresh
+                show_name: false
+                tap_action:
+                  action: fire-dom-event
+                  blink_snapshot_refresh:
+                    slug: kitchen
+                    source_entity_id: camera.kitchen
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - color: white
+                    - width: 22px
+                style:
+                  bottom: 8px
+                  right: 56px
+                  transform: none
+                  z-index: 2
+              - type: custom:button-card
+                entity: switch.kitchen_camera_motion_detection
+                show_name: false
+                icon: >
+                  [[[
+                    return entity && entity.state === 'on'
+                      ? 'mdi:motion-sensor'
+                      : 'mdi:motion-sensor-off';
+                  ]]]
+                tap_action:
+                  action: toggle
+                styles:
+                  card:
+                    - background: rgba(2, 6, 23, 0.55)
+                    - border-radius: 999px
+                    - border: 0
+                    - width: 40px
+                    - height: 40px
+                    - padding: 0
+                  icon:
+                    - width: 22px
+                    - color: >
+                        [[[
+                          return entity && entity.state === 'on'
+                            ? '#38bdf8'
+                            : '#94a3b8';
+                        ]]]
+                style:
+                  bottom: 8px
+                  right: 8px
+                  transform: none
+                  z-index: 2

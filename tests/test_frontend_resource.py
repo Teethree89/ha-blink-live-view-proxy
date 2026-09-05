@@ -136,9 +136,13 @@ def lovelace(mode="storage", shape="modern", **kwargs):
     return obj
 
 
-def run(hass):
+VERSION = "0.7.0"
+VERSIONED = f"{URL}?v={VERSION}"
+
+
+def run(hass, version=VERSION):
     """Run one attempt, returning whether Lovelace could be reached at all."""
-    return asyncio.run(register(hass))
+    return asyncio.run(register(hass, version))
 
 
 def main() -> int:
@@ -164,17 +168,17 @@ def main() -> int:
         run(Hass({"lovelace": data}))
         resources = data["resources"] if isinstance(data, dict) else data.resources
         check(
-            resources.created == [{"res_type": "module", "url": URL}],
+            resources.created == [{"res_type": "module", "url": VERSIONED}],
             f"registers the module when absent, on {era}",
         )
 
     # Runs on every setup, so it must not add a second copy.
-    ll = lovelace(items=[{"res_type": "module", "url": URL}])
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": VERSIONED}])
     run(Hass({"lovelace": ll}))
     check(ll.resources.created == [], "does not add a duplicate")
 
     # HA appends a cache-buster to resources; that is still the same resource.
-    ll = lovelace(items=[{"res_type": "module", "url": f"{URL}?hacstag=123"}])
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": f"{URL}?hacstag=123"}])
     run(Hass({"lovelace": ll}))
     check(ll.resources.created == [], "matches an existing entry with a query string")
 
@@ -210,14 +214,14 @@ def main() -> int:
     ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": LEGACY_URL}])
     run(Hass({"lovelace": ll}))
     check(ll.resources.created == [], "no second entry is added")
-    check(ll.resources.updated == [("abc", {"url": URL})], "the old entry is rewritten")
+    check(ll.resources.updated == [("abc", {"url": VERSIONED})], "the old entry is rewritten")
     check(
-        [item["url"] for item in ll.resources.items] == [URL],
+        [item["url"] for item in ll.resources.items] == [VERSIONED],
         "the resource list ends up with exactly one, on the new path",
     )
 
     # Already migrated: nothing to do, and nothing to churn.
-    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": URL}])
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": VERSIONED}])
     run(Hass({"lovelace": ll}))
     check(ll.resources.created == [] and ll.resources.updated == [],
           "an already-migrated list is left alone")
@@ -225,15 +229,44 @@ def main() -> int:
     # HACS-style cache-buster on the legacy entry is still the legacy entry.
     ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": f"{LEGACY_URL}?hacstag=1"}])
     run(Hass({"lovelace": ll}))
-    check(ll.resources.updated == [("abc", {"url": URL})],
+    check(ll.resources.updated == [("abc", {"url": VERSIONED})],
           "a legacy entry with a query string is migrated too")
 
     # An entry with no id cannot be updated; fall back to creating the new one
     # rather than raising through config entry setup.
     ll = lovelace(items=[{"res_type": "module", "url": LEGACY_URL}])
     run(Hass({"lovelace": ll}))
-    check(ll.resources.created == [{"res_type": "module", "url": URL}],
+    check(ll.resources.created == [{"res_type": "module", "url": VERSIONED}],
           "an un-updatable legacy entry still gets the new resource added")
+
+    print("\nthe version in the URL, which is what reaches a stale browser")
+
+    # An upgrade has to change the URL. no-cache and an ETag make a browser
+    # revalidate, but a module already imported by a live document stays in
+    # that document's registry - and the companion app keeps its webview
+    # alive across app switches, so nothing else dislodges the old code.
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": f"{URL}?v=0.6.2"}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.updated == [("abc", {"url": VERSIONED})],
+          "an older version is moved to the current one")
+    check(ll.resources.created == [], "and not added a second time")
+
+    # Same version: nothing to do, and nothing to churn on every setup.
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": VERSIONED}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.updated == [] and ll.resources.created == [],
+          "the current version is left completely alone")
+
+    # An unversioned entry from before this existed is brought up to date.
+    ll = lovelace(items=[{"id": "abc", "res_type": "module", "url": URL}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.updated == [("abc", {"url": VERSIONED})],
+          "an entry predating the version query gets one")
+
+    # No id means it cannot be updated; it must still not be duplicated.
+    ll = lovelace(items=[{"res_type": "module", "url": f"{URL}?v=0.6.2"}])
+    run(Hass({"lovelace": ll}))
+    check(ll.resources.created == [], "an un-updatable entry is never duplicated")
 
     print("\nreading Lovelace across its three shapes")
     read = lovelace_module.resource_mode

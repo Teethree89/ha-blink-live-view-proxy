@@ -58,11 +58,13 @@ class BlinkProxyAuthPanel extends HTMLElement {
   _ensureDialog() {
     if (window.__blinkLiveviewDialogLoaded || this._dialogRequested) return;
     this._dialogRequested = true;
+    // The icon set too: this panel can be the first thing a session loads.
+    import("/api/blink_liveview_proxy/assets/blink-liveview-icons.js").catch(() => {});
     import("/api/blink_liveview_proxy/assets/blink-liveview-dialog.js").catch((error) => {
       this._dialogRequested = false;
       this._notice = "The live view dialog helper could not be loaded, so the buttons on the Cameras tab will not open anything. Check the Lovelace dialog resource below.";
       // eslint-disable-next-line no-console
-      console.error("Blink Liveview Proxy: dialog helper failed to load", error);
+      console.error("Blink Live View Proxy: dialog helper failed to load", error);
       this._render();
     });
   }
@@ -86,6 +88,16 @@ class BlinkProxyAuthPanel extends HTMLElement {
     }
     window.history.pushState(null, "", "/");
     window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+  }
+
+  // Home Assistant's own way of moving between panels without a reload.
+  _navigate(path) {
+    window.history.pushState(null, "", path);
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+  }
+
+  _configured() {
+    return !this._panelData || this._panelData.configured !== false;
   }
 
   _schedule() {
@@ -132,7 +144,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
   async _refreshPanel() {
     if (!this._hass) return;
     try {
-      this._panelData = await this._panelApi("GET");
+      // Only this page can answer the secure-context check: getUserMedia, and
+      // so push-to-talk, depends on the address Home Assistant was opened on,
+      // which nothing server-side sees.
+      const secure = window.isSecureContext ? "1" : "0";
+      this._panelData = await this._panelApi("GET", `?secure_context=${secure}`);
       this._panelError = "";
     } catch (_error) {
       this._panelError = "Home Assistant could not load proxy details. The integration may still be starting or need reauthentication.";
@@ -225,7 +241,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
   }
 
   async _startUpdate() {
-    if (!window.confirm("Start the Blink Liveview Proxy update now? Live views may pause while it restarts.")) return;
+    if (!window.confirm("Start the Blink Live View Proxy update now? Live views may pause while it restarts.")) return;
     this._busy = true;
     this._notice = "Starting update…";
     this._render();
@@ -437,9 +453,25 @@ class BlinkProxyAuthPanel extends HTMLElement {
       </ha-card>`;
   }
 
+  _setupHtml() {
+    const docs = "https://github.com/Teethree89/ha-blink-live-view-proxy/blob/main/docs/INSTALL.md";
+    return `<ha-card class="setup">
+      <h2>Two halves, and only one is here yet</h2>
+      <p class="muted">This integration is installed, but it is a client: the proxy is what signs in to Blink and streams the cameras, and none is connected. Run the proxy first, then add the integration and point it at the proxy. The checks below already say what else this Home Assistant needs.</p>
+      <ol class="paths">
+        <li><strong>Home Assistant OS or Supervised</strong> — install the <em>Blink Live View Proxy</em> add-on from this repository under Settings → Add-ons → Add-on Store → ⋮ → Repositories, start it, and complete the Blink login in its log. It shares its token with this integration, so the form below arrives filled in. <a href="${docs}#a--home-assistant-os-or-supervised" target="_blank" rel="noreferrer noopener">Steps</a></li>
+        <li><strong>A Linux host with systemd</strong> — one command on that host installs the service and prints the URL and token to use. <a href="${docs}#b--linux-host-with-systemd" target="_blank" rel="noreferrer noopener">Steps</a></li>
+        <li><strong>Docker, a NAS, anything else</strong> — run the published image with <code>/data</code> on a volume. <a href="${docs}#c--docker-anywhere" target="_blank" rel="noreferrer noopener">Steps</a></li>
+      </ol>
+      <button type="button" id="add-integration">Add the integration</button>
+      <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Check again</button>
+    </ha-card>`;
+  }
+
   _overviewHtml() {
     if (!this._panelData) return `<ha-card><p>${this._escape(this._panelError || "Loading proxy details…")}</p></ha-card>`;
     const data = this._panelData;
+    if (data.configured === false) return `${this._setupHtml()}${this._prerequisitesHtml()}`;
     const healthy = data.health && (data.health.ok === true || data.health.status === "ok");
     const behind = data.versions.behind;
     return `
@@ -462,6 +494,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
 
   _camerasHtml() {
     if (!this._panelData) return `<ha-card><p>${this._escape(this._panelError || "Loading cameras…")}</p></ha-card>`;
+    if (!this._configured()) return `<ha-card><p>No proxy is connected yet, so there are no cameras to list. The Overview tab has the install steps.</p></ha-card>`;
     if (!this._panelData.cameras.length) return `<ha-card><p>No configured cameras were reported.</p></ha-card>`;
     return `<section class="camera-grid">${this._panelData.cameras.map((camera, index) => `
       <ha-card class="camera-card">
@@ -475,6 +508,9 @@ class BlinkProxyAuthPanel extends HTMLElement {
   }
 
   _authHtml() {
+    if (!this._configured()) {
+      return `<ha-card><h2>Blink Authentication</h2><p class="muted">Signing in to Blink happens inside the proxy, and none is connected yet. Set one up from the Overview tab; this page then drives its login without the proxy token ever reaching the browser.</p></ha-card>`;
+    }
     const state = this._state.state || "idle";
     const waiting = state === "waiting_for_pin";
     const active = state === "authenticating" || waiting;
@@ -495,7 +531,10 @@ class BlinkProxyAuthPanel extends HTMLElement {
 
   _yamlHtml() {
     const cameras = this._panelData ? this._panelData.cameras : [];
-    return `<ha-card><h2>Dashboard YAML</h2><p class="muted">Build a whole dashboard, one view, or a paste-ready card from the cameras currently discovered by the proxy.</p>
+    if (!this._configured()) {
+      return `<ha-card><h2>Dashboard YAML</h2><p class="muted">The YAML is built from the cameras the proxy discovers, and no proxy is connected yet. Set one up from the Overview tab first.</p></ha-card>`;
+    }
+    return `<ha-card><h2>Dashboard YAML</h2><p class="muted">Build a whole dashboard, one view, or a paste-ready card from the cameras currently discovered by the proxy. The layout is a sections view, so it fills a desktop and stacks on a phone.</p>
       <div class="yaml-controls"><label>Output<select id="yaml-format"><option value="dashboard" ${this._yamlFormat === "dashboard" ? "selected" : ""}>Whole dashboard</option><option value="view" ${this._yamlFormat === "view" ? "selected" : ""}>One view</option><option value="card" ${this._yamlFormat === "card" ? "selected" : ""}>Card</option></select></label><label>Camera<select id="yaml-camera"><option value="">All cameras</option>${cameras.map((camera) => `<option value="${this._escape(camera.slug)}" ${this._yamlCamera === camera.slug ? "selected" : ""}>${this._escape(camera.name)}</option>`).join("")}</select></label></div>
       <button id="generate-yaml" ${this._busy || !cameras.length ? "disabled" : ""}>Generate YAML</button><button class="secondary" id="copy-yaml" ${!this._yaml ? "disabled" : ""}>Copy YAML</button>
       ${this._yaml ? `<textarea readonly spellcheck="false">${this._escape(this._yaml)}</textarea>` : ""}
@@ -511,7 +550,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
       this._state.remedy,
       this._state.challenge_id,
       this._state.authenticated,
-      this._tab === "auth" ? null : this._panelData,
+      this._tab === "auth" ? (this._panelData ? this._panelData.configured : null) : this._panelData,
       this._tab === "auth" ? "" : this._panelError,
       this._notice,
       this._showLogin,
@@ -529,7 +568,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._signature = signature;
     const content = { overview: this._overviewHtml(), cameras: this._camerasHtml(), auth: this._authHtml(), yaml: this._yamlHtml() }[this._tab];
     this.shadowRoot.innerHTML = `<style>
-      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h1 .wordmark{display:block;height:40px;width:auto} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin:18px 0 0;padding:0}.check{padding:14px 16px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-left:4px solid var(--secondary-text-color);border-radius:6px}.check.ok{border-left-color:var(--success-color,#2e7d32)}.check.missing.required{border-left-color:var(--error-color,#c62828)}.check.missing.optional{border-left-color:var(--warning-color,#e68a00)}.check-head{display:flex;align-items:flex-start;gap:12px}.check-text{flex:1 1 auto;min-width:0}.check h3{margin:0;font-size:15px}.check .detail{margin:4px 0 0;font-size:14px;line-height:1.5}.check .muted{margin:4px 0 0;font-size:13px}.dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--secondary-text-color)}.check.ok .dot{background:var(--success-color,#2e7d32)}.check.missing.required .dot{background:var(--error-color,#c62828)}.check.missing.optional .dot{background:var(--warning-color,#e68a00)}.badge.status{white-space:nowrap}.check details{margin-top:10px}.check summary{padding:4px 0;font-size:13px;color:var(--secondary-text-color);cursor:pointer}.check details ul{margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--secondary-text-color)}.check details li{margin-bottom:6px}.check details a{color:var(--primary-color)}.update-banner .bar{position:relative;height:6px;margin:4px 0 0;border-radius:999px;background:var(--divider-color);overflow:hidden}.update-banner .bar span{position:absolute;top:0;bottom:0;left:0;width:100%;border-radius:999px;background:var(--primary-color)}.update-banner .bar.busy span{width:40%;animation:blink-proxy-slide 1.4s ease-in-out infinite}.update-banner.done .bar span{background:var(--success-color,#2e7d32)}.update-banner.timeout .bar span{background:var(--warning-color,#e68a00)}.update-banner .detail{margin:12px 0 0;font-size:14px;line-height:1.5}@keyframes blink-proxy-slide{0%{left:-40%}100%{left:100%}}@media(prefers-reduced-motion:reduce){.update-banner .bar.busy span{width:100%;animation:none;opacity:.6}}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}.check-head{flex-wrap:wrap}h1 .wordmark{height:32px}}
+      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h1 .wordmark{display:block;height:40px;width:auto} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin:18px 0 0;padding:0}.check{padding:14px 16px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-left:4px solid var(--secondary-text-color);border-radius:6px}.check.ok{border-left-color:var(--success-color,#2e7d32)}.check.missing.required{border-left-color:var(--error-color,#c62828)}.check.missing.optional{border-left-color:var(--warning-color,#e68a00)}.check-head{display:flex;align-items:flex-start;gap:12px}.check-text{flex:1 1 auto;min-width:0}.check h3{margin:0;font-size:15px}.check .detail{margin:4px 0 0;font-size:14px;line-height:1.5}.check .muted{margin:4px 0 0;font-size:13px}.dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--secondary-text-color)}.check.ok .dot{background:var(--success-color,#2e7d32)}.check.missing.required .dot{background:var(--error-color,#c62828)}.check.missing.optional .dot{background:var(--warning-color,#e68a00)}.badge.status{white-space:nowrap}.check details{margin-top:10px}.check summary{padding:4px 0;font-size:13px;color:var(--secondary-text-color);cursor:pointer}.check details ul{margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--secondary-text-color)}.check details li{margin-bottom:6px}.check details a{color:var(--primary-color)}.setup .paths{margin:4px 0 6px;padding-left:22px;line-height:1.55}.setup .paths li{margin-bottom:10px}.setup .paths a{color:var(--primary-color);white-space:nowrap}.setup code{font-size:13px}.update-banner .bar{position:relative;height:6px;margin:4px 0 0;border-radius:999px;background:var(--divider-color);overflow:hidden}.update-banner .bar span{position:absolute;top:0;bottom:0;left:0;width:100%;border-radius:999px;background:var(--primary-color)}.update-banner .bar.busy span{width:40%;animation:blink-proxy-slide 1.4s ease-in-out infinite}.update-banner.done .bar span{background:var(--success-color,#2e7d32)}.update-banner.timeout .bar span{background:var(--warning-color,#e68a00)}.update-banner .detail{margin:12px 0 0;font-size:14px;line-height:1.5}@keyframes blink-proxy-slide{0%{left:-40%}100%{left:100%}}@media(prefers-reduced-motion:reduce){.update-banner .bar.busy span{width:100%;animation:none;opacity:.6}}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}.check-head{flex-wrap:wrap}h1 .wordmark{height:32px}}
     </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>${this._wordmark()}</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
     this._renderExpiry();
     this.shadowRoot.querySelectorAll("[data-tab]").forEach((node) => node.addEventListener("click", () => { this._tab = node.dataset.tab; this._notice = ""; this._render(); }));
@@ -539,6 +578,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.getElementById("reauth")?.addEventListener("click", () => { this._showLogin = true; this._render(); });
     this.shadowRoot.getElementById("recheck")?.addEventListener("click", () => this._recheck());
     this.shadowRoot.getElementById("update")?.addEventListener("click", () => this._startUpdate());
+    this.shadowRoot.getElementById("add-integration")?.addEventListener("click", () => this._navigate("/config/integrations/dashboard/add?domain=blink_liveview_proxy"));
     this.shadowRoot.querySelectorAll("[data-entity]").forEach((node) => node.addEventListener("click", () => this._openEntity(node.dataset.entity)));
     this.shadowRoot.querySelectorAll("[data-live]").forEach((node) => node.addEventListener("click", () => this._openLive(this._panelData.cameras[Number(node.dataset.live)])));
     this.shadowRoot.querySelectorAll("[data-clips]").forEach((node) => node.addEventListener("click", () => this._openClips(this._panelData.cameras[Number(node.dataset.clips)])));

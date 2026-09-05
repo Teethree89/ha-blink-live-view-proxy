@@ -45,7 +45,10 @@ from blink_proxy.hls import HlsManager, HlsSession  # noqa: E402
 
 # Stand-in ffmpeg: record argv next to the playlist, write it, stay alive.
 RECORDER = """#!/bin/sh
-eval playlist=\\${$#}
+playlist=""
+for arg in "$@"; do
+  case "$arg" in *.m3u8) playlist="$arg" ;; esac
+done
 printf '%s\\n' "$@" > "$(dirname "$playlist")/args.txt"
 echo '#EXTM3U' > "$playlist"
 sleep 30
@@ -92,9 +95,48 @@ def check(title, condition, detail):
     print(f"  {detail}\n  PASS\n")
 
 
+def split_outputs(args):
+    """The two outputs: the HLS playlist, then the cached copy.
+
+    Split at the playlist rather than at each -f, because an output's codec
+    options come before its -f and would otherwise land in the wrong half.
+    """
+    start = args.index("-i") + 2
+    cut = next(i for i, a in enumerate(args) if a.endswith(".m3u8")) + 1
+    return args[start:cut], args[cut:]
+
+
 async def main():
     args = await record_args({})
     inputs = args[: args.index("-i")]
+
+    # An HLS session has to leave the same cached copy the MPEG-TS path does,
+    # or saving a live view has nothing to finalize on a client that plays HLS -
+    # which is every iPhone, since they have no MSE and never take the other
+    # route. It used to fail there, and "Save MP4" quietly handed back an
+    # older session's recording instead.
+    hls_out, cache_out = split_outputs(args)
+    check(
+        "the live view is cached alongside the playlist",
+        option(hls_out, "-f") == "hls" and option(cache_out, "-f") == "mpegts",
+        f"an hls playlist and an mpegts cache ({option(hls_out, '-f')}, {option(cache_out, '-f')})",
+    )
+    check(
+        "the cached copy lands in the live-view cache",
+        cache_out[-1].endswith(".ts.part") and "liveviews" in cache_out[-1],
+        f"written to a .part in the cache directory ({Path(cache_out[-1]).name})",
+    )
+
+    # Low-latency mode re-encodes for the playlist. The cache should still hold
+    # what Blink sent, not a re-encode of it.
+    fast_hls, fast_cache = split_outputs(await record_args({"hls_transcode": True}))
+    check(
+        "the cache is a straight copy even when the playlist is re-encoded",
+        "libx264" in fast_hls
+        and "libx264" not in fast_cache
+        and option(fast_cache, "-c") == "copy",
+        "the hls output encodes, the cache copies",
+    )
 
     check(
         "the opening keyframe is not thrown away",

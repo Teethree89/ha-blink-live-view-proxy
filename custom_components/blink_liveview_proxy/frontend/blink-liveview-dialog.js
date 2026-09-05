@@ -2,8 +2,16 @@
   if (window.__blinkLiveviewDialogLoaded) return;
   window.__blinkLiveviewDialogLoaded = true;
 
+  // Pull in the icon set. index.html carries it too, but a tab that was open
+  // when the integration was installed never re-parses index.html, so the
+  // sidebar icon stays blank there. This resource loads on every Lovelace
+  // dashboard, and the module repaints icons that already gave up.
+  import("/api/blink_liveview_proxy/assets/blink-liveview-icons.js").catch(() => {});
+
   const STYLE_ID = "blink-liveview-dialog-style";
   const DIALOG_ID = "blink-liveview-dialog";
+  const CLIPS_TOKENS_REQUEST = "blink_liveview_proxy_clips_tokens";
+  const CLIPS_TOKENS_REPLY = "blink_liveview_proxy_clips_tokens_reply";
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -22,9 +30,16 @@
         position: fixed;
         inset: 0;
         width: 100vw;
+        /* 100vh on a phone is the height with the browser toolbar hidden, so
+           the bottom of the dialog - where the video's controls live - sat
+           behind the toolbar in portrait and only appeared in landscape,
+           where the toolbar collapses. dvh is the height actually visible;
+           the vh line stays for engines without it. */
         height: 100vh;
+        height: 100dvh;
         max-width: 100vw;
         max-height: 100vh;
+        max-height: 100dvh;
         margin: 0;
         border: 0;
         padding: 0;
@@ -48,28 +63,52 @@
       #${DIALOG_ID} .blink-liveview-shell {
         width: min(1120px, calc(100vw - 32px));
         height: min(760px, calc(100vh - 32px));
-        display: grid;
-        grid-template-rows: 56px 1fr;
+        height: min(760px, calc(100dvh - 32px));
+        position: relative;
+        display: block;
+        box-sizing: border-box;
         overflow: hidden;
         border-radius: 8px;
-        background: var(--card-background-color, #111827);
+        /* The live player is dark in every theme. Keeping its containing block
+           dark too means a transient resize or an unavoidable letterbox never
+           exposes Home Assistant's white light-theme card background. */
+        background: #05070a;
         box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
       }
-      #${DIALOG_ID} .blink-liveview-header {
-        display: grid;
-        grid-template-columns: 48px 1fr auto;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-        padding: 0 8px;
-        background: var(--app-header-background-color, #1f2937);
+      /* No header row.
+         It cost a fixed 56px of every screen to show a camera name the viewer
+         had just tapped and can see in the picture, and on a phone in
+         landscape that was most of the height the video needed - the bottom
+         of the picture, and the native controls with it, fell off the screen.
+         A floating button costs nothing and says the same thing. */
+      #${DIALOG_ID} .blink-liveview-close {
+        position: absolute;
+        top: calc(10px + env(safe-area-inset-top, 0px));
+        left: calc(10px + env(safe-area-inset-left, 0px));
+        z-index: 3;
+        width: 40px;
+        height: 40px;
+        border-radius: 999px;
+        background: rgba(2, 6, 23, 0.55);
+        color: #f8fafc;
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
       }
-      #${DIALOG_ID} .blink-liveview-title {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 18px;
-        font-weight: 650;
+      #${DIALOG_ID} .blink-liveview-close:hover,
+      #${DIALOG_ID} .blink-liveview-close:focus-visible {
+        background: rgba(2, 6, 23, 0.78);
+      }
+      #${DIALOG_ID} button svg {
+        width: 24px;
+        height: 24px;
+        fill: currentColor;
+        vertical-align: middle;
+      }
+      #${DIALOG_ID} button {
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #${DIALOG_ID} button {
         width: 40px;
@@ -81,17 +120,6 @@
         cursor: pointer;
         font-size: 28px;
         line-height: 40px;
-      }
-      #${DIALOG_ID} button.blink-liveview-header-action {
-        width: auto;
-        min-width: 40px;
-        border-radius: 6px;
-        padding: 0 12px;
-        font-size: 13px;
-        font-weight: 800;
-      }
-      #${DIALOG_ID} button:hover {
-        background: rgba(148, 163, 184, 0.16);
       }
       #${DIALOG_ID} iframe {
         width: 100%;
@@ -141,26 +169,200 @@
       @keyframes blinkCameraSpin {
         to { transform: rotate(360deg); }
       }
-      @media (max-width: 720px) {
+      /* A phone in either orientation, or anything short enough that the
+         framed dialog would leave no room for the picture: fill the screen,
+         and keep the header and controls out of the notch and home bar. */
+      @media (max-width: 720px), (max-height: 520px) {
         #${DIALOG_ID} {
-          place-items: stretch;
+          align-items: stretch;
+          justify-content: stretch;
         }
         #${DIALOG_ID} .blink-liveview-shell {
-          width: 100vw;
-          height: 100vh;
+          width: 100%;
+          height: 100%;
           border-radius: 0;
+          /* Fill the viewport through the safe-area edges. Padding the shell
+             itself left Home Assistant's card background visible beside the
+             notch in landscape and below the home indicator in both
+             orientations. Edge controls carry their own safe-area offsets. */
         }
       }
     `;
     document.head.appendChild(style);
   }
 
+  // iOS lies about height in more than one way. 100vh is the height with the
+  // browser toolbar hidden, and even 100dvh does not account for the chrome
+  // the Home Assistant companion app puts around its webview - so the bottom
+  // of the shell, where the video element's native controls live, sat below
+  // the fold. window.innerHeight is what is actually visible, so use it and
+  // keep it current; the CSS units stay as the fallback.
+  function sizeDialog(root) {
+    if (!root) return;
+    // Clamp, never set.
+    //
+    // Setting an explicit height replaces the box that `inset: 0` already
+    // describes, so a measurement that reads high makes the dialog taller
+    // than the screen rather than shorter - which is what put a landscape
+    // live view's bottom row off the display even after portrait was fixed.
+    // Taking the smallest of everything on offer, and applying it only as an
+    // upper bound, can shrink the dialog to fit but can never stretch it.
+    const measures = [window.innerHeight];
+    if (window.visualViewport && window.visualViewport.height) {
+      measures.push(window.visualViewport.height);
+    }
+    const height = Math.floor(Math.min(...measures.filter(Boolean)));
+    if (!height) return;
+    root.style.height = "";
+    root.style.maxHeight = `${height}px`;
+  }
+
+  function watchViewport(root) {
+    const apply = () => sizeDialog(root);
+    // orientationchange fires BEFORE iOS updates its viewport metrics, so
+    // reading the height in that handler returns the height of the
+    // orientation being left - which is how a portrait-sized dialog ended up
+    // in a landscape window with its bottom off the screen. Measure again as
+    // the rotation settles rather than trusting the first read.
+    const applyThroughRotation = () => {
+      apply();
+      for (const delay of [60, 180, 400, 800]) setTimeout(apply, delay);
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", applyThroughRotation);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", apply);
+      window.visualViewport.addEventListener("scroll", apply);
+    }
+    root.__blinkStopWatching = () => {
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", applyThroughRotation);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", apply);
+        window.visualViewport.removeEventListener("scroll", apply);
+      }
+    };
+  }
+
+  function watchVideoBounds(root, iframe, close) {
+    let video = null;
+    let observer = null;
+
+    const reset = () => {
+      close.style.left = "";
+    };
+    const apply = () => {
+      if (!root.isConnected || root.clientWidth <= root.clientHeight) {
+        reset();
+        return;
+      }
+
+      try {
+        const candidate = iframe.contentDocument?.querySelector("video");
+        if (!candidate || !candidate.videoWidth || !candidate.videoHeight) {
+          reset();
+          return;
+        }
+
+        const shell = close.offsetParent;
+        const shellRect = shell.getBoundingClientRect();
+        const frameRect = iframe.getBoundingClientRect();
+        const videoRect = candidate.getBoundingClientRect();
+        const videoLeft = frameRect.left - shellRect.left + videoRect.left;
+        const edge = 10;
+        const gap = 8;
+
+        // Only move the button when the letterbox genuinely has room for it.
+        // On a screen with no side gutter, the safe-area CSS remains the better
+        // fallback than putting the button over the picture's left edge.
+        if (videoLeft < edge + close.offsetWidth + gap) {
+          reset();
+          return;
+        }
+        close.style.left = `${Math.floor(videoLeft - close.offsetWidth - gap)}px`;
+      } catch (err) {
+        // A frame which has navigated away or become cross-origin cannot offer
+        // useful bounds; leave the button in its safe-area CSS position.
+        reset();
+      }
+    };
+    const applyThroughRotation = () => {
+      apply();
+      for (const delay of [60, 180, 400, 800]) setTimeout(apply, delay);
+    };
+    const connectVideo = () => {
+      try {
+        const candidate = iframe.contentDocument?.querySelector("video");
+        if (candidate !== video) {
+          if (video) {
+            video.removeEventListener("loadedmetadata", apply);
+            video.removeEventListener("resize", apply);
+          }
+          if (observer) observer.disconnect();
+          video = candidate;
+          if (video) {
+            video.addEventListener("loadedmetadata", apply);
+            video.addEventListener("resize", apply);
+            if (window.ResizeObserver) {
+              observer = new ResizeObserver(apply);
+              observer.observe(video);
+            }
+          }
+        }
+      } catch (err) {
+        video = null;
+      }
+      applyThroughRotation();
+    };
+
+    iframe.addEventListener("load", connectVideo);
+    window.addEventListener("resize", apply);
+    window.addEventListener("orientationchange", applyThroughRotation);
+    connectVideo();
+    root.__blinkStopPositioningClose = () => {
+      iframe.removeEventListener("load", connectVideo);
+      window.removeEventListener("resize", apply);
+      window.removeEventListener("orientationchange", applyThroughRotation);
+      if (video) {
+        video.removeEventListener("loadedmetadata", apply);
+        video.removeEventListener("resize", apply);
+      }
+      if (observer) observer.disconnect();
+    };
+  }
+
   function closeDialog() {
     const existing = document.getElementById(DIALOG_ID);
     if (!existing) return;
+    if (typeof existing.__blinkStopWatching === "function") existing.__blinkStopWatching();
+    if (typeof existing.__blinkStopPositioningClose === "function") {
+      existing.__blinkStopPositioningClose();
+    }
     if (typeof existing.close === "function" && existing.open) existing.close();
+
+    // Tell the player to stop before the iframe goes.
+    //
+    // Dropping the src and removing the element is enough on a desktop, and
+    // is not on iOS: there the player runs native HLS, and a detached
+    // document's <video> was left fetching segments. The proxy therefore
+    // never saw the stream go idle, held the Blink live view open, and every
+    // later call that needs the Blink client - listing clips, above all -
+    // queued behind a session nobody was watching. Killing the app was the
+    // only thing that ended it, which is exactly the report.
+    //
+    // The player is same-origin, so ask it to shut down properly, then
+    // navigate the frame to about:blank so the document really does unload.
     const iframe = existing.querySelector("iframe");
-    if (iframe) iframe.removeAttribute("src");
+    if (iframe) {
+      try {
+        const frame = iframe.contentWindow;
+        if (frame && typeof frame.__blinkStopPlayer === "function") frame.__blinkStopPlayer();
+      } catch (err) {
+        /* a cross-origin or already-torn-down frame has nothing to stop */
+      }
+      iframe.src = "about:blank";
+    }
     existing.remove();
   }
 
@@ -173,7 +375,7 @@
     return root && root.hass ? root.hass : null;
   }
 
-  function openFrameDialog({ title, src, headerAction }) {
+  function openFrameDialog({ title, src }) {
     ensureStyle();
     closeDialog();
 
@@ -186,44 +388,38 @@
     shell.setAttribute("aria-modal", "true");
     shell.setAttribute("aria-label", title);
 
-    const header = document.createElement("header");
-    header.className = "blink-liveview-header";
-
+    // The title survives as the accessible name of the dialog; it just is not
+    // drawn any more, because the picture underneath already says it.
     const close = document.createElement("button");
     close.type = "button";
-    close.setAttribute("aria-label", "Close");
-    close.textContent = "x";
+    close.className = "blink-liveview-close";
+    close.setAttribute("aria-label", `Close ${title}`);
+    // The MDI "close" glyph, inline so this file stays self-contained.
+    close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>';
     close.addEventListener("click", closeDialog);
 
-    const heading = document.createElement("div");
-    heading.className = "blink-liveview-title";
-    heading.textContent = title;
-
-    header.append(close, heading);
-    if (headerAction) {
-      header.append(headerAction);
-    } else {
-      header.append(document.createElement("span"));
-    }
-    shell.append(header);
-
+    let iframe = null;
     if (!src) {
       const error = document.createElement("div");
       error.className = "blink-liveview-error";
       error.textContent = "Camera access token is not ready yet. Refresh the dashboard and try again.";
       shell.append(error);
     } else {
-      const iframe = document.createElement("iframe");
+      iframe = document.createElement("iframe");
       iframe.allow = "autoplay; fullscreen; microphone; picture-in-picture";
       iframe.src = src;
       shell.append(iframe);
     }
+    // Last, so it paints over whatever is behind it.
+    shell.append(close);
 
     root.append(shell);
     root.addEventListener("click", (event) => {
       if (event.target === root) closeDialog();
     });
     document.body.append(root);
+    watchViewport(root);
+    if (iframe) watchVideoBounds(root, iframe, close);
 
     // showModal() promotes the element into the top layer, which is what
     // actually gets it painted in the iOS app's WKWebView. Fall back to leaving
@@ -259,7 +455,7 @@
     const title =
       config.title ||
       (state && state.attributes && state.attributes.friendly_name) ||
-      `Blink Live ${slug}`;
+      `Live view ${slug}`;
     let src = "";
     if (slug && entityId && token) {
       src = `/api/blink_liveview_proxy/cameras/${encodeURIComponent(
@@ -269,20 +465,47 @@
     openFrameDialog({ title, src });
   }
 
-  function openClipsDialog(config, hass) {
+  function clipsViewerSrc(slug, token) {
     const params = new URLSearchParams();
-    if (config.slug) params.set("camera", config.slug);
-    const entityId =
-      config.entity_id ||
-      (config.slug ? `camera.blink_live_${config.slug}` : "");
-    const state = hass && entityId ? hass.states[entityId] : null;
-    const token = state && state.attributes ? state.attributes.access_token : "";
+    if (slug) params.set("camera", slug);
     if (token) params.set("token", token);
     const query = params.toString();
+    return `/api/blink_liveview_proxy/clips/viewer${query ? `?${query}` : ""}`;
+  }
+
+  // Every live camera entity carries its own access token, keyed here by the proxy slug it serves.
+  function clipsTokens(hass) {
+    const tokens = {};
+    for (const state of Object.values(hass ? hass.states : {})) {
+      const attrs = state.attributes || {};
+      if (attrs.proxy_slug && attrs.access_token) tokens[attrs.proxy_slug] = attrs.access_token;
+    }
+    return tokens;
+  }
+
+  function openClipsDialog(config, hass) {
+    const tokens = clipsTokens(hass);
+    const slug = config.slug && tokens[config.slug]
+      ? config.slug
+      : Object.keys(tokens).sort()[0] || config.slug || "";
     openFrameDialog({
-      title: config.title || "Blink Local Clips",
-      src: `/api/blink_liveview_proxy/clips/viewer${query ? `?${query}` : ""}`
+      title: config.title || "Local clips",
+      src: clipsViewerSrc(slug, tokens[slug] || "")
     });
+  }
+
+  // The viewer's own token covers one camera; it asks for the rest so its camera select can cover them all.
+  function answerClipsTokens(event) {
+    const data = event.data || {};
+    if (event.origin !== window.location.origin || data.type !== CLIPS_TOKENS_REQUEST) return;
+    const root = document.getElementById(DIALOG_ID);
+    const iframe = root ? root.querySelector("iframe") : null;
+    const app = document.querySelector("home-assistant");
+    if (!iframe || !app || event.source !== iframe.contentWindow) return;
+    iframe.contentWindow.postMessage(
+      { type: CLIPS_TOKENS_REPLY, tokens: clipsTokens(app.hass) },
+      window.location.origin
+    );
   }
 
   async function refreshSnapshot(config, hass) {
@@ -419,6 +642,8 @@
     },
     true
   );
+
+  window.addEventListener("message", answerClipsTokens);
 
   window.addEventListener(
     "ll-custom",

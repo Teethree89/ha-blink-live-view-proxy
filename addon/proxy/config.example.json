@@ -16,6 +16,8 @@
   "hls_transcode": false,
   "hls_frame_rate": 24,
   "liveview_cache_dir": "/var/lib/blink-liveview-proxy/liveviews",
+  "clip_cache_dir": "/var/lib/blink-liveview-proxy/clips",
+  "clip_cache_max_mb": 512,
   "mpegts_session_seconds": 60,
   "mpegts_cooldown_seconds": 30,
   "save_liveview_cache": true,
@@ -23,8 +25,12 @@
   "ptt_strip_adts": false,
   "ptt_send_audio_config": false,
   "ptt_force_enabled_slugs": [],
-  "ptt_disabled_camera_types": ["mini"],
-  "ptt_disabled_product_types": ["owl"],
+  "ptt_disabled_camera_types": [
+    "mini"
+  ],
+  "ptt_disabled_product_types": [
+    "owl"
+  ],
   "prefer_v6_liveview": true,
   "send_liveview_token": true,
   "cameras": {

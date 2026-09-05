@@ -6,6 +6,7 @@ import ast
 import pathlib
 import re
 import sys
+import types
 
 import yaml
 
@@ -114,7 +115,7 @@ def test_backend_contract() -> None:
           "an unreadable Lovelace resource list is reported as unknown")
 
     # The brand images live beside manifest.json, not in frontend/, and Home
-    # Assistant only serves them itself from 2026.3.0. The floor is 2024.6.0.
+    # Assistant only serves them itself from 2026.3.0. The floor is 2024.11.0.
     # hass.data["lovelace"] has had three shapes; reading it directly saw only
     # the newest, which is why both callers go through the same accessor.
     check("resource_collection(" in source, "Lovelace is read through the shared accessor")
@@ -129,6 +130,18 @@ def test_backend_contract() -> None:
     check("_hacs_update_facts" in source, "the readout can see HACS's update entity")
     check("release_url" in source,
           "HACS's entity is matched on the repository URL, not a renameable name")
+
+    # The panel is in the sidebar from the first restart after installing,
+    # before any config entry exists. A 503 there was the one thing it showed.
+    check('"configured": False' in source and '"configured": True' in source,
+          "the payload says whether a config entry exists yet")
+    check("except web.HTTPServiceUnavailable:" in source.split("async def _panel_payload")[1].split("PANEL_UPDATE_MESSAGES")[0],
+          "a missing entry is answered, not raised")
+    check('"blink-liveview-icons.js"' in source, "the icon set is on the static allow-list")
+    check("BlinkLiveviewProxyClipThumbnailView" in source, "clip thumbnails are proxied")
+    check('"thumbnail_url"' in source, "and their URLs are rewritten like the download URL")
+    check('range_header := request.headers.get("Range")' in source,
+          "byte ranges reach the proxy, so the clip player can seek and Safari can play")
 
     check("BRAND_ROOT" in source, "the panel serves its own brand images")
     for name in ("logo.png", "dark_logo.png"):
@@ -204,12 +217,165 @@ def test_frontend_contract() -> None:
     )
     check("_darkTheme()," in panel, "a theme change re-renders the header")
 
+    check("_setupHtml()" in panel and "configured === false" in panel,
+          "before a config entry exists, Overview shows the install paths")
+    check("/config/integrations/dashboard/add?domain=blink_liveview_proxy" in panel,
+          "and offers to start the config flow")
+    for tab in ("_camerasHtml", "_authHtml", "_yamlHtml"):
+        body = panel.split(f"  {tab}() {{")[1].split("\n  }\n")[0]
+        check("_configured()" in body, f"{tab} explains itself before setup rather than erroring")
+
+    init = (COMPONENT / "__init__.py").read_text()
+    check('sidebar_icon="blink:logo"' in init and "add_extra_js_url" in init,
+          "the sidebar entry uses the shipped icon set, loaded on every page")
+    check('sidebar_title="Blink Live View Proxy"' in init, "the sidebar entry carries the product name")
+    # With config_panel_domain set, the Configure gear links to the sidebar panel and the options form is unreachable.
+    check("config_panel_domain" not in init, "the Configure gear opens the options form, not the panel")
+
+
+def test_dialog_viewer_lists_every_camera() -> None:
+    """A viewer opened from a card starts on every camera and filters from there.
+
+    The Clips button hands the viewer a token that is only good for one
+    camera, so the select used to be disabled and the list pinned. The dialog
+    that opened it holds a token for every camera, so the viewer asks for them
+    all, lists each camera on its own token, and merges. Standalone, with
+    nobody to ask, it stays pinned to the camera it was opened for.
+    """
+    print("\nclip viewer covers every camera")
+    source = (COMPONENT / "views.py").read_text()
+    dialog = (COMPONENT / "frontend/blink-liveview-dialog.js").read_text()
+    check("__CAMERAS_JSON__" in source, "the viewer is handed the camera inventory")
+    for name in ("TOKENS_REQUEST", "TOKENS_REPLY"):
+        viewer_type = re.search(rf'{name} = "([^"]+)"', source)
+        dialog_type = re.search(rf'CLIPS_{name} = "([^"]+)"', dialog)
+        check(
+            bool(viewer_type and dialog_type) and viewer_type.group(1) == dialog_type.group(1),
+            f"viewer and dialog agree on {name}",
+        )
+    check("SWITCH_MESSAGE" not in source and "SWITCH_MESSAGE" not in dialog,
+          "the reopen-per-camera round trip is gone")
+    check('new Option("All cameras", "")' in source, "the select offers every camera")
+    check("Promise.allSettled(Object.entries(tokens)" in source,
+          "inside the dialog each camera is listed on its own token and merged")
+    check("event.source !== window.parent" in source,
+          "the viewer takes tokens only from the window that opened it")
+    check('window.addEventListener("message", answerClipsTokens)' in dialog,
+          "the dialog answers the request")
+    check(
+        "event.origin !== window.location.origin" in dialog
+        and "event.source !== iframe.contentWindow" in dialog,
+        "and only from its own viewer frame",
+    )
+    check("attrs.proxy_slug" in dialog,
+          "tokens are keyed by each entity's proxy_slug, not a naming convention")
+
+    tree = ast.parse(source)
+    node = next(
+        (item for item in tree.body
+         if isinstance(item, ast.FunctionDef) and item.name == "_camera_inventory"),
+        None,
+    )
+    check(node is not None, "_camera_inventory exists")
+    if node is None:
+        return
+    namespace: dict[str, object] = {
+        "HomeAssistant": object,
+        "_runtime": lambda hass: {"coordinator": hass},
+    }
+    exec(ast.unparse(node), namespace)
+    inventory = namespace["_camera_inventory"]
+
+    coordinator = types.SimpleNamespace(data={"cameras": [
+        {"slug": "grill_camera", "name": "Grill Camera"},
+        {"slug": "back_door"},
+        {"name": "no slug"},
+    ]})
+
+    check(
+        inventory(coordinator) == [
+            {"slug": "grill_camera", "name": "Grill Camera"},
+            {"slug": "back_door", "name": "back_door"},
+        ],
+        "the inventory carries slug and name, falls back to the slug, skips slugless entries",
+    )
+    check("_clips_viewer_html(camera_slug, access_token, _camera_inventory(self.hass))" in source,
+          "and the viewer view hands it to the page")
+
+
+def test_clip_source_select() -> None:
+    """The viewer chooses its own clip source and remembers the choice.
+
+    Both inventories by default, so nothing changes for an install with local
+    storage. An account whose clips are all in one place can pin that source
+    instead of paging past the other one on every open.
+    """
+    print("\nclip viewer source select")
+    source = (COMPONENT / "views.py").read_text()
+    check('<select id="source">' in source, "the toolbar carries a Source select")
+    for value, label in (
+        ("both", "Sync Module + cloud"),
+        ("cloud", "Blink cloud"),
+        ("local", "Sync Module"),
+    ):
+        check(f'<option value="{value}"' in source, f"{value} is offered")
+        check(f">{label}</option>" in source, f"and reads {label}")
+    check('<option value="both" selected>' in source, "both is the default")
+    check("source: source.value" in source, "the select feeds the clips request")
+    check('"blink_liveview_proxy.clips.source"' in source,
+          "and the choice is remembered in the browser")
+    check('initial.get("source")' in source, "?source= on the URL wins over what was remembered")
+    check('source.addEventListener("change"' in source, "changing it reloads the list")
+
+    # An empty list has to say which inventory came back empty, or the obvious
+    # next move - try another source - is invisible.
+    for text in (
+        "No clips in this window, from the Sync Module or from Blink's cloud. Try a longer one.",
+        "No clips in this window from Blink's cloud. Try a longer one, or another source.",
+        "No clips in this window from the Sync Module. Try a longer one, or another source.",
+    ):
+        check(text in source, f"the empty state names the source: {text[:34]}...")
+
+    check("_clip_query(request, allow_both=True)" in source,
+          "the listing route still accepts all three values")
+
+    viewer = source.split('<select id="source">')[1].split("</section>")[0]
+    check(viewer.index("Window") < viewer.index("Camera") < viewer.index("Show"),
+          "Source comes first, then Window, Camera and Show")
+
+
+def test_first_cloud_thumbnails_are_free() -> None:
+    """The newest few cloud clips draw themselves; the rest wait to be asked.
+
+    Cloud thumbnails cost a clip download each, so they are on demand. Taken
+    to the letter that opens the viewer on a screen of grey tiles, with
+    nothing to tell one recent event from another.
+    """
+    print("\nnewest cloud clips draw themselves")
+    source = (COMPONENT / "views.py").read_text()
+    check("const AUTO_CLOUD_THUMBNAILS = 6;" in source, "about one phone screen of them")
+    check("const autoThumbs = new Set();" in source,
+          "held apart from fetchedClips, which means a clip is in the proxy's cache")
+    check("autoThumbs.has(clip.id)" in source, "an auto tile is drawn like any other")
+    check("autoThumbs.clear();" in source and "autoThumbs.size >= AUTO_CLOUD_THUMBNAILS" in source,
+          "and the set is rebuilt from the top of the list on every render")
+    check("function shownClips()" in source and "const shown = shownClips();" in source,
+          "the list and the button agree on what is shown")
+    check("return shownClips().filter(" in source,
+          "so the Load button counts only the cloud clips still waiting")
+    check("!cloudThumbnailReady(clip)" in source, "and hides once none are")
+    check("if (visible) visible.observe(box)" in source,
+          "an auto tile still only fetches when it scrolls into view")
+
 
 def main() -> int:
     test_yaml()
     test_backend_contract()
     test_placeholder_substitution()
     test_frontend_contract()
+    test_dialog_viewer_lists_every_camera()
+    test_clip_source_select()
+    test_first_cloud_thumbnails_are_free()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

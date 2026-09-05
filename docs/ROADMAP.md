@@ -3,6 +3,14 @@
 Things worth doing, and things that are odd but deliberate. Not a promise of
 dates — a list so nobody has to rediscover them.
 
+Getting listed in HACS by default has its own checklist, with its own reasoning,
+in [HACS_SUBMISSION.md](HACS_SUBMISSION.md). Two of its setup items are still
+open and belong here too: Supervisor discovery, so an installed add-on makes
+Home Assistant offer the integration with URL and token filled in rather than
+waiting to be added; and the Blink login as a step of the config flow, so the
+2FA PIN is asked for where the setup already is instead of on a panel found
+afterwards.
+
 ## Known rough edges
 
 ### The proxy source exists twice
@@ -84,8 +92,15 @@ breaks.
   `button-card` and `fire-dom-event`. The generator exists because that
   assembly is fiddly; a real card would remove the need for it.
 - **Motion zones and camera settings**, currently out of scope.
-- **Cloud clip browsing.** Deliberately not surfaced — the local Sync Module
-  path is the supported one — but the proxy has a diagnostic route for it.
+- **Push-to-talk that says why it cannot run.** The button is enabled from what
+  the camera supports, so on a plain-HTTP page it is offered and then refuses
+  into a hidden status line. Overview reports the address now; the button
+  itself should disable and label itself the way it already does for a camera
+  that does not support PTT. Found by @fritzzetik.
+- **The audio shape a Wired Floodlight (`superior`) expects.** It gets IMMI, so
+  the path exists, but nothing the proxy sends is accepted and pressing the
+  button costs the live view for about three minutes. A capture of Blink's own
+  app talking to one would settle it. Measured by @bbolinger.
 
 ## Deliberately not doing
 

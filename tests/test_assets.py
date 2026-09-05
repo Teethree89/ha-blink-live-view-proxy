@@ -153,6 +153,75 @@ def test_manifest() -> None:
     check("http" in data.get("dependencies", []), "declares the http dependency")
 
 
+def test_proxy_pill_keeps_its_mark() -> None:
+    """The proxy pill shows the same icon whether the proxy is up or down.
+
+    It used to swap to mdi:cctv-off, which is not a variant of the mark but a
+    different object - a dome camera beside a webcam - so the pill stopped
+    looking like this integration exactly when someone was reading it. A
+    slashed variant of the mark was tried and rejected: with no knocked-out
+    gap around the slash it merges into the rings and is unreadable at the 24
+    and 40px the sidebar and the pill actually draw.
+
+    So colour carries the state, and that is only safe because show_state
+    prints the word underneath. If show_state ever goes, this decision has to
+    be revisited - hence it is asserted here too.
+    """
+    print("\nthe proxy pill keeps its mark in both states")
+    for path in tracked("examples/*.yaml"):
+        try:
+            doc = yaml.safe_load(path.read_text())
+        except yaml.YAMLError:
+            continue
+        name = path.relative_to(ROOT).as_posix()
+        for _where, key, value in walk(doc, name):
+            # The pill is the button-card bound to the proxy health sensor.
+            if key != "entity" or value != "binary_sensor.blink_liveview_proxy":
+                continue
+            break
+        else:
+            continue
+
+        text = path.read_text()
+        check(
+            "mdi:cctv-off" not in text,
+            f"{name} does not swap the pill for a foreign glyph",
+        )
+        # Both the base icon and every state override are the mark.
+        icons = {
+            value
+            for _where, key, value in walk(doc, name)
+            if key == "icon" and isinstance(value, str) and "cctv" in value
+        }
+        check(not icons, f"{name} has no leftover cctv icon ({sorted(icons)})")
+        check(
+            "icon: blink:logo" in text,
+            f"{name} uses the shipped mark on the pill",
+        )
+        check(
+            "show_state: true" in text,
+            f"{name} prints the state as words, so colour is not carrying it alone",
+        )
+
+
+def test_translations_shipped() -> None:
+    """strings.json is a build-time file. Custom integrations must ship the
+    translation Home Assistant actually reads, translations/en.json, or every
+    label in the config flow, the options flow and the repair issues renders
+    as its raw key. Nothing in Home Assistant or HACS reports that."""
+    print("\ntranslations are shipped, and match the source strings")
+    component = ROOT / "custom_components/blink_liveview_proxy"
+    source = json.loads((component / "strings.json").read_text())
+    shipped_path = component / "translations/en.json"
+    check(shipped_path.exists(), "translations/en.json exists")
+    if shipped_path.exists():
+        shipped = json.loads(shipped_path.read_text())
+        check(shipped == source, "translations/en.json says exactly what strings.json says")
+    icons = component / "frontend/blink-liveview-icons.js"
+    check(icons.exists() and "customIcons" in icons.read_text(),
+          "the blink: icon set is shipped, so the sidebar entry has its mark")
+
+
 def test_generator_shapes() -> None:
     """--demo needs no proxy, so the three shapes are checkable here."""
     print("\ngenerate-dashboard.py --demo")
@@ -431,7 +500,7 @@ def test_versions_agree() -> None:
     # A minimum above the shipped version would put a repair notice in front of
     # everyone, including people running the matching proxy.
     def to_tuple(value: str) -> tuple[int, ...]:
-        return tuple(int(part) for part in value.split("."))
+        return tuple(int(part) for part in value.split("-", 1)[0].split("."))
 
     check(
         to_tuple(minimum.group(1)) <= to_tuple(manifest),
@@ -467,18 +536,23 @@ def test_bootstrap_and_autoupdate() -> None:
                    "commit", "-q", "--allow-empty", "-m", "x"],
             check=True,
         )
-        # v0.10.0 last, so an alphabetical sort would pick v0.9.0 and quietly
-        # stop upgrading anyone after the ninth release.
-        for tag in ("v0.2.0", "v0.9.0", "v0.10.0"):
+        # This mix catches three traps: alphabetical ordering, ignoring no-v
+        # prerelease tags, and treating an rc as newer than its final release.
+        for tag in ("v0.2.0", "v0.9.0", "v0.10.0", "0.11.0-rc.1"):
             subprocess.run(git + ["tag", tag], check=True)
 
         probe = f"""
         SRC_DIR={repo} OPT_DIR={opt}
         source {ROOT}/scripts/bootstrap.sh
-        echo "newest=$(newest_tag)"
+        echo "newest_rc=$(newest_tag)"
+        git -C {repo} tag v0.11.0
+        echo "newest_stable=$(newest_tag)"
         echo "installed=$(installed_version)"
         should_install 'v0.3.0' '0.3.0' && echo same=install || echo same=skip
         should_install 'v0.10.0' '0.3.0' && echo newer=install || echo newer=skip
+        should_install '0.11.0-rc.1' '0.10.0' && echo rc=install || echo rc=skip
+        should_install 'v0.10.0' '0.11.0-rc.1' && echo downgrade=install || echo downgrade=skip
+        should_install '0.11.0-rc.1' '0.11.0-rc.1' && echo same_rc=install || echo same_rc=skip
         should_install 'v0.3.0' '' && echo unknown=install || echo unknown=skip
         FORCE=1 should_install 'v0.3.0' '0.3.0' && echo forced=install || echo forced=skip
         """
@@ -488,10 +562,14 @@ def test_bootstrap_and_autoupdate() -> None:
         results = dict(
             line.split("=", 1) for line in out.strip().splitlines() if "=" in line
         )
-        check(results.get("newest") == "v0.10.0", "the newest tag is chosen by version, not alphabetically")
+        check(results.get("newest_rc") == "0.11.0-rc.1", "a prerelease tag is visible to the updater")
+        check(results.get("newest_stable") == "v0.11.0", "a final release wins over its prerelease")
         check(results.get("installed") == "0.3.0", "the installed version is read from the deployed proxy")
         check(results.get("same") == "skip", "an up-to-date host does nothing")
         check(results.get("newer") == "install", "a newer tag installs")
+        check(results.get("rc") == "install", "a newer prerelease installs")
+        check(results.get("downgrade") == "skip", "an automatic check never downgrades")
+        check(results.get("same_rc") == "skip", "a matching prerelease does nothing")
         check(results.get("unknown") == "install", "an install too old to report a version upgrades")
         check(results.get("forced") == "install", "FORCE reinstalls the same tag")
 
@@ -573,8 +651,8 @@ def test_standalone_image() -> None:
         if step.get("uses", "").startswith("docker/build-push-action")
     ]
     check(
-        push and "startsWith(github.ref, 'refs/tags/v')" in str(push[0]),
-        "every push builds the image, but only a tag publishes it",
+        push and "startsWith(github.ref, 'refs/tags/')" in str(push[0]),
+        "every push builds the image, but only a stable or prerelease tag publishes it",
     )
 
     # The entrypoint is what makes the image self-configuring; run it for real,
@@ -606,7 +684,7 @@ def test_standalone_image() -> None:
         check("token_exported=yes" in out, "a generated token reaches the proxy process")
         check(config["cameras"] == {} and config["host"] == "0.0.0.0", "the container config discovers cameras")
         check(
-            all(str(data) in config[key] for key in ("auth_file", "hls_dir", "liveview_cache_dir")),
+            all(str(data) in config[key] for key in ("auth_file", "hls_dir", "liveview_cache_dir", "clip_cache_dir")),
             "all state is written inside the volume, not the image layer",
         )
         check(oct(token.stat().st_mode)[-3:] == "600", "the generated token file is owner-only")
@@ -647,6 +725,21 @@ def test_requirements_are_stated_once_and_true() -> None:
     check(
         hacs["homeassistant"].rsplit(".", 1)[0] in readme or hacs["homeassistant"] in readme,
         f"the README names the Home Assistant version HACS enforces ({hacs['homeassistant']})",
+    )
+    # The panel reports the same floor; two numbers here means one of them lies.
+    declared_floor = re.search(
+        r'MINIMUM_HA_VERSION = "([^"]+)"',
+        (ROOT / "custom_components/blink_liveview_proxy/const.py").read_text(),
+    )
+    check(
+        declared_floor is not None and declared_floor.group(1) == hacs["homeassistant"],
+        f"const.py and hacs.json agree on the floor ({hacs['homeassistant']})",
+    )
+    # OptionsFlow.config_entry, which the options flow reads, only exists from
+    # 2024.11. A lower floor installs fine and breaks the moment Options opens.
+    check(
+        tuple(int(part) for part in hacs["homeassistant"].split(".")) >= (2024, 11, 0),
+        "the floor is at least 2024.11.0, where OptionsFlow.config_entry appeared",
     )
 
     # blinkpy is pinned exactly, on purpose: 0.25.5 reads Blink's 2FA challenge
@@ -754,6 +847,346 @@ def test_asset_paths_avoid_the_service_worker() -> None:
     check(not stale, f"nothing else still points at the superseded path ({len(stale)})")
 
 
+def test_liveview_safe_areas_do_not_pad_the_player() -> None:
+    """The player must paint behind iOS's notch and home-indicator insets."""
+    print("\nlive-view safe areas belong to controls, not the player shell")
+    source = (
+        ROOT
+        / "custom_components/blink_liveview_proxy/frontend/blink-liveview-dialog.js"
+    ).read_text()
+
+    for edge in ("top", "right", "bottom", "left"):
+        check(
+            f"padding-{edge}: env(safe-area-inset-{edge}" not in source,
+            f"the outer shell has no {edge} safe-area padding",
+        )
+    check(
+        "top: calc(10px + env(safe-area-inset-top, 0px));" in source,
+        "the close button stays below the top safe area",
+    )
+    check(
+        "left: calc(10px + env(safe-area-inset-left, 0px));" in source,
+        "the close button stays clear of a landscape notch",
+    )
+    check(
+        "background: #05070a;" in source,
+        "the shell cannot inherit Home Assistant's white card background",
+    )
+    check(
+        'iframe.contentDocument?.querySelector("video")' in source,
+        "the dialog measures the same-origin player's rendered video",
+    )
+    check(
+        "videoLeft - close.offsetWidth - gap" in source,
+        "the landscape close button sits just left of the video",
+    )
+    check(
+        "root.clientWidth <= root.clientHeight" in source,
+        "portrait keeps the safe-area CSS position",
+    )
+
+    player = (
+        ROOT / "custom_components/blink_liveview_proxy/views.py"
+    ).read_text()
+    check(
+        'liveActions.classList.add("bottom-gutter")' in player,
+        "portrait can put live actions in the gutter below the video",
+    )
+    check(
+        "window.innerHeight - videoRect.bottom" in player,
+        "bottom placement uses the rendered video edge",
+    )
+    check(
+        "roomBelow >= liveActions.offsetHeight + 80" in player,
+        "buttons move only when the gutter clears the home indicator",
+    )
+
+
+def test_sound_is_reachable_on_the_player() -> None:
+    print("\nlive view starts muted, and says how to change that")
+
+    player = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+
+    check(
+        '<video id="video" muted playsinline autoplay' in player,
+        "the stream still starts muted, which is the only way it starts at all",
+    )
+    check(
+        '<button id="sound"' in player and '>Unmute</button>' in player,
+        "the control bar carries a sound button, not just the native one",
+    )
+    check(
+        'sound.textContent = video.muted ? "Unmute" : "Mute"' in player,
+        "the button says what tapping it does",
+    )
+    check(
+        player.count("await startPlayback();") == 2,
+        "both the HLS and the MPEG-TS path start through the same helper",
+    )
+    check(
+        "if (soundWanted()) video.muted = false;" in player,
+        "someone who unmuted last time is not asked again",
+    )
+    check(
+        "restoringMute = true;" in player and "video.muted = true;" in player,
+        "a refused unmuted start falls back to the muted one, not to a still frame",
+    )
+    check(
+        player.count("statusText.textContent = \"Tap play to start live view\";") == 2,
+        "the fallback still ends in the old message when even muted is refused",
+    )
+    check(
+        "if (!restoringMute) rememberSound(!video.muted);" in player,
+        "that fallback is not remembered as a preference",
+    )
+    check(
+        "} catch (err) {" in player.split("function soundWanted()")[1][:400],
+        "storage that throws leaves the player working, without sound memory",
+    )
+
+
+def test_proxy_status_codes_survive_the_integration() -> None:
+    print("\nwhat the proxy answered is what the browser sees")
+
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    mapping = views[views.index("async def _open_proxy_response") :]
+    mapping = mapping[: mapping.index("async def _proxy_stream")]
+
+    check(
+        "response.status == 416" in mapping,
+        "an unsatisfiable range is answered as one",
+    )
+    check(
+        "HTTPRequestRangeNotSatisfiable" in mapping,
+        "416 does not become a gateway error",
+    )
+    check(
+        mapping.index("response.status == 416") < mapping.index("response.status >= 400"),
+        "the 416 branch is reached before the catch-all",
+    )
+    check(
+        'headers={"Content-Range": content_range} if content_range else None' in mapping,
+        "the header that says what range would have worked is kept",
+    )
+
+
+def test_addon_reaches_the_options_that_matter() -> None:
+    print("\nthe add-on can be configured for what its users hit")
+
+    config = yaml.safe_load((ROOT / "addon/config.yaml").read_text())
+    build = (ROOT / "addon/build_config.py").read_text()
+
+    excluded = config.get("backup_exclude") or []
+    for name in ("clips/", "liveviews/"):
+        check(name in excluded, f"{name} stays out of every snapshot")
+
+    for key in (
+        "ptt_disabled_product_types",
+        "ptt_disabled_camera_types",
+        "ptt_force_enabled_slugs",
+    ):
+        check(key in config["schema"], f"{key} is settable from the add-on UI")
+        check(
+            config["options"].get(key) == [],
+            f"{key} starts empty, meaning 'keep the proxy default'",
+        )
+        check(key in build, f"{key} reaches the generated proxy config")
+
+    check(
+        "value = options.get(key) or []" in build and "if value:" in build,
+        "an empty list is left out, so it cannot overwrite a proxy default",
+    )
+
+    defaults = (ROOT / "proxy/blink_proxy/constants.py").read_text()
+    for key in (
+        "ptt_disabled_product_types",
+        "ptt_disabled_camera_types",
+        "ptt_force_enabled_slugs",
+    ):
+        check(
+            f'"{key}"' in defaults,
+            f"{key} is a key the proxy actually reads ({key})",
+        )
+
+
+def test_a_tag_cannot_ship_the_wrong_version() -> None:
+    print("\nthe tag and the build agree, or nothing publishes")
+
+    workflow = (ROOT / ".github/workflows/publish-image.yaml").read_text()
+    build = yaml.safe_load(workflow)["jobs"]["build"]["steps"]
+    names = [step.get("name") for step in build]
+
+    check(
+        "The tag and the shipped version must agree" in names,
+        "a tag build checks itself against the tag",
+    )
+    guard = names.index("The tag and the shipped version must agree")
+    check(
+        guard < names.index("Build (and push on a tag)"),
+        "the check runs before anything is built or pushed",
+    )
+    check(
+        build[guard].get("if", "").startswith("startsWith(github.ref, 'refs/tags/')"),
+        "it only applies where there is a tag to compare",
+    )
+    for name in (
+        "manifest.json",
+        "addon/config.yaml",
+        "proxy/blink_proxy/constants.py",
+    ):
+        check(name in build[guard]["run"], f"{name} is compared to the tag")
+
+
+def test_cloud_clips_cost_nothing_until_asked() -> None:
+    print("\ncloud clips are listed, and fetched only on purpose")
+
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+
+    check(
+        "source: source.value" in views and '<option value="both" selected>' in views,
+        "the viewer asks for both inventories unless told otherwise, not just the Sync Module",
+    )
+    check(
+        'if (clip.source === "cloud" && !cloudThumbnailReady(clip))' in views,
+        "a cloud clip draws a placeholder rather than fetching itself",
+    )
+    check(
+        "cloudThumbnailsOn || fetchedClips.has(clip.id)" in views,
+        "a cloud thumbnail is drawn once its clip is on disk anyway",
+    )
+    check(
+        "window.confirm(warning)" in views and "downloaded from Blink first" in views,
+        "the bulk button says what it is about to download, and can be refused",
+    )
+    check(
+        'fetchedClips.add(clip.id);' in views and "upgradeThumbnail(clip)" in views,
+        "playing a cloud clip fills its tile in, at no further cost",
+    )
+    check(
+        views.index("function loadCloudThumbnails") < views.index("cloudThumbnailsOn = true"),
+        "nothing turns cloud thumbnails on except that button",
+    )
+
+    # The source has to survive the integration, or a cloud clip 404s on the
+    # way to its own bytes.
+    check(
+        "def _clip_query(request: web.Request, *, allow_both: bool)" in views,
+        "one place decides which clip sources a request may name",
+    )
+    check(
+        'permitted = {"local", "cloud", "both"} if allow_both else {"local", "cloud"}' in views,
+        "the source is an enum, and only the listing may say both",
+    )
+    check(
+        views.count("_clip_query(request, allow_both=False)") == 2,
+        "the download and thumbnail routes carry a source too",
+    )
+    check(
+        'query["source"] = "local"' not in views,
+        "no route pins itself to local any more",
+    )
+
+    docs = (ROOT / "docs/CONFIGURATION.md").read_text()
+    check(
+        "only for an account with a Blink subscription" in docs,
+        "the docs say what a cloud clip costs and who has one",
+    )
+
+
+def test_secure_context_reaches_the_readout() -> None:
+    """The secure-context check spans three files, and only together do they work.
+
+    The browser is the only thing that can answer it, the panel is the only
+    browser code we control, and the decision lives in prerequisites.py with
+    the rest. Remove any one end and the row silently goes UNKNOWN forever —
+    which looks like a working install, not a broken check. So all three ends
+    are asserted here, together.
+    """
+    print("\nthe secure-context check is wired end to end")
+
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend"
+             / "blink-proxy-auth-panel.js").read_text()
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    checks = (ROOT / "custom_components/blink_liveview_proxy/prerequisites.py").read_text()
+
+    check(
+        "window.isSecureContext" in panel and "secure_context=" in panel,
+        "the panel measures it in the browser and sends it",
+    )
+    check(
+        'request.query.get("secure_context")' in views,
+        "the panel view reads it off the request",
+    )
+    check(
+        '"secure_context": secure_context' in views,
+        "it reaches the facts the readout is built from",
+    )
+    check(
+        'facts.get("secure_context")' in checks,
+        "the check reads that fact rather than guessing",
+    )
+    # The third state is the whole reason this is safe to ship: a panel from
+    # before the check exists sends nothing, and must not be called a failure.
+    check(
+        'None if reported not in ("0", "1") else reported == "1"' in views,
+        "anything but a plain 0 or 1 leaves the check unanswered",
+    )
+
+
+def test_push_to_talk_defaults_to_offered() -> None:
+    print("\npush-to-talk is not hidden from a family that has it")
+
+    defaults = (ROOT / "proxy/blink_proxy/constants.py").read_text()
+    check(
+        '"ptt_disabled_camera_types": [],' in defaults,
+        "ptt_disabled_camera_types ships empty: camera_type cannot tell the "
+        "families apart, an xt reports the same 'default' as a catalina",
+    )
+    # The one list that is NOT empty, and the reason it may be. xt and white
+    # get rtsps://, and BlinkRtspLiveStream raises NotImplementedError because
+    # RTSP has no equivalent of send_session_command(). There is nothing to
+    # call, so the button can only fail - that is a different case from mini
+    # and owl, which were listed before anyone tried and can do it.
+    listed = re.search(
+        r'"ptt_disabled_product_types":\s*\[([^\]]*)\]', defaults
+    )
+    families = re.findall(r'"([^"]+)"', listed.group(1)) if listed else []
+    check(
+        families == ["xt", "white", "superior"],
+        "ptt_disabled_product_types refuses exactly the families that cannot "
+        f"be talked to today, and no others (found {families})",
+    )
+    for family in ("mini", "owl", "catalina", "lotus"):
+        check(
+            family not in families,
+            f"{family} is still offered push-to-talk by default",
+        )
+    check(
+        '"ptt_force_enabled_slugs": [],' in defaults,
+        "the per-camera override is still there for a family that is listed",
+    )
+
+    docs = (ROOT / "docs/CONFIGURATION.md").read_text()
+    check(
+        '"ptt_disabled_product_types": ["xt", "white", "superior"]' in docs,
+        "the documented default is the shipped one",
+    )
+
+
+def test_clips_toolbar_clears_the_status_bar() -> None:
+    """The clip viewer's toolbar is the one thing on that page under the notch."""
+    print("\nclips toolbar sits below the phone's status bar")
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    toolbar = re.search(r"\n\.toolbar\{([^}]*)\}", views)
+    check(toolbar is not None, "the clips toolbar rule is where it was")
+    if toolbar is None:
+        return
+    check(
+        "padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px" in toolbar.group(1),
+        "its top padding grows by the status bar inset",
+    )
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -761,6 +1194,8 @@ def main() -> int:
         test_button_card_styles,
         test_hacs_json,
         test_manifest,
+        test_translations_shipped,
+        test_proxy_pill_keeps_its_mark,
         test_generator_shapes,
         test_proxy_copies_match,
         test_install_token,
@@ -771,6 +1206,15 @@ def main() -> int:
         test_standalone_image,
         test_requirements_are_stated_once_and_true,
         test_asset_paths_avoid_the_service_worker,
+        test_liveview_safe_areas_do_not_pad_the_player,
+        test_sound_is_reachable_on_the_player,
+        test_proxy_status_codes_survive_the_integration,
+        test_addon_reaches_the_options_that_matter,
+        test_a_tag_cannot_ship_the_wrong_version,
+        test_cloud_clips_cost_nothing_until_asked,
+        test_secure_context_reaches_the_readout,
+        test_push_to_talk_defaults_to_offered,
+        test_clips_toolbar_clears_the_status_bar,
     ):
         test()
 

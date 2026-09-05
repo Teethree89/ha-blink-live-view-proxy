@@ -36,7 +36,7 @@ The add-on is the whole proxy. No Linux setup, no Python, no separate host.
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
-2. Install **Blink Liveview Proxy** from the store.
+2. Install **Blink Live View Proxy** from the store.
 3. Open the add-on **Configuration** tab. Fill in `blink_username` and
    `blink_password`. Leave `blink_2fa_code` and `proxy_api_token` empty: the
    add-on generates a token on first start, keeps it across updates, and shares
@@ -172,8 +172,10 @@ moves it to the newest tag, and runs the installer from there:
 curl -fsSL https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/scripts/bootstrap.sh | sudo bash
 ```
 
-It exits with `Already on vX.Y.Z - nothing to do` when there is nothing to do,
-so it is safe to run whenever. `VERSION=v0.3.0` pins a tag, `FORCE=1`
+It exits with `Already on X.Y.Z - nothing to do` when there is nothing to do,
+so it is safe to run whenever. Stable and prerelease tags are both considered;
+a final release wins over its prereleases, and an automatic run never
+downgrades. `VERSION=0.7.0-rc.1` pins either kind of tag, while `FORCE=1`
 reinstalls the current one.
 
 The installer also places `blink-liveview-proxy-update.service` on the host.
@@ -320,6 +322,11 @@ The proxy reads it within seconds and deletes the file.
 2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
 3. Download it and restart Home Assistant.
 
+To install a release candidate, turn on **Show beta versions** for this
+repository first — HACS's three-dot menu, then Redownload. Without it the
+"Need a different version?" list stops at the last stable release and the RC
+you are looking for is simply not there.
+
 **Manually:**
 
 ```bash
@@ -331,14 +338,14 @@ For Docker-based HA, copy into the mounted config directory then restart the con
 After restarting:
 
 ```text
-Settings → Devices & services → Add integration → Blink Liveview Proxy
+Settings → Devices & services → Add integration → Blink Live View Proxy
 ```
 
 The URL depends on where the proxy runs:
 
 | Proxy | URL |
 |---|---|
-| Add-on | `http://homeassistant.local:8088` — pre-filled, along with the token |
+| Add-on | Pre-filled, along with the token: the add-on's own hostname on Home Assistant's internal network, like `http://a1b2c3d4-blink-liveview-proxy:8088`. The prefix identifies the repository you installed from — except for an add-on **built locally**, under `/addons/<name>/` rather than installed from the store, where the prefix is literally `local` (`http://local-blink-liveview-proxy:8088`), not a hash. The add-on publishes no host port by default, so `homeassistant.local:8088` only works if you map `8088` in its **Network** panel. |
 | systemd or Docker on the HA host | `http://127.0.0.1:8088` if HA uses host networking, otherwise the host's name |
 | Another machine | `http://<that-host>:8088` |
 
@@ -346,7 +353,7 @@ Paste the proxy API token in the token field. Add-on installs have it filled in
 already; the other paths printed where to read it.
 
 The integration can be added while a new proxy is waiting for Blink login as
-long as the proxy API token is configured. It adds an admin-only **Blink
+long as the proxy API token is configured. It adds an admin-only **Blink Live View
 Proxy → Authentication** sidebar tab — that panel is the only browser entry point,
 including for a systemd install: the proxy itself never serves a login page.
 Home Assistant must be able to reach the proxy URL you entered, so a proxy bound

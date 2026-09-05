@@ -31,14 +31,34 @@
   the add-on. 32-bit ARM cannot usefully transcode a live stream.
 - Motion zones, camera settings, and deep account administration are not
   implemented.
-- Push-to-talk is experimental. Tested regular Blink cameras can receive audio.
-  Blink Mini/`owl` cameras remain disabled by default, but specific slugs can be
-  force-enabled with `ptt_force_enabled_slugs`; one was confirmed audible that
-  way on June 30, 2026.
+- **Push-to-talk needs an HTTPS address, and fails invisibly without one.**
+  Browsers only expose a microphone in a secure context, so Hold Talk cannot
+  work over `http://<address>:8123` — Home Assistant's own default — however
+  the proxy itself is reached. The button is enabled from whether the *camera*
+  supports it, so on plain HTTP it is offered, looks live, and does nothing:
+  the refusal is written to a status line the player has already hidden by the
+  time the button becomes usable, and nothing is logged proxy-side because
+  nothing was ever sent. The panel's Overview now has a row that says which
+  kind of address you are on. Reported by @fritzzetik, reproduced by
+  @bbolinger; making the button disable and label itself is the fix still to
+  come.
+- Push-to-talk is experimental. Tested regular Blink cameras can receive audio,
+  Blink Mini/`owl` included — one was confirmed audible on June 30, 2026, and
+  again on September 5, 2026, which is why the family is no longer denied by
+  default.
 - Push-to-talk is not available at all on cameras Blink serves over the RTSP
   transport (the older `xt` and `white` models). That transport carries no
   upstream audio channel, so the proxy raises `push-to-talk is not available
-  over RTSP`. Live view on those cameras is otherwise unaffected.
+  over RTSP`. Live view on those cameras is otherwise unaffected. They are on
+  `ptt_disabled_product_types` by default so the button is never offered there.
+- Push-to-talk does not work on the Wired Floodlight (`superior`) either, for a
+  different reason: it gets Blink's IMMI transport, so the path exists, but the
+  audio shape the camera expects is not the one the proxy sends. Measured cost
+  of pressing it there is worse than a refusal — the camera closes the stream
+  mid-hold and will not rejoin a live view for about three minutes — so it is
+  denied by default too. A capture of what Blink's own app sends to a
+  `superior` would make this fixable, and the entry should come out then.
+  Measured by @bbolinger.
 - Which transport a camera gets is Blink's decision, not a setting. A model
   moved from `rtsps://` to `immis://` by Blink would gain push-to-talk, and a
   model moved the other way would lose it, with no change here.
@@ -50,7 +70,11 @@
   general DVR.
 - Local clips depend on a Sync Module with local storage and BlinkPy's local
   storage manifest support.
-- Cloud clips are kept as a proxy diagnostic path and intentionally skipped in
-  the HA viewer.
+- Cloud clips are listed in the HA viewer, but they cost more to show than
+  local ones: a thumbnail is the first frame of the clip, so drawing one means
+  downloading the whole clip from Blink. The newest six are fetched
+  automatically, the rest wait until a clip is played or **Load cloud
+  thumbnails** is pressed. Cloud clips also only exist for an account with a
+  Blink subscription.
 - The dashboard helper expects `custom:button-card` or another card that can
   fire `fire-dom-event` actions.
