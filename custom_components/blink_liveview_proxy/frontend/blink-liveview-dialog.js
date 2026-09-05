@@ -10,6 +10,8 @@
 
   const STYLE_ID = "blink-liveview-dialog-style";
   const DIALOG_ID = "blink-liveview-dialog";
+  const CLIPS_TOKENS_REQUEST = "blink_liveview_proxy_clips_tokens";
+  const CLIPS_TOKENS_REPLY = "blink_liveview_proxy_clips_tokens_reply";
 
   function ensureStyle() {
     if (document.getElementById(STYLE_ID)) return;
@@ -463,20 +465,47 @@
     openFrameDialog({ title, src });
   }
 
-  function openClipsDialog(config, hass) {
+  function clipsViewerSrc(slug, token) {
     const params = new URLSearchParams();
-    if (config.slug) params.set("camera", config.slug);
-    const entityId =
-      config.entity_id ||
-      (config.slug ? `camera.blink_live_${config.slug}` : "");
-    const state = hass && entityId ? hass.states[entityId] : null;
-    const token = state && state.attributes ? state.attributes.access_token : "";
+    if (slug) params.set("camera", slug);
     if (token) params.set("token", token);
     const query = params.toString();
+    return `/api/blink_liveview_proxy/clips/viewer${query ? `?${query}` : ""}`;
+  }
+
+  // Every live camera entity carries its own access token, keyed here by the proxy slug it serves.
+  function clipsTokens(hass) {
+    const tokens = {};
+    for (const state of Object.values(hass ? hass.states : {})) {
+      const attrs = state.attributes || {};
+      if (attrs.proxy_slug && attrs.access_token) tokens[attrs.proxy_slug] = attrs.access_token;
+    }
+    return tokens;
+  }
+
+  function openClipsDialog(config, hass) {
+    const tokens = clipsTokens(hass);
+    const slug = config.slug && tokens[config.slug]
+      ? config.slug
+      : Object.keys(tokens).sort()[0] || config.slug || "";
     openFrameDialog({
       title: config.title || "Local clips",
-      src: `/api/blink_liveview_proxy/clips/viewer${query ? `?${query}` : ""}`
+      src: clipsViewerSrc(slug, tokens[slug] || "")
     });
+  }
+
+  // The viewer's own token covers one camera; it asks for the rest so its camera select can cover them all.
+  function answerClipsTokens(event) {
+    const data = event.data || {};
+    if (event.origin !== window.location.origin || data.type !== CLIPS_TOKENS_REQUEST) return;
+    const root = document.getElementById(DIALOG_ID);
+    const iframe = root ? root.querySelector("iframe") : null;
+    const app = document.querySelector("home-assistant");
+    if (!iframe || !app || event.source !== iframe.contentWindow) return;
+    iframe.contentWindow.postMessage(
+      { type: CLIPS_TOKENS_REPLY, tokens: clipsTokens(app.hass) },
+      window.location.origin
+    );
   }
 
   async function refreshSnapshot(config, hass) {
@@ -613,6 +642,8 @@
     },
     true
   );
+
+  window.addEventListener("message", answerClipsTokens);
 
   window.addEventListener(
     "ll-custom",

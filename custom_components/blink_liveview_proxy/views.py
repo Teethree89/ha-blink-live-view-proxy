@@ -221,6 +221,16 @@ def _camera(hass: HomeAssistant, slug: str) -> dict[str, Any]:
     raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n")
 
 
+def _camera_inventory(hass: HomeAssistant) -> list[dict[str, str]]:
+    """Return every proxy camera as slug and display name, for the clip viewer's select."""
+    cameras = _runtime(hass)["coordinator"].data.get("cameras", [])
+    return [
+        {"slug": str(item["slug"]), "name": str(item.get("name") or item["slug"])}
+        for item in cameras
+        if item.get("slug")
+    ]
+
+
 def _live_camera_state(hass: HomeAssistant, slug: str):
     """Return the HA camera state for a proxy slug."""
     for state in hass.states.async_all("camera"):
@@ -1705,7 +1715,11 @@ def _rewrite_clip_download_urls(
     return payload
 
 
-def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
+def _clips_viewer_html(
+    camera_slug: str | None,
+    access_token: str,
+    cameras: list[dict[str, str]] | None = None,
+) -> str:
     """Return the clip viewer page, for Sync Module and cloud clips alike.
 
     Two panes that scroll independently: the list on its own, and the
@@ -1714,6 +1728,7 @@ def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
     .replace(), and a test checks every placeholder is substituted.
     """
     camera_json = json.dumps(camera_slug or "")
+    cameras_json = json.dumps(cameras or [])
     token_json = json.dumps(access_token)
     html_text = """<!doctype html>
 <html lang="en">
@@ -1880,6 +1895,10 @@ const refresh = document.getElementById("refresh");
 const cloudThumbs = document.getElementById("cloudThumbs");
 const initial = new URLSearchParams(window.location.search);
 const fixedCamera = __CAMERA_JSON__;
+const inventory = __CAMERAS_JSON__;
+const TOKENS_REQUEST = "blink_liveview_proxy_clips_tokens";
+const TOKENS_REPLY = "blink_liveview_proxy_clips_tokens_reply";
+let loadSeq = 0;
 const accessToken = __TOKEN_JSON__;
 const FILM_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z"/></svg>';
 const PLAY_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#fff" d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>';
@@ -1889,11 +1908,47 @@ let activeId = "";
 // Opened outside the dialog there is no header naming the page, so show one.
 if (window.self === window.top) document.body.classList.add("standalone");
 
-if (fixedCamera || initial.get("camera")) {
-  const slug = fixedCamera || initial.get("camera");
-  camera.append(new Option(slug, slug));
-  camera.value = slug;
-  camera.disabled = Boolean(fixedCamera);
+// Each request is authorised for one camera; inside the dialog the page borrows the token of every other one.
+const inDialog = Boolean(fixedCamera) && window.self !== window.top;
+const tokens = fixedCamera && accessToken ? { [fixedCamera]: accessToken } : {};
+let chosen = false;
+
+function fillCameraOptions() {
+  const known = new Map(inventory.map((item) => [item.slug, item.name || item.slug]));
+  const wantedCamera = fixedCamera ? "" : initial.get("camera") || "";
+  if (wantedCamera && !known.has(wantedCamera)) known.set(wantedCamera, wantedCamera);
+  const pinned = Boolean(fixedCamera) && Object.keys(tokens).length < 2;
+  const slugs = fixedCamera ? Object.keys(tokens) : [...known.keys()];
+  const current = camera.value;
+  camera.replaceChildren();
+  if (!pinned) camera.append(new Option("All cameras", ""));
+  slugs.sort((a, b) => (known.get(a) || a).localeCompare(known.get(b) || b));
+  for (const slug of slugs) camera.append(new Option(known.get(slug) || slug, slug));
+  let value = "";
+  if (pinned) value = fixedCamera;
+  else if (chosen) value = slugs.includes(current) ? current : "";
+  else if (!fixedCamera) value = wantedCamera;
+  camera.value = value;
+  camera.disabled = pinned;
+}
+fillCameraOptions();
+
+// Home Assistant rotates camera tokens, so the dialog is asked again before every load; a dialog that never answers (an older copy still cached) leaves the page pinned.
+function requestTokens() {
+  return new Promise((resolve) => {
+    if (!inDialog) { resolve(); return; }
+    const timer = setTimeout(() => { window.removeEventListener("message", onReply); resolve(); }, 1500);
+    function onReply(event) {
+      const data = event.data || {};
+      if (event.source !== window.parent || event.origin !== window.location.origin || data.type !== TOKENS_REPLY) return;
+      window.removeEventListener("message", onReply);
+      clearTimeout(timer);
+      Object.assign(tokens, data.tokens || {});
+      resolve();
+    }
+    window.addEventListener("message", onReply);
+    window.parent.postMessage({ type: TOKENS_REQUEST }, window.location.origin);
+  });
 }
 
 // Thumbnails are cut on the proxy from a clip it has to fetch from Blink
@@ -1981,19 +2036,6 @@ function optionLabel(clip) {
   return clip.camera_name || clip.slug || "Camera";
 }
 
-function updateCameraOptions() {
-  const selected = camera.value;
-  const seen = new Map();
-  for (const clip of clips) {
-    if (clip.slug) seen.set(clip.slug, optionLabel(clip));
-  }
-  camera.replaceChildren(new Option("All cameras", ""));
-  for (const [slug, label] of [...seen.entries()].sort((a, b) => a[1].localeCompare(b[1]))) {
-    camera.append(new Option(label, slug));
-  }
-  if (selected && seen.has(selected)) camera.value = selected;
-}
-
 // What a cloud thumbnail actually costs.
 //
 // A thumbnail is the first frame cut from the clip file, so there is no cheap
@@ -2078,7 +2120,7 @@ function play(clip) {
 }
 
 function render() {
-  const selected = fixedCamera || camera.value;
+  const selected = camera.value;
   const shown = selected ? clips.filter((clip) => clip.slug === selected) : clips;
   summary.textContent = shown.length ? `${shown.length} clip${shown.length === 1 ? "" : "s"}` : "";
   QUEUE.length = 0;
@@ -2119,7 +2161,7 @@ function render() {
 }
 
 function pendingCloudThumbnails() {
-  const selected = fixedCamera || camera.value;
+  const selected = camera.value;
   return clips.filter(
     (clip) =>
       clip.source === "cloud" &&
@@ -2151,34 +2193,62 @@ function loadCloudThumbnails() {
   render();
 }
 
+async function fetchClips(params) {
+  const response = await fetch(`/api/blink_liveview_proxy/clips?${params}`, {
+    cache: "no-store",
+    credentials: "same-origin"
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  return Array.isArray(data.clips) ? data.clips : [];
+}
+
+// A standalone page is authenticated by Home Assistant itself; inside the dialog every camera is listed on its own token and the lists merged.
+async function listClips(base) {
+  if (!fixedCamera) {
+    const params = new URLSearchParams(base);
+    if (camera.value) params.set("camera", camera.value);
+    return fetchClips(params);
+  }
+  const results = await Promise.allSettled(Object.entries(tokens).map(([slug, token]) => {
+    const params = new URLSearchParams(base);
+    params.set("camera", slug);
+    params.set("token", token);
+    return fetchClips(params);
+  }));
+  const merged = results.filter((item) => item.status === "fulfilled").flatMap((item) => item.value);
+  const failed = results.find((item) => item.status === "rejected");
+  if (!merged.length && failed) throw failed.reason;
+  merged.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+  return merged.slice(0, Number(limit.value) || merged.length);
+}
+
 async function loadClips() {
+  const seq = ++loadSeq;
   refresh.disabled = true;
   list.innerHTML = '<div class="loading">Loading clips…</div>';
-  const params = new URLSearchParams({
-    hours: hours.value,
-    limit: limit.value,
-    // Both inventories. Local clips come off the Sync Module; cloud clips
-    // exist only for an account with a Blink subscription, and listing them
-    // is metadata only - no clip is fetched to build this list.
-    source: "both"
-  });
-  if (fixedCamera || camera.value) params.set("camera", fixedCamera || camera.value);
-  if (accessToken) params.set("token", accessToken);
+  await requestTokens();
+  if (seq !== loadSeq) return;
+  fillCameraOptions();
   try {
-    const response = await fetch(`/api/blink_liveview_proxy/clips?${params}`, {
-      cache: "no-store",
-      credentials: "same-origin"
+    const loaded = await listClips({
+      hours: hours.value,
+      limit: limit.value,
+      // Both inventories. Local clips come off the Sync Module; cloud clips
+      // exist only for an account with a Blink subscription, and listing them
+      // is metadata only - no clip is fetched to build this list.
+      source: "both"
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    clips = Array.isArray(data.clips) ? data.clips : [];
+    // A slower reply from an earlier load must not overwrite the current one.
+    if (seq !== loadSeq) return;
+    clips = loaded;
   } catch (err) {
+    if (seq !== loadSeq) return;
     list.innerHTML = '<div class="empty">Could not load clips. Check that the proxy is running and signed in to Blink, then refresh.</div>';
     summary.textContent = "";
     refresh.disabled = false;
     return;
   }
-  updateCameraOptions();
   updateCloudThumbnailButton();
   render();
   refresh.disabled = false;
@@ -2203,6 +2273,7 @@ cloudThumbs.addEventListener("click", loadCloudThumbnails);
 hours.addEventListener("change", loadClips);
 limit.addEventListener("change", loadClips);
 camera.addEventListener("change", () => {
+  chosen = true;
   updateCloudThumbnailButton();
   render();
 });
@@ -2212,6 +2283,7 @@ loadClips();
 </html>"""
     return (
         html_text.replace("__CAMERA_JSON__", camera_json)
+        .replace("__CAMERAS_JSON__", cameras_json)
         .replace("__ASSET_BASE__", ASSET_URL_BASE)
         .replace("__TOKEN_JSON__", token_json)
     )
@@ -2365,7 +2437,7 @@ class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
         return web.Response(
-            text=_clips_viewer_html(camera_slug, access_token),
+            text=_clips_viewer_html(camera_slug, access_token, _camera_inventory(self.hass)),
             content_type="text/html",
             headers={"Cache-Control": "no-store"},
         )

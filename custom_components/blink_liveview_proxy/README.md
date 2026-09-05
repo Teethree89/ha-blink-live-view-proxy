@@ -164,6 +164,9 @@ tap_action:
     title: Blink Local Clips
 ```
 
+The viewer opens on every camera and its Camera select filters from there. Add
+`slug: driveway` to open with that camera's token; the list still starts on all.
+
 To request a fresh normal Blink snapshot without starting live view, use:
 
 ```yaml
