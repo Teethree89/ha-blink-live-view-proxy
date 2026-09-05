@@ -11,8 +11,9 @@ Blink's cloud.
 
 This project exists because the official Home Assistant Blink integration is
 good for snapshots, motion switches, arming, sensors, and normal Blink services,
-but it does not expose Blink's live-view stream. The proxy uses BlinkPy to log
-in to Blink with your own account, request a live-view session, read whichever
+but it does not expose Blink's live-view stream. The proxy uses
+[BlinkPy](https://github.com/fronzbot/blinkpy) to log in to Blink with your
+own account, request a live-view session, read whichever
 transport Blink hands that camera — its own `immis://` framing, or `rtsps://`
 on the older `xt` and `white` models — and expose browser/HA-friendly endpoints
 on your LAN.
@@ -110,9 +111,10 @@ Two halves with different needs. The **proxy** is what talks to Blink; the
 | Docker | Docker on `linux/amd64` or `linux/arm64`. Everything else is inside the image |
 
 Its Python dependencies are in [`proxy/requirements.txt`](proxy/requirements.txt):
-`aiohttp`, `certifi`, and `blinkpy` pinned to an exact version — 0.25.9 is the
-release that recognises Blink's current 2FA challenge, and an older one fails
-login while still texting you a code.
+`aiohttp`, `certifi`, and [`blinkpy`](https://github.com/fronzbot/blinkpy)
+pinned to an exact version — 0.25.9 is the release that recognises Blink's
+current 2FA challenge, and an older one fails login while still texting you
+a code.
 
 **The integration**: Home Assistant **2024.11.0 or newer**, installed through
 HACS or copied into `custom_components/`. It adds no Python dependencies of its
@@ -372,6 +374,17 @@ requires a trusted HTTPS origin and working Android microphone input. For the
 tested Frameo USB microphone workflow, see the HA Light Panel companion docs:
 
 [Frameo USB microphone guide](https://github.com/Teethree89/ha-light-panel/blob/main/docs/frameo-usb-microphone.md)
+
+## Credits
+
+This proxy is built on [**blinkpy**](https://github.com/fronzbot/blinkpy) —
+Blink account login, token refresh, camera discovery, and the live-view
+handshake this project extends all come from that library. Written and
+maintained by **Kevin Fronczak** ([@fronzbot](https://github.com/fronzbot)).
+
+Everyone who has shipped a merged pull request to this repository, including
+this project's own maintainer, is tracked with a running count in
+[CONTRIBUTORS.md](CONTRIBUTORS.md).
 
 ## License
 
