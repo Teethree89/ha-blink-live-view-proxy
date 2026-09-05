@@ -1043,8 +1043,8 @@ def test_cloud_clips_cost_nothing_until_asked() -> None:
     views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
 
     check(
-        'source: "both"' in views,
-        "the viewer asks for both inventories, not just the Sync Module",
+        "source: source.value" in views and '<option value="both" selected>' in views,
+        "the viewer asks for both inventories unless told otherwise, not just the Sync Module",
     )
     check(
         'if (clip.source === "cloud" && !cloudThumbnailReady(clip))' in views,

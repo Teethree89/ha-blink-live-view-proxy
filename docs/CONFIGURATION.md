@@ -237,6 +237,10 @@ The HA clip viewer lists both inventories:
 /api/blink_liveview_proxy/clips/viewer
 ```
 
+Its Source select narrows that to the Sync Module or to Blink's cloud alone,
+and the browser remembers the choice for the next open. `?source=cloud` on the
+URL opens straight there.
+
 Cloud clips exist only for an account with a Blink subscription; without one,
 motion clips are written to a Sync Module's local storage and nothing else.
 Listing them is metadata only. Fetching one is not, and that is why cloud
