@@ -150,8 +150,15 @@ were renamed.
 
 Push-to-talk, **End** and **Save MP4** are inside the live-view dialog,
 not on the tile. PTT only appears for cameras the proxy reports as supporting
-it; Mini/`owl` cameras are hidden by default and can be opted back in per
-camera with `ptt_force_enabled_slugs`.
+it; `xt`, `white` and `superior` are refused by default and any single camera
+can be opted back in with `ptt_force_enabled_slugs`. Mini/`owl` cameras are
+offered it — they used to be denied by default, before one was confirmed
+audible.
+
+Being offered it is not the same as being able to use it: the browser only
+hands over a microphone on an HTTPS page, so Hold Talk cannot work from
+`http://<address>:8123` no matter which camera it is. Overview has a row for
+this.
 
 ## Option 1 — Copy one camera and edit
 

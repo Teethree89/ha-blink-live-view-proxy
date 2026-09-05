@@ -1093,6 +1093,46 @@ def test_cloud_clips_cost_nothing_until_asked() -> None:
     )
 
 
+def test_secure_context_reaches_the_readout() -> None:
+    """The secure-context check spans three files, and only together do they work.
+
+    The browser is the only thing that can answer it, the panel is the only
+    browser code we control, and the decision lives in prerequisites.py with
+    the rest. Remove any one end and the row silently goes UNKNOWN forever —
+    which looks like a working install, not a broken check. So all three ends
+    are asserted here, together.
+    """
+    print("\nthe secure-context check is wired end to end")
+
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend"
+             / "blink-proxy-auth-panel.js").read_text()
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    checks = (ROOT / "custom_components/blink_liveview_proxy/prerequisites.py").read_text()
+
+    check(
+        "window.isSecureContext" in panel and "secure_context=" in panel,
+        "the panel measures it in the browser and sends it",
+    )
+    check(
+        'request.query.get("secure_context")' in views,
+        "the panel view reads it off the request",
+    )
+    check(
+        '"secure_context": secure_context' in views,
+        "it reaches the facts the readout is built from",
+    )
+    check(
+        'facts.get("secure_context")' in checks,
+        "the check reads that fact rather than guessing",
+    )
+    # The third state is the whole reason this is safe to ship: a panel from
+    # before the check exists sends nothing, and must not be called a failure.
+    check(
+        'None if reported not in ("0", "1") else reported == "1"' in views,
+        "anything but a plain 0 or 1 leaves the check unanswered",
+    )
+
+
 def test_push_to_talk_defaults_to_offered() -> None:
     print("\npush-to-talk is not hidden from a family that has it")
 
@@ -1172,6 +1212,7 @@ def main() -> int:
         test_addon_reaches_the_options_that_matter,
         test_a_tag_cannot_ship_the_wrong_version,
         test_cloud_clips_cost_nothing_until_asked,
+        test_secure_context_reaches_the_readout,
         test_push_to_talk_defaults_to_offered,
         test_clips_toolbar_clears_the_status_bar,
     ):

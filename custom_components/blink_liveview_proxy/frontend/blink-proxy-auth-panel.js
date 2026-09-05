@@ -144,7 +144,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
   async _refreshPanel() {
     if (!this._hass) return;
     try {
-      this._panelData = await this._panelApi("GET");
+      // Only this page can answer the secure-context check: getUserMedia, and
+      // so push-to-talk, depends on the address Home Assistant was opened on,
+      // which nothing server-side sees.
+      const secure = window.isSecureContext ? "1" : "0";
+      this._panelData = await this._panelApi("GET", `?secure_context=${secure}`);
       this._panelError = "";
     } catch (_error) {
       this._panelError = "Home Assistant could not load proxy details. The integration may still be starting or need reauthentication.";

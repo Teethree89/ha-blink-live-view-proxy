@@ -408,13 +408,78 @@ def _integration_update(facts: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _secure_context(facts: dict[str, Any]) -> dict[str, Any]:
+    """Whether the browser reading this page may open a microphone.
+
+    Push-to-talk is the one feature that does not live on the proxy at all
+    before it starts: the browser captures the audio, and `getUserMedia` only
+    exists in a secure context — HTTPS, or `http://localhost`. Home Assistant's
+    own default, `http://<address>:8123`, is not one, and neither is the
+    companion app pointed at an internal URL.
+
+    It earns a row because of how it fails. Hold Talk is enabled from whether
+    the *camera* supports it, so on plain HTTP the button is offered, looks
+    live, and does nothing: the refusal is written to a status line the player
+    has already hidden by the time the button becomes usable. Four different
+    refusals reach the same invisible place. Nothing is logged proxy-side,
+    because nothing was ever sent.
+
+    Only the browser can answer this, so the panel reports what it sees and an
+    older panel that does not send it leaves the row unanswered rather than
+    guessing. Never required: live view, clips, snapshots and everything else
+    are unaffected, and most installs are plain HTTP on purpose.
+    """
+    reported = facts.get("secure_context")
+
+    if reported is None:
+        state, detail = UNKNOWN, (
+            "The page did not report whether it is a secure context. A panel "
+            "from before this check existed does not send it."
+        )
+    elif reported:
+        state, detail = OK, (
+            "This page is a secure context, so the browser will hand over a "
+            "microphone when Hold Talk asks for one."
+        )
+    else:
+        state, detail = MISSING, (
+            "This page is not a secure context, so the browser refuses the "
+            "microphone and Hold Talk cannot work from this address. It is "
+            "still offered on cameras that support it, and pressing it does "
+            "nothing visible. Everything else is unaffected."
+        )
+
+    return _row(
+        "secure_context",
+        "HTTPS, or a browser-trusted origin",
+        state,
+        detail,
+        "Push-to-talk",
+        False,
+        [
+            "The address in the browser is what counts, not how the proxy is "
+            "reached: Home Assistant's default http://<address>:8123 is not a "
+            "secure context, and http://localhost is.",
+            "Home Assistant Cloud (Nabu Casa) gives you an HTTPS address with "
+            "nothing to configure, and the companion app can use it at home "
+            "too — Settings → Companion app → Internal URL, left empty.",
+            "Self-hosted: put a reverse proxy with a certificate in front of "
+            "Home Assistant, or set ssl_certificate and ssl_key under http: "
+            "in configuration.yaml.",
+            "Only push-to-talk needs this. Live view, clips, downloads and "
+            "snapshots work over plain HTTP.",
+        ],
+        f"{DOCS_BASE}/CONFIGURATION.md#push-to-talk",
+    )
+
+
 def build(facts: dict[str, Any]) -> list[dict[str, Any]]:
     """The whole readout, in the order it is worth reading.
 
     Home Assistant first because everything sits on it, then this integration's
     own currency, then the two halves of the account story, then the proxy
-    host, then the dashboard layer — roughly outward from the thing least
-    likely to be the problem.
+    host, then the dashboard layer, and last the browser the page is being read
+    in — roughly outward from the thing least likely to be the problem.
     """
     return [
         _home_assistant(facts),
@@ -425,6 +490,7 @@ def build(facts: dict[str, Any]) -> list[dict[str, Any]]:
         _dashboard_resource(facts),
         _frontend_card(facts, "button-card"),
         _frontend_card(facts, "auto-entities"),
+        _secure_context(facts),
     ]
 
 

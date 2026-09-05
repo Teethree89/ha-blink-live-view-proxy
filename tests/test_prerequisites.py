@@ -68,6 +68,10 @@ def facts(**overrides) -> dict:
         "blink_entries": 1,
         "blink_loaded": 1,
         "blink_service": True,
+        # Only the browser can answer this one, and the panel does. True here
+        # so a healthy install is all green; the three states are exercised in
+        # test_secure_context.
+        "secure_context": True,
     }
     base.update(overrides)
     return base
@@ -88,9 +92,10 @@ def test_shape() -> None:
         "dashboard_resource",
         "button_card",
         "auto_entities",
+        "secure_context",
     }
     result = build(facts())
-    check(set(row["key"] for row in result) == keys, "all eight checks are present")
+    check(set(row["key"] for row in result) == keys, "all nine checks are present")
     check(
         len({row["key"] for row in result}) == len(result),
         "no two checks share a key",
@@ -117,7 +122,7 @@ def test_all_green() -> None:
     result = build(facts())
     check(all(row["state"] == OK for row in result), "every check passes")
     summary = summarize(result)
-    check(summary == {"total": 8, "ok": 8, "missing": 0, "unknown": 0, "blocking": 0},
+    check(summary == {"total": 9, "ok": 9, "missing": 0, "unknown": 0, "blocking": 0},
           f"the summary counts them all as ready ({summary})")
 
 
@@ -250,6 +255,48 @@ def test_frontend_cards() -> None:
           "no resource list means unknown for the cards too")
 
 
+def test_secure_context() -> None:
+    """The one check nothing server-side can answer.
+
+    It exists because the failure is silent in the worst way: Hold Talk is
+    enabled from whether the camera supports it, so on plain HTTP the button
+    is offered, looks live, and refuses into a status line the player has
+    already hidden. This row is the only thing that says so.
+    """
+    print("\nthe browser's secure context, which only the browser knows")
+
+    secure = rows(secure_context=True)["secure_context"]
+    check(secure["state"] == OK, "an HTTPS page passes")
+
+    plain = rows(secure_context=False)["secure_context"]
+    check(plain["state"] == MISSING, "a plain-HTTP page is reported")
+    check(
+        "microphone" in plain["detail"] and "nothing visible" in plain["detail"],
+        "it says what the user will actually see happen",
+    )
+
+    # Not required: live view, clips and snapshots are all fine over HTTP, and
+    # most installs are plain HTTP on purpose. A red blocking row on every one
+    # of them would be noise, and noise is what gets a readout ignored.
+    check(plain["required"] is False, "it never blocks, it only explains")
+    summary = summarize(build(facts(secure_context=False)))
+    check(summary["blocking"] == 0, f"a plain-HTTP install blocks nothing ({summary})")
+
+    # A panel from before this check existed sends nothing. Third state, not a
+    # false — the same rule the rest of this module follows.
+    unasked = rows(secure_context=None)["secure_context"]
+    check(unasked["state"] == UNKNOWN, "an older panel leaves it unanswered")
+    check(
+        summarize(build(facts(secure_context=None)))["missing"] == 0,
+        "an unanswered check is not counted as a failure",
+    )
+
+    check(
+        plain["needed_for"] == "Push-to-talk",
+        "the row names the single feature it gates",
+    )
+
+
 def test_blocking_counts_only_required_failures() -> None:
     print("\nthe summary's blocking count")
     summary = summarize(build(facts(environment={"blinkpy": "0.25.9", "ffmpeg": None},
@@ -270,6 +317,7 @@ def main() -> int:
         test_old_proxy_is_not_a_failure,
         test_dashboard_resource,
         test_frontend_cards,
+        test_secure_context,
         test_blocking_counts_only_required_failures,
     ):
         test()

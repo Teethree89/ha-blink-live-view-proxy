@@ -2712,11 +2712,19 @@ async def _prerequisite_facts(
     status: dict[str, Any],
     proxy_version: str | None,
     own_version: str,
+    secure_context: bool | None = None,
 ) -> dict[str, Any]:
-    """Collect everything prerequisites.build() decides from, and nothing else."""
+    """Collect everything prerequisites.build() decides from, and nothing else.
+
+    All of this is server-side except secure_context, which nothing here can
+    observe: whether the microphone is available depends on the address in the
+    reader's browser, so the panel measures it and passes it in. None means it
+    did not say, which is a state of its own rather than a false.
+    """
     from homeassistant.const import __version__ as HA_VERSION
 
     return {
+        "secure_context": secure_context,
         "ha_version": HA_VERSION,
         "minimum_ha": MINIMUM_HA_VERSION,
         "required_blinkpy": REQUIRED_BLINKPY_VERSION,
@@ -2733,7 +2741,9 @@ async def _prerequisite_facts(
     }
 
 
-async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
+async def _panel_payload(
+    hass: HomeAssistant, secure_context: bool | None = None
+) -> dict[str, Any]:
     """Build the admin panel's redacted, read-only snapshot.
 
     Answers before a config entry exists too. The panel is registered at
@@ -2752,7 +2762,7 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
         entry_id, runtime = _runtime_entry(hass)
     except web.HTTPServiceUnavailable:
         checks = prerequisites.build(
-            await _prerequisite_facts(hass, {}, None, own_version)
+            await _prerequisite_facts(hass, {}, None, own_version, secure_context)
         )
         return {
             "configured": False,
@@ -2777,7 +2787,9 @@ async def _panel_payload(hass: HomeAssistant) -> dict[str, Any]:
     proxy_version = infer_version(status)
     entry = hass.config_entries.async_get_entry(entry_id)
     checks = prerequisites.build(
-        await _prerequisite_facts(hass, status, proxy_version, own_version)
+        await _prerequisite_facts(
+            hass, status, proxy_version, own_version, secure_context
+        )
     )
     return {
         "configured": True,
@@ -2825,9 +2837,18 @@ class BlinkLiveviewProxyPanelView(HomeAssistantView):
         self.hass = hass
 
     @require_admin
-    async def get(self, _request: web.Request) -> web.Response:
+    async def get(self, request: web.Request) -> web.Response:
+        # Whether the microphone is reachable is a property of the address in
+        # the reader's browser, which nothing server-side can see. The panel
+        # measures window.isSecureContext and says so here; anything else,
+        # including a panel too old to send it, leaves the check unanswered.
+        reported = request.query.get("secure_context")
+        secure_context = (
+            None if reported not in ("0", "1") else reported == "1"
+        )
         return web.json_response(
-            await _panel_payload(self.hass), headers=AUTH_VIEW_HEADERS
+            await _panel_payload(self.hass, secure_context),
+            headers=AUTH_VIEW_HEADERS,
         )
 
 

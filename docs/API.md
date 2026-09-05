@@ -180,14 +180,21 @@ Blink IMMI audio frames over the active live-view session.
 
 The MP4 endpoint remuxes the cached MPEG-TS file with `ffmpeg` on demand.
 
-## Local Clips
+## Clips
 
-- `GET /clips?source=local&hours=24&limit=20`
+- `GET /clips?source=both&hours=24&limit=20`
 - `GET /clips/{clip_id}.mp4?source=local`
-- `GET /clips/{clip_id}.jpg?source=local`
+- `GET /clips/{clip_id}.jpg?source=cloud`
 
-The Home Assistant viewer intentionally uses local Sync Module clips. Cloud clip
-support remains a diagnostic proxy path and is not surfaced in the HA viewer.
+`source` is `local`, `cloud`, or — on the listing only — `both`, which is what
+the Home Assistant viewer asks for by default. The download and thumbnail
+routes name one inventory, never both, and a clip id that is not a
+24-character hex digest is refused before it reaches the cache or Blink.
+
+Listing either inventory is metadata only. Fetching is not, and that is the
+difference worth knowing: a local clip comes off your own Sync Module, while a
+cloud clip is downloaded from Blink, which is why the viewer draws cloud
+thumbnails only for the newest few and leaves the rest until asked.
 
 Each listed clip carries a `download_url`, a `thumbnail_url` and `cached`.
 The first request for a clip fetches it from Blink and keeps it under

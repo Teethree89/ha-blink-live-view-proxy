@@ -184,9 +184,26 @@ the default. Set it back to `false` if you hit issues and want to compare.
 
 ## Push-to-Talk
 
-Browser microphone capture requires HTTPS or a browser-trusted origin. The
-player sends PCM to HA over WebSocket; HA forwards it to the proxy; the proxy
-uses ffmpeg to encode AAC and sends IMMI audio frames to Blink.
+**This is the one feature that needs an HTTPS address.** Browsers only expose
+a microphone in a secure context — an HTTPS page, or `http://localhost` — so
+Hold Talk cannot work from `http://<address>:8123`, which is Home Assistant's
+own default and what the companion app uses at home unless you tell it
+otherwise. How the proxy is reached makes no difference: the address in the
+browser is what counts.
+
+Today it fails badly rather than clearly. The button is enabled from whether
+the *camera* supports push-to-talk, so on a plain-HTTP page it is offered,
+looks live, and does nothing at all: the refusal is written to a status line
+the player has already hidden by the time the button becomes usable, and
+nothing appears in the proxy log because nothing was ever sent. If Hold Talk
+seems dead, check **Blink Live View Proxy → Overview**, which has a row for
+exactly this. Home Assistant Cloud (Nabu Casa) is the shortest route to an
+HTTPS address; a reverse proxy with a certificate, or `ssl_certificate` and
+`ssl_key` under `http:` in `configuration.yaml`, also do it.
+
+Once the microphone is available, the player sends PCM to HA over WebSocket;
+HA forwards it to the proxy; the proxy uses ffmpeg to encode AAC and sends
+IMMI audio frames to Blink.
 
 PTT is hidden for camera families in:
 
@@ -229,7 +246,7 @@ An add-on install can set all three; they are add-on options. There, an empty
 box means "keep these defaults" rather than "allow everything", so the lists
 can only be added to from the add-on UI.
 
-## Local Clips
+## Clips
 
 The HA clip viewer lists both inventories:
 

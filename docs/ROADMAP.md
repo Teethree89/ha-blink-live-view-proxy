@@ -92,8 +92,15 @@ breaks.
   `button-card` and `fire-dom-event`. The generator exists because that
   assembly is fiddly; a real card would remove the need for it.
 - **Motion zones and camera settings**, currently out of scope.
-- **Cloud clip browsing.** Deliberately not surfaced — the local Sync Module
-  path is the supported one — but the proxy has a diagnostic route for it.
+- **Push-to-talk that says why it cannot run.** The button is enabled from what
+  the camera supports, so on a plain-HTTP page it is offered and then refuses
+  into a hidden status line. Overview reports the address now; the button
+  itself should disable and label itself the way it already does for a camera
+  that does not support PTT. Found by @fritzzetik.
+- **The audio shape a Wired Floodlight (`superior`) expects.** It gets IMMI, so
+  the path exists, but nothing the proxy sends is accepted and pressing the
+  button costs the live view for about three minutes. A capture of Blink's own
+  app talking to one would settle it. Measured by @bbolinger.
 
 ## Deliberately not doing
 

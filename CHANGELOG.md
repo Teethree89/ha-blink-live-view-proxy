@@ -8,6 +8,157 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.7.0-rc.4] — 2026-09-05
+
+Everything found in the rc.2 and rc.3 testing pass, closed. Nine of these
+arrived as pull requests from @bbolinger and @fritzzetik against the release
+branch, each measured on real hardware before it was written.
+
+### Fixed
+
+- **A clip id that we did not issue is refused.** The download and thumbnail
+  handlers turned the id straight from the URL into a filename under the cache
+  directory, and aiohttp decodes a `%2F` inside a match_info value — so an id
+  of `..%2Fsecret` read `secret.mp4` from the directory *above* the cache and
+  served it. A clip id is a 24-character hex digest and nothing else can name
+  a clip the listing handed out, so anything else is a 404 before it reaches
+  the cache or Blink. No released version shipped `clip_cache.py`, so this
+  never left the release branch, but the systemd unit has no `User=` and runs
+  as root, which is what made it worth taking first. Found and fixed by
+  @bbolinger ([#33]).
+- **Save hands back the live view you just watched, not an older one.** When
+  an MPEG-TS session ends it deletes the previous cached file and repoints
+  `last_liveviews` at the new one. `HlsSession` finalized its own copy and did
+  neither, so the memo kept the first file it ever saw and every Save after
+  the first returned a stale recording — on iPhones and iPads, which can only
+  take the HLS path, that meant every Save after the first was wrong. It also
+  stops the per-camera cache growing a file per session. Found and fixed by
+  @bbolinger ([#34]).
+- **The clips toolbar clears the status bar on a phone.** The live-view dialog
+  pads for the notch on purpose; the clips viewer is a different page whose
+  toolbar is the first thing at the top, so the Source, Window and Camera
+  selectors sat under the clock. Seen on an iPhone in the companion app, in
+  portrait. Found and fixed by @bbolinger ([#35]).
+- **The Configure gear opens the options form again.** With
+  `config_panel_domain` set on the sidebar panel, Home Assistant turns the gear
+  on the integration page into a link to that panel — so live-view duration and
+  the proxy token could only be reached by removing and re-adding the entry.
+  The panel keeps its sidebar entry; the gear goes back to the options form.
+  Found and fixed by @bbolinger ([#36]).
+- **The clips viewer covers every camera, not just the one that opened it.**
+  The Clips button handed the viewer a token good for one camera, so the Camera
+  select was disabled and the list pinned — which on a phone reads as a control
+  that does not respond. The viewer now asks the dialog for every live camera's
+  token over `postMessage`, opens on All cameras, and filters the merged list
+  on the client. The select is filled from the inventory rather than from
+  whichever cameras happened to have clips, so a camera with nothing in the
+  window no longer relabels itself "All cameras" over an empty list. Found and
+  fixed by @bbolinger ([#37]).
+- **Push-to-talk is not offered where it cannot work.** `xt` and `white` are
+  handed `rtsps://`, and push-to-talk goes through `send_session_command()`,
+  which exists only on the IMMI path — so the button was offered, was
+  pressable, and could only fail, in the gutter position 0.7.0's phone layout
+  gives it. Gated on `product_type` rather than `camera_type`, and that
+  distinction is the finding: an `xt` reports `camera_type: default` and so
+  does a `catalina`, which genuinely has push-to-talk, so gating on
+  `camera_type` would have taken the feature away from a family that has it.
+  Measured by @fritzzetik against a live `xt`; `white` is @bbolinger's
+  measurement ([#31]).
+- **A deliberate push-to-talk refusal no longer writes a traceback.**
+  `BlinkRtspLiveStream` raises `NotImplementedError` from
+  `send_session_command()` on purpose, with a message written for a reader.
+  The catch-all in `ptt_handler` treated that decision as a fault and called
+  `LOGGER.exception`, so anyone chasing a real push-to-talk problem stopped at
+  a full stack trace for a documented refusal. Handled the way `"IMMI target
+  is not connected"` already was — message kept, traceback dropped, logged at
+  `info`. Still reachable on purpose through `ptt_force_enabled_slugs`, which
+  is why it was worth keeping alongside the gating. By @fritzzetik ([#32]).
+- **A failed live-view session no longer masks itself as a 500.**
+  `LiveViewHandle.close()` awaits the feed task, which re-raises whatever
+  killed it — and every caller runs `close()` from a `finally`. So a session
+  Blink refused came back out of the teardown, replaced the real failure, and
+  the request ended as a bare `500` with the actual cause sitting further up
+  the log and nothing pointing at it. The feed task's failure is the session's
+  failure, it has already happened, and no teardown can act on it: it is now
+  reported in full — named as the reason the live view stopped, with the usual
+  causes and what to do — and not re-raised. `mpegts_handler`, `HlsSession`
+  and the CLI were all exposed to this; cancellation still propagates
+  untouched. Seen once and reported by @bbolinger.
+
+### Added
+
+- **Overview says whether push-to-talk can work here at all.** Browsers only
+  open a microphone in a secure context — an HTTPS page, or `http://localhost`
+  — and Home Assistant's own default, `http://<address>:8123`, is not one. The
+  failure was the worst kind: Hold Talk is enabled from whether the *camera*
+  supports it, so on plain HTTP the button is offered, looks live, and does
+  nothing, because the refusal is written to a status line the player has
+  already hidden by the time the button becomes usable, and nothing reaches the
+  proxy log because nothing was ever sent. Four separate refusals landed in
+  that same invisible place. Only the browser can answer this, so the panel
+  measures it and the readout reports it, with a panel too old to send it
+  leaving the row unanswered rather than guessing. Never blocking: live view,
+  clips, downloads and snapshots are all unaffected. Found by @fritzzetik,
+  who read the page source to find it, and reproduced independently by
+  @bbolinger on a Wired Floodlight. Making the button disable and label itself
+  is still to come.
+- **The clips viewer picks its source.** A Source select leads the toolbar —
+  Sync Module, cloud, or both — kept in the browser and settable from the URL
+  with `?source=`, so a cloud-only account lands where its clips are instead of
+  paging past an inventory it does not have. The empty state now names the
+  source that came back empty rather than giving one sentence for either. By
+  @bbolinger ([#38]).
+- **The newest six cloud clips draw their thumbnails without being asked.** A
+  cloud thumbnail costs a clip download, so none were drawn until someone
+  played a clip or pressed Load cloud thumbnails — which opened a cloud-only
+  account on a screen of grey tiles with nothing to tell one recent event from
+  another. Six is about one phone screen, they stay lazy so a tile is only
+  fetched once it scrolls into view, and the proxy still fetches one clip at a
+  time, which bounds it. Load cloud thumbnails now counts only the clips still
+  waiting and hides when there are none. By @bbolinger ([#39]).
+
+### Documentation
+
+- **The docs no longer contradict what shipped.** The README still said cloud
+  clip browsing was "intentionally not surfaced" and that push-to-talk was
+  hidden on Blink Minis by default — both true until this release cycle, both
+  wrong now, and the second would have told the tester who confirmed a Mini
+  audible that his camera could not do it. `docs/API.md`, `docs/ROADMAP.md`,
+  `docs/KNOWN_LIMITATIONS.md` and `docs/DASHBOARD.md` carried the same two
+  claims. All corrected, and the HTTPS requirement for push-to-talk is now
+  stated wherever push-to-talk is described. The README drift was flagged by
+  @bbolinger.
+- **The add-on's internal hostname is not always a repository hash.** For an
+  add-on built locally, under `/addons/<name>/` rather than installed from the
+  store, the slug prefix is literally `local` —
+  `http://local-blink-liveview-proxy:8088` — which reads like a placeholder
+  next to a hash example, and sent at least one person looking for a hash that
+  was not there. Said in both places that show the pattern. Noted by
+  @fritzzetik on [#30].
+
+### Not fixed in this release
+
+- **Hold Talk still accepts the press on a plain-HTTP page** before failing
+  where the message cannot be seen. Overview now explains it; the button
+  itself should disable and label itself the way it already does for a camera
+  that does not support push-to-talk.
+- **Push-to-talk on a Wired Floodlight (`superior`)** does not work: it gets
+  IMMI, so the path exists, but the audio shape the camera expects is not the
+  one we send, and pressing it costs the live view for about three minutes.
+  It is denied by default for now; a capture of what Blink's own app sends to
+  a `superior` would make it fixable. Measured by @bbolinger.
+
+[#30]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/30
+[#31]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/31
+[#32]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/32
+[#33]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/33
+[#34]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/34
+[#35]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/35
+[#36]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/36
+[#37]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/37
+[#38]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/38
+[#39]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/39
+
 ## [0.7.0-rc.3] — 2026-09-05
 
 - **An add-on install is offered an address that actually reaches the add-on.**

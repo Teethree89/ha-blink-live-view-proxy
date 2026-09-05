@@ -579,8 +579,33 @@ class LiveViewHandle:
     async def close(self) -> None:
         self.stream.stop()
         self.feed_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
+        # Awaiting the feed task re-raises whatever killed it, and every caller
+        # of close() is tearing down: mpegts_handler and HlsSession both call
+        # it from a finally, so a session Blink refused came back out here and
+        # replaced the real failure with itself. The request then ended as a
+        # bare 500 while the actual cause sat further up the log with nothing
+        # pointing at it.
+        #
+        # The feed task's failure is the session's failure and it has already
+        # happened; there is nothing a teardown can do about it. So it is
+        # reported here in full, named as what it is, and not re-raised.
+        # CancelledError is a BaseException and is deliberately not caught by
+        # the second clause: cancellation has to keep propagating.
+        try:
             await self.feed_task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            LOGGER.exception(
+                "The Blink live-view feed for this session ended on an error. "
+                "This is the reason the live view stopped, not a fault in "
+                "closing it, and the session is gone either way. A refused "
+                "connection here usually means Blink would not open the "
+                "session at all: the camera may be busy in another app, "
+                "asleep on a weak signal, or the account may be rate-limited "
+                "after repeated attempts. Retry once, then leave it a few "
+                "minutes before trying again."
+            )
         server = self.stream.server
         if server is not None:
             await server.wait_closed()
