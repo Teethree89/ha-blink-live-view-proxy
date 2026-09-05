@@ -301,12 +301,54 @@ def test_dialog_viewer_lists_every_camera() -> None:
           "and the viewer view hands it to the page")
 
 
+def test_clip_source_select() -> None:
+    """The viewer chooses its own clip source and remembers the choice.
+
+    Both inventories by default, so nothing changes for an install with local
+    storage. An account whose clips are all in one place can pin that source
+    instead of paging past the other one on every open.
+    """
+    print("\nclip viewer source select")
+    source = (COMPONENT / "views.py").read_text()
+    check('<select id="source">' in source, "the toolbar carries a Source select")
+    for value, label in (
+        ("both", "Sync Module + cloud"),
+        ("cloud", "Blink cloud"),
+        ("local", "Sync Module"),
+    ):
+        check(f'<option value="{value}"' in source, f"{value} is offered")
+        check(f">{label}</option>" in source, f"and reads {label}")
+    check('<option value="both" selected>' in source, "both is the default")
+    check("source: source.value" in source, "the select feeds the clips request")
+    check('"blink_liveview_proxy.clips.source"' in source,
+          "and the choice is remembered in the browser")
+    check('initial.get("source")' in source, "?source= on the URL wins over what was remembered")
+    check('source.addEventListener("change"' in source, "changing it reloads the list")
+
+    # An empty list has to say which inventory came back empty, or the obvious
+    # next move - try another source - is invisible.
+    for text in (
+        "No clips in this window, from the Sync Module or from Blink's cloud. Try a longer one.",
+        "No clips in this window from Blink's cloud. Try a longer one, or another source.",
+        "No clips in this window from the Sync Module. Try a longer one, or another source.",
+    ):
+        check(text in source, f"the empty state names the source: {text[:34]}...")
+
+    check("_clip_query(request, allow_both=True)" in source,
+          "the listing route still accepts all three values")
+
+    viewer = source.split('<select id="source">')[1].split("</section>")[0]
+    check(viewer.index("Window") < viewer.index("Camera") < viewer.index("Show"),
+          "Source comes first, then Window, Camera and Show")
+
+
 def main() -> int:
     test_yaml()
     test_backend_contract()
     test_placeholder_substitution()
     test_frontend_contract()
     test_dialog_viewer_lists_every_camera()
+    test_clip_source_select()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

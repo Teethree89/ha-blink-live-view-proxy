@@ -1836,6 +1836,13 @@ video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;ba
 <body>
 <section class="toolbar">
   <h1>Clips</h1>
+  <label>Source
+    <select id="source">
+      <option value="both" selected>Sync Module + cloud</option>
+      <option value="cloud">Blink cloud</option>
+      <option value="local">Sync Module</option>
+    </select>
+  </label>
   <label>Window
     <select id="hours">
       <option value="24">24 hours</option>
@@ -1888,6 +1895,7 @@ const now = document.getElementById("now");
 const nowTitle = document.getElementById("nowTitle");
 const nowMeta = document.getElementById("nowMeta");
 const nowDownload = document.getElementById("nowDownload");
+const source = document.getElementById("source");
 const hours = document.getElementById("hours");
 const limit = document.getElementById("limit");
 const camera = document.getElementById("camera");
@@ -1898,6 +1906,12 @@ const fixedCamera = __CAMERA_JSON__;
 const inventory = __CAMERAS_JSON__;
 const TOKENS_REQUEST = "blink_liveview_proxy_clips_tokens";
 const TOKENS_REPLY = "blink_liveview_proxy_clips_tokens_reply";
+const SOURCE_KEY = "blink_liveview_proxy.clips.source";
+const EMPTY_TEXT = {
+  both: "No clips in this window, from the Sync Module or from Blink's cloud. Try a longer one.",
+  cloud: "No clips in this window from Blink's cloud. Try a longer one, or another source.",
+  local: "No clips in this window from the Sync Module. Try a longer one, or another source."
+};
 let loadSeq = 0;
 const accessToken = __TOKEN_JSON__;
 const FILM_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18,4L20,8H17L15,4H13L15,8H12L10,4H8L10,8H7L5,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V4H18Z"/></svg>';
@@ -1907,6 +1921,12 @@ let activeId = "";
 
 // Opened outside the dialog there is no header naming the page, so show one.
 if (window.self === window.top) document.body.classList.add("standalone");
+
+// An account whose clips are all in one place would otherwise pick it again every open.
+let remembered = "";
+try { remembered = localStorage.getItem(SOURCE_KEY) || ""; } catch (err) { remembered = ""; }
+const wantedSource = initial.get("source") || remembered;
+if (["both", "cloud", "local"].includes(wantedSource)) source.value = wantedSource;
 
 // Each request is authorised for one camera; inside the dialog the page borrows the token of every other one.
 const inDialog = Boolean(fixedCamera) && window.self !== window.top;
@@ -2128,7 +2148,7 @@ function render() {
   if (!shown.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No clips in this window, from the Sync Module or from Blink's cloud. Try a longer one.";
+    empty.textContent = EMPTY_TEXT[source.value] || EMPTY_TEXT.both;
     list.append(empty);
     return;
   }
@@ -2234,10 +2254,8 @@ async function loadClips() {
     const loaded = await listClips({
       hours: hours.value,
       limit: limit.value,
-      // Both inventories. Local clips come off the Sync Module; cloud clips
-      // exist only for an account with a Blink subscription, and listing them
-      // is metadata only - no clip is fetched to build this list.
-      source: "both"
+      // Listing is metadata only - no clip is fetched to build this list.
+      source: source.value
     });
     // A slower reply from an earlier load must not overwrite the current one.
     if (seq !== loadSeq) return;
@@ -2270,6 +2288,10 @@ document.addEventListener("keydown", (event) => {
 
 refresh.addEventListener("click", loadClips);
 cloudThumbs.addEventListener("click", loadCloudThumbnails);
+source.addEventListener("change", () => {
+  try { localStorage.setItem(SOURCE_KEY, source.value); } catch (err) { /* private browsing */ }
+  loadClips();
+});
 hours.addEventListener("change", loadClips);
 limit.addEventListener("change", loadClips);
 camera.addEventListener("change", () => {

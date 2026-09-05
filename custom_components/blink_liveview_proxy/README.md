@@ -166,6 +166,8 @@ tap_action:
 
 The viewer opens on every camera and its Camera select filters from there. Add
 `slug: driveway` to open with that camera's token; the list still starts on all.
+A Source select picks the Sync Module, Blink's cloud, or both, and the choice is
+remembered in the browser.
 
 To request a fresh normal Blink snapshot without starting live view, use:
 
