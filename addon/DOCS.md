@@ -138,9 +138,13 @@ The form arrives pre-filled with the token the add-on generated and the address
 it is reachable on, so setup is usually a single click. That address is the
 add-on's own hostname on Home Assistant's internal network — something like
 `http://a1b2c3d4-blink-liveview-proxy:8088`, where the prefix identifies the
-repository you installed from. It works with no port published to the host,
-which is the default: `8088/tcp` is offered in the add-on's **Network** panel
-and left unmapped unless you map it.
+repository you installed from. It is not always a repository hash: for an
+add-on **built locally**, under `/addons/<name>/` rather than installed from
+the store, the prefix is literally `local` — `http://local-blink-liveview-proxy:8088`
+— which reads like a placeholder rather than a real slug if you go looking for
+a hash that is not there. It works with no port published to the host, which
+is the default: `8088/tcp` is offered in the add-on's **Network** panel and
+left unmapped unless you map it.
 
 If the form ever arrives with an address that does not work, the two things to
 try are the internal hostname above (take the slug from the add-on page's URL
