@@ -260,6 +260,21 @@ async def ptt_handler(request: web.Request) -> web.WebSocketResponse:
                         await send_status(
                             {"type": "error", "message": "Unknown command"}
                         )
+                except NotImplementedError as err:
+                    # Not a failure - a refusal this code makes on purpose.
+                    # BlinkRtspLiveStream raises it because RTSP has no
+                    # equivalent of send_session_command(), and says so in the
+                    # message. LOGGER.exception below would write a full
+                    # traceback for a documented condition; someone reading the
+                    # log while chasing a real fault would stop at it and lose
+                    # time on a decision rather than a bug.
+                    #
+                    # The message is already written for a reader, so it is
+                    # forwarded unchanged rather than rephrased here.
+                    LOGGER.info(
+                        "Push-to-talk is not available for %s: %s", slug, err
+                    )
+                    await send_status({"type": "error", "message": str(err)})
                 except Exception as err:  # noqa: BLE001
                     LOGGER.exception("Push-to-talk command failed for %s", slug)
                     message = str(err)
