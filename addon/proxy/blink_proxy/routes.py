@@ -716,7 +716,10 @@ async def make_app(
     # Cached/env/add-on authentication starts in the app lifecycle below.
     broker = BlinkStreamBroker(None)
     active_liveviews: dict[str, LiveViewHandle] = {}
-    hls_manager = HlsManager(broker, config, config_base, active_liveviews)
+    last_liveviews: dict[str, dict[str, Any]] = {}
+    hls_manager = HlsManager(
+        broker, config, config_base, active_liveviews, last_liveviews
+    )
     proxy_token = os.getenv(config["proxy_token_env"], config.get("proxy_token", ""))
 
     app = web.Application(client_max_size=4096)
@@ -726,7 +729,7 @@ async def make_app(
     app["proxy_token"] = proxy_token
     app["config"] = config
     app["liveview_cache_dir"] = resolve_path(config["liveview_cache_dir"], config_base)
-    app["last_liveviews"] = {}
+    app["last_liveviews"] = last_liveviews
     app["mpegts_cooldowns"] = {}
     app["active_liveviews"] = active_liveviews
     app["mp4_locks"] = {}

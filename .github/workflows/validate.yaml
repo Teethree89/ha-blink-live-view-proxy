@@ -101,6 +101,9 @@ jobs:
       - name: RTSP relay tests
         run: python tests/test_rtsp.py
 
+      - name: HLS save tests
+        run: python tests/test_hls_save.py
+
       - name: Clip cache and thumbnail tests
         run: python tests/test_clip_cache.py
 
