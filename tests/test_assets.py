@@ -1112,11 +1112,11 @@ def test_push_to_talk_defaults_to_offered() -> None:
     )
     families = re.findall(r'"([^"]+)"', listed.group(1)) if listed else []
     check(
-        families == ["xt", "white"],
-        "ptt_disabled_product_types refuses the two RTSP-only families "
-        f"and no others (found {families})",
+        families == ["xt", "white", "superior"],
+        "ptt_disabled_product_types refuses exactly the families that cannot "
+        f"be talked to today, and no others (found {families})",
     )
-    for family in ("mini", "owl", "catalina", "lotus", "superior"):
+    for family in ("mini", "owl", "catalina", "lotus"):
         check(
             family not in families,
             f"{family} is still offered push-to-talk by default",
@@ -1128,7 +1128,7 @@ def test_push_to_talk_defaults_to_offered() -> None:
 
     docs = (ROOT / "docs/CONFIGURATION.md").read_text()
     check(
-        '"ptt_disabled_product_types": ["xt", "white"]' in docs,
+        '"ptt_disabled_product_types": ["xt", "white", "superior"]' in docs,
         "the documented default is the shipped one",
     )
 
