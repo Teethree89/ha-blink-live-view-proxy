@@ -23,7 +23,7 @@ Important fields:
   "mpegts_cooldown_seconds": 30,
   "ptt_force_enabled_slugs": [],
   "ptt_disabled_camera_types": [],
-  "ptt_disabled_product_types": [],
+  "ptt_disabled_product_types": ["xt", "white"],
   "cameras": {}
 }
 ```
@@ -193,13 +193,28 @@ PTT is hidden for camera families in:
 ```json
 "ptt_force_enabled_slugs": [],
 "ptt_disabled_camera_types": [],
-"ptt_disabled_product_types": []
+"ptt_disabled_product_types": ["xt", "white"]
 ```
 
-Both lists are empty by default. They used to carry `mini` and `owl`, set
-before anyone had actually tried it, and a Blink Mini/`owl` was confirmed
-audible on June 30, 2026 — so the default was hiding a control that works. Put
-a family on a list when it genuinely cannot do this, and use
+`ptt_disabled_product_types` ships with `xt` and `white`; the other two
+lists are empty.
+
+Those two families are refused because they **cannot** do it, not because it
+is untested: they get `rtsps://`, and `BlinkRtspLiveStream` raises
+`NotImplementedError` because RTSP has no equivalent of
+`send_session_command()`. There is nothing for the proxy to call, so the
+button could only ever fail.
+
+That is a different case from `mini` and `owl`, which these lists used to
+carry — set before anyone had actually tried it, and a Blink Mini/`owl` was
+confirmed audible on June 30, 2026. The default was hiding a control that
+works, and they came off.
+
+`ptt_disabled_camera_types` stays empty on purpose: `camera_type` cannot tell
+the families apart. An `xt` reports `default`, and so does a `catalina`, which
+does have push-to-talk.
+
+Put a family on a list when it genuinely cannot do this, and use
 `ptt_force_enabled_slugs` for a single camera you want back regardless.
 
 An add-on install can set all three; they are add-on options. There, an empty

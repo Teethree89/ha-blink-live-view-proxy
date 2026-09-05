@@ -1097,10 +1097,29 @@ def test_push_to_talk_defaults_to_offered() -> None:
     print("\npush-to-talk is not hidden from a family that has it")
 
     defaults = (ROOT / "proxy/blink_proxy/constants.py").read_text()
-    for key in ("ptt_disabled_camera_types", "ptt_disabled_product_types"):
+    check(
+        '"ptt_disabled_camera_types": [],' in defaults,
+        "ptt_disabled_camera_types ships empty: camera_type cannot tell the "
+        "families apart, an xt reports the same 'default' as a catalina",
+    )
+    # The one list that is NOT empty, and the reason it may be. xt and white
+    # get rtsps://, and BlinkRtspLiveStream raises NotImplementedError because
+    # RTSP has no equivalent of send_session_command(). There is nothing to
+    # call, so the button can only fail - that is a different case from mini
+    # and owl, which were listed before anyone tried and can do it.
+    listed = re.search(
+        r'"ptt_disabled_product_types":\s*\[([^\]]*)\]', defaults
+    )
+    families = re.findall(r'"([^"]+)"', listed.group(1)) if listed else []
+    check(
+        families == ["xt", "white"],
+        "ptt_disabled_product_types refuses the two RTSP-only families "
+        f"and no others (found {families})",
+    )
+    for family in ("mini", "owl", "catalina", "lotus", "superior"):
         check(
-            f'"{key}": [],' in defaults,
-            f"{key} ships empty, so no family is refused by default",
+            family not in families,
+            f"{family} is still offered push-to-talk by default",
         )
     check(
         '"ptt_force_enabled_slugs": [],' in defaults,
@@ -1109,7 +1128,7 @@ def test_push_to_talk_defaults_to_offered() -> None:
 
     docs = (ROOT / "docs/CONFIGURATION.md").read_text()
     check(
-        '"ptt_disabled_product_types": []' in docs,
+        '"ptt_disabled_product_types": ["xt", "white"]' in docs,
         "the documented default is the shipped one",
     )
 
