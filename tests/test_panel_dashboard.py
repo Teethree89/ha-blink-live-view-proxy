@@ -230,11 +230,83 @@ def test_frontend_contract() -> None:
     check('sidebar_title="Blink Live View Proxy"' in init, "the sidebar entry carries the product name")
 
 
+def test_dialog_viewer_lists_every_camera() -> None:
+    """A viewer opened from a card starts on every camera and filters from there.
+
+    The Clips button hands the viewer a token that is only good for one
+    camera, so the select used to be disabled and the list pinned. The dialog
+    that opened it holds a token for every camera, so the viewer asks for them
+    all, lists each camera on its own token, and merges. Standalone, with
+    nobody to ask, it stays pinned to the camera it was opened for.
+    """
+    print("\nclip viewer covers every camera")
+    source = (COMPONENT / "views.py").read_text()
+    dialog = (COMPONENT / "frontend/blink-liveview-dialog.js").read_text()
+    check("__CAMERAS_JSON__" in source, "the viewer is handed the camera inventory")
+    for name in ("TOKENS_REQUEST", "TOKENS_REPLY"):
+        viewer_type = re.search(rf'{name} = "([^"]+)"', source)
+        dialog_type = re.search(rf'CLIPS_{name} = "([^"]+)"', dialog)
+        check(
+            bool(viewer_type and dialog_type) and viewer_type.group(1) == dialog_type.group(1),
+            f"viewer and dialog agree on {name}",
+        )
+    check("SWITCH_MESSAGE" not in source and "SWITCH_MESSAGE" not in dialog,
+          "the reopen-per-camera round trip is gone")
+    check('new Option("All cameras", "")' in source, "the select offers every camera")
+    check("Promise.allSettled(Object.entries(tokens)" in source,
+          "inside the dialog each camera is listed on its own token and merged")
+    check("event.source !== window.parent" in source,
+          "the viewer takes tokens only from the window that opened it")
+    check('window.addEventListener("message", answerClipsTokens)' in dialog,
+          "the dialog answers the request")
+    check(
+        "event.origin !== window.location.origin" in dialog
+        and "event.source !== iframe.contentWindow" in dialog,
+        "and only from its own viewer frame",
+    )
+    check("attrs.proxy_slug" in dialog,
+          "tokens are keyed by each entity's proxy_slug, not a naming convention")
+
+    tree = ast.parse(source)
+    node = next(
+        (item for item in tree.body
+         if isinstance(item, ast.FunctionDef) and item.name == "_camera_inventory"),
+        None,
+    )
+    check(node is not None, "_camera_inventory exists")
+    if node is None:
+        return
+    namespace: dict[str, object] = {
+        "HomeAssistant": object,
+        "_runtime": lambda hass: {"coordinator": hass},
+    }
+    exec(ast.unparse(node), namespace)
+    inventory = namespace["_camera_inventory"]
+
+    class Coordinator:
+        data = {"cameras": [
+            {"slug": "grill_camera", "name": "Grill Camera"},
+            {"slug": "back_door"},
+            {"name": "no slug"},
+        ]}
+
+    check(
+        inventory(Coordinator()) == [
+            {"slug": "grill_camera", "name": "Grill Camera"},
+            {"slug": "back_door", "name": "back_door"},
+        ],
+        "the inventory carries slug and name, falls back to the slug, skips slugless entries",
+    )
+    check("_clips_viewer_html(camera_slug, access_token, _camera_inventory(self.hass))" in source,
+          "and the viewer view hands it to the page")
+
+
 def main() -> int:
     test_yaml()
     test_backend_contract()
     test_placeholder_substitution()
     test_frontend_contract()
+    test_dialog_viewer_lists_every_camera()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")
