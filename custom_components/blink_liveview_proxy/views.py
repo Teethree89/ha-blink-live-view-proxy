@@ -2066,11 +2066,16 @@ function optionLabel(clip) {
 // either by playing one clip or by pressing the button, which says what it is
 // about to do. Blink's own app behaves the same way: a list is cheap, a clip
 // is fetched when you tap it.
+//
+// The newest few are drawn anyway: a screen of grey tiles says nothing about
+// what you are choosing between, and six is about one phone screen of them.
+const AUTO_CLOUD_THUMBNAILS = 6;
 let cloudThumbnailsOn = false;
 const fetchedClips = new Set();
+const autoThumbs = new Set();
 
 function cloudThumbnailReady(clip) {
-  return cloudThumbnailsOn || fetchedClips.has(clip.id);
+  return cloudThumbnailsOn || fetchedClips.has(clip.id) || autoThumbs.has(clip.id);
 }
 
 function thumbnail(clip) {
@@ -2139,9 +2144,19 @@ function play(clip) {
   now.hidden = false;
 }
 
-function render() {
+function shownClips() {
   const selected = camera.value;
   const shown = selected ? clips.filter((clip) => clip.slug === selected) : clips;
+  autoThumbs.clear();
+  for (const clip of shown) {
+    if (autoThumbs.size >= AUTO_CLOUD_THUMBNAILS) break;
+    if (clip.source === "cloud" && clip.thumbnail_url) autoThumbs.add(clip.id);
+  }
+  return shown;
+}
+
+function render() {
+  const shown = shownClips();
   summary.textContent = shown.length ? `${shown.length} clip${shown.length === 1 ? "" : "s"}` : "";
   QUEUE.length = 0;
   list.replaceChildren();
@@ -2181,13 +2196,8 @@ function render() {
 }
 
 function pendingCloudThumbnails() {
-  const selected = camera.value;
-  return clips.filter(
-    (clip) =>
-      clip.source === "cloud" &&
-      clip.thumbnail_url &&
-      !cloudThumbnailReady(clip) &&
-      (!selected || clip.slug === selected)
+  return shownClips().filter(
+    (clip) => clip.source === "cloud" && clip.thumbnail_url && !cloudThumbnailReady(clip)
   );
 }
 

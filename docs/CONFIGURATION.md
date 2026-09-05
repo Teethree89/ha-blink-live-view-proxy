@@ -225,8 +225,9 @@ clips show a placeholder rather than a thumbnail: a thumbnail is the first
 frame of the clip, so drawing a screenful would pull every clip in the window
 off Blink's servers. A cloud clip is fetched when someone plays it, or when
 someone presses **Load cloud thumbnails**, which says how many clips that is
-before it starts. Local clips come off your own Sync Module and are drawn
-without asking.
+before it starts. The newest six cloud clips show a thumbnail automatically;
+the rest load on demand. Local clips come off your own Sync Module and are
+drawn without asking.
 
 Each clip is fetched from Blink once and kept, and its first frame is cut as
 the thumbnail the viewer shows. Two keys control that:
