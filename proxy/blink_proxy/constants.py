@@ -75,7 +75,40 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # these lists is a family that *cannot* do it, which is a property of the
     # transport rather than the model.
     "ptt_disabled_camera_types": [],
-    "ptt_disabled_product_types": [],
+    # "xt" and "white" are the two families Blink hands an rtsps:// URL rather
+    # than immis://. Push-to-talk goes through send_session_command(), which
+    # exists only on the IMMI path - BlinkRtspLiveStream raises
+    # NotImplementedError for it, deliberately, because RTSP has no equivalent.
+    # Left off this list the button is offered, is pressable, and can only fail.
+    #
+    # product_type rather than camera_type, and that is the whole point of the
+    # entry: an xt reports camera_type "default", and so does a catalina, which
+    # does have push-to-talk over IMMI. Gating on camera_type would take the
+    # feature away from a family that has it.
+    #
+    # Measured 2026-09-04 on an xt: a handshake against /cameras/<slug>/ptt
+    # upgraded with 101, exactly like the catalina and lotus beside it, and the
+    # refusal then landed on the NotImplementedError at the end of the chain.
+    # "white" is @bbolinger's measurement rather than mine; there is no white
+    # on the account this was measured on.
+    #
+    # "superior" is on this list for a DIFFERENT reason, and the distinction
+    # matters to whoever reads it next. xt and white are "never": the transport
+    # has no way to carry it. superior is "not yet": it gets immis://, the path
+    # exists, and it should work. It does not, because the audio shape the
+    # camera expects is not the one we send.
+    #
+    # @bbolinger measured the cost on a Wired Floodlight: with the proxy's
+    # audio config on, the camera closes the stream about four seconds into the
+    # hold; without it, the close comes a few seconds after release. Either way
+    # it then refuses to rejoin for about three minutes. So the button does not
+    # merely fail there - it costs the live view.
+    #
+    # WHAT WOULD TAKE IT BACK OFF: a capture of what Blink's own app sends to a
+    # superior. Match that shape and the entry is obsolete; remove it then.
+    # Until anyone has one, ptt_force_enabled_slugs keeps the door open per
+    # camera for whoever wants to try.
+    "ptt_disabled_product_types": ["xt", "white", "superior"],
     "prefer_v6_liveview": True,
     "send_liveview_token": True,
     "cameras": {},
