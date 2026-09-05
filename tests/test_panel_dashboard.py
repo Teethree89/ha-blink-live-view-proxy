@@ -6,6 +6,7 @@ import ast
 import pathlib
 import re
 import sys
+import types
 
 import yaml
 
@@ -283,15 +284,14 @@ def test_dialog_viewer_lists_every_camera() -> None:
     exec(ast.unparse(node), namespace)
     inventory = namespace["_camera_inventory"]
 
-    class Coordinator:
-        data = {"cameras": [
-            {"slug": "grill_camera", "name": "Grill Camera"},
-            {"slug": "back_door"},
-            {"name": "no slug"},
-        ]}
+    coordinator = types.SimpleNamespace(data={"cameras": [
+        {"slug": "grill_camera", "name": "Grill Camera"},
+        {"slug": "back_door"},
+        {"name": "no slug"},
+    ]})
 
     check(
-        inventory(Coordinator()) == [
+        inventory(coordinator) == [
             {"slug": "grill_camera", "name": "Grill Camera"},
             {"slug": "back_door", "name": "back_door"},
         ],
