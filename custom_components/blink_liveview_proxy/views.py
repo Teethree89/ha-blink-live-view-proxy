@@ -1730,7 +1730,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-famil
    to grow with the list, so the preview stretched to the height of sixty rows
    and the video sat somewhere in the middle of it. */
 body{height:100vh;height:100dvh;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
-.toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)}
+.toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:10px 14px;padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px;background:var(--panel);border-bottom:1px solid var(--line)}
 .toolbar h1{display:none;margin:0;font-size:17px;align-self:center}
 body.standalone .toolbar h1{display:block}
 /* Opened in the dialog there is a floating close button over the top-left
