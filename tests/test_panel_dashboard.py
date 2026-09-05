@@ -344,6 +344,30 @@ def test_clip_source_select() -> None:
           "Source comes first, then Window, Camera and Show")
 
 
+def test_first_cloud_thumbnails_are_free() -> None:
+    """The newest few cloud clips draw themselves; the rest wait to be asked.
+
+    Cloud thumbnails cost a clip download each, so they are on demand. Taken
+    to the letter that opens the viewer on a screen of grey tiles, with
+    nothing to tell one recent event from another.
+    """
+    print("\nnewest cloud clips draw themselves")
+    source = (COMPONENT / "views.py").read_text()
+    check("const AUTO_CLOUD_THUMBNAILS = 6;" in source, "about one phone screen of them")
+    check("const autoThumbs = new Set();" in source,
+          "held apart from fetchedClips, which means a clip is in the proxy's cache")
+    check("autoThumbs.has(clip.id)" in source, "an auto tile is drawn like any other")
+    check("autoThumbs.clear();" in source and "autoThumbs.size >= AUTO_CLOUD_THUMBNAILS" in source,
+          "and the set is rebuilt from the top of the list on every render")
+    check("function shownClips()" in source and "const shown = shownClips();" in source,
+          "the list and the button agree on what is shown")
+    check("return shownClips().filter(" in source,
+          "so the Load button counts only the cloud clips still waiting")
+    check("!cloudThumbnailReady(clip)" in source, "and hides once none are")
+    check("if (visible) visible.observe(box)" in source,
+          "an auto tile still only fetches when it scrolls into view")
+
+
 def main() -> int:
     test_yaml()
     test_backend_contract()
@@ -351,6 +375,7 @@ def main() -> int:
     test_frontend_contract()
     test_dialog_viewer_lists_every_camera()
     test_clip_source_select()
+    test_first_cloud_thumbnails_are_free()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")
