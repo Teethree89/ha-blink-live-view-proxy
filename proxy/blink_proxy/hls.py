@@ -15,6 +15,7 @@ from typing import Any
 from .blink import BlinkStreamBroker, LiveViewHandle
 from .config import resolve_path
 from .constants import LOGGER_NAME
+from .liveview_cache import last_liveview_metadata_from_path
 from .util import liveview_filename
 
 LOGGER = logging.getLogger(LOGGER_NAME)
@@ -216,11 +217,13 @@ class HlsSession:
         LOGGER.info("Stopped HLS session for %s", self.slug)
 
     def _finalize_cache(self) -> None:
-        """Publish the cached copy under the name find_last_liveview globs for.
+        """Publish the cached copy and make it the camera's last live view.
 
         Only on the way out, and only when ffmpeg actually wrote something: a
         half-named file would be picked up as the newest live view and handed
-        to whoever asked to save one.
+        to whoever asked to save one. The previous file goes and last_liveviews
+        is repointed, the same two steps the MPEG-TS route takes, so Save gets
+        this session rather than the first one ever recorded.
         """
         if self.cache_tmp is None or self.cache_final is None:
             return
@@ -228,7 +231,18 @@ class HlsSession:
         self.cache_tmp = self.cache_final = None
         try:
             if tmp.exists() and tmp.stat().st_size > 0:
+                previous = self.manager.last_liveviews.get(self.slug, {})
+                previous_path = previous.get("path")
+                if previous_path:
+                    # A previous file that will not delete must not cost the new one.
+                    with contextlib.suppress(OSError):
+                        Path(previous_path).unlink()
+                    with contextlib.suppress(OSError):
+                        Path(previous_path).with_suffix(".mp4").unlink()
                 os.replace(tmp, final)
+                self.manager.last_liveviews[self.slug] = (
+                    last_liveview_metadata_from_path(self.slug, final)
+                )
                 LOGGER.info("Cached the HLS live view for %s at %s", self.slug, final)
                 return
         except OSError:
@@ -245,9 +259,13 @@ class HlsManager:
         config: dict[str, Any],
         base: Path,
         active_liveviews: dict[str, LiveViewHandle] | None = None,
+        last_liveviews: dict[str, dict[str, Any]] | None = None,
     ):
         self.broker = broker
         self.config = config
+        # The same map the MPEG-TS path writes, so a saved HLS session becomes
+        # the one find_last_liveview returns instead of an older file on disk.
+        self.last_liveviews = last_liveviews if last_liveviews is not None else {}
         self.root_dir = resolve_path(config["hls_dir"], base)
         # Tolerate a config that does not name it: the tests build a manager
         # from a handful of keys, and a missing one must not be fatal here.
