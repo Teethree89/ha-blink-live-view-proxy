@@ -1114,6 +1114,20 @@ def test_push_to_talk_defaults_to_offered() -> None:
     )
 
 
+def test_clips_toolbar_clears_the_status_bar() -> None:
+    """The clip viewer's toolbar is the one thing on that page under the notch."""
+    print("\nclips toolbar sits below the phone's status bar")
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    toolbar = re.search(r"\n\.toolbar\{([^}]*)\}", views)
+    check(toolbar is not None, "the clips toolbar rule is where it was")
+    if toolbar is None:
+        return
+    check(
+        "padding:calc(10px + env(safe-area-inset-top,0px)) 14px 10px" in toolbar.group(1),
+        "its top padding grows by the status bar inset",
+    )
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -1140,6 +1154,7 @@ def main() -> int:
         test_a_tag_cannot_ship_the_wrong_version,
         test_cloud_clips_cost_nothing_until_asked,
         test_push_to_talk_defaults_to_offered,
+        test_clips_toolbar_clears_the_status_bar,
     ):
         test()
 
