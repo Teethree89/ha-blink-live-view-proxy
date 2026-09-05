@@ -228,6 +228,8 @@ def test_frontend_contract() -> None:
     check('sidebar_icon="blink:logo"' in init and "add_extra_js_url" in init,
           "the sidebar entry uses the shipped icon set, loaded on every page")
     check('sidebar_title="Blink Live View Proxy"' in init, "the sidebar entry carries the product name")
+    # With config_panel_domain set, the Configure gear links to the sidebar panel and the options form is unreachable.
+    check("config_panel_domain" not in init, "the Configure gear opens the options form, not the panel")
 
 
 def main() -> int:

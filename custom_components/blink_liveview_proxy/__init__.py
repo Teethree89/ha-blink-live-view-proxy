@@ -17,8 +17,10 @@ from .api import BlinkLiveviewProxyClient
 from .const import (
     ASSET_URL_BASE,
     CONF_BASE_URL,
+    CONF_CLIP_RECORDING,
     CONF_STREAM_SECONDS,
     CONF_TOKEN,
+    DEFAULT_CLIP_RECORDING,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
     FRONTEND_RESOURCE_URL,
@@ -77,7 +79,6 @@ async def _async_register_auth_panel(hass: HomeAssistant) -> None:
         sidebar_icon="blink:logo",
         module_url=f"{AUTH_PANEL_MODULE_URL}?v={version}",
         require_admin=True,
-        config_panel_domain=DOMAIN,
     )
     domain_data["_auth_panel_registered"] = True
 
@@ -227,6 +228,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "client": client,
         "coordinator": coordinator,
         "stream_seconds": int(merged.get(CONF_STREAM_SECONDS, DEFAULT_STREAM_SECONDS)),
+        "clip_recording": bool(merged.get(CONF_CLIP_RECORDING, DEFAULT_CLIP_RECORDING)),
     }
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
