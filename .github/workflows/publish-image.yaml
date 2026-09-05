@@ -21,6 +21,46 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      # The tag has to mean what the build says it is.
+      #
+      # v0.7.0-rc.1 shipped constants.py, manifest.json and config.yaml all
+      # saying "0.7.0". They agreed with each other, so the version test
+      # passed; every host installed from that tag then read itself as the
+      # final release and would never update again, not even to the real
+      # 0.7.0. Nothing compared the files to the tag they were being published
+      # under, because nothing could until there was a tag. This is that
+      # comparison, and it runs before anything is pushed.
+      - name: The tag and the shipped version must agree
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'CHECK'
+          import json, os, pathlib, re, sys
+
+          tag = os.environ["TAG"].removeprefix("v")
+          declared = {
+              "custom_components/blink_liveview_proxy/manifest.json": json.loads(
+                  pathlib.Path(
+                      "custom_components/blink_liveview_proxy/manifest.json"
+                  ).read_text()
+              )["version"],
+              "addon/config.yaml": re.search(
+                  r'^version: "([^"]+)"',
+                  pathlib.Path("addon/config.yaml").read_text(),
+                  re.MULTILINE,
+              ).group(1),
+              "proxy/blink_proxy/constants.py": re.search(
+                  r'PROXY_VERSION = "([^"]+)"',
+                  pathlib.Path("proxy/blink_proxy/constants.py").read_text(),
+              ).group(1),
+          }
+          wrong = {name: value for name, value in declared.items() if value != tag}
+          for name, value in wrong.items():
+              print(f"{name} says {value}, but this tag is {tag}")
+          sys.exit(1 if wrong else 0)
+          CHECK
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 

@@ -368,6 +368,18 @@ async def _open_proxy_response(
         raise web.HTTPServiceUnavailable(
             text=body or "The proxy is not ready yet\n"
         )
+    if response.status == 416:
+        # An unsatisfiable Range. The proxy answers it correctly, and says in
+        # Content-Range how long the resource actually is; collapsing that into
+        # 502 told the browser the gateway was broken and threw away the one
+        # header that would have let it ask again for something valid.
+        content_range = response.headers.get("Content-Range")
+        body = await response.text()
+        response.close()
+        raise web.HTTPRequestRangeNotSatisfiable(
+            text=body or "Requested range not satisfiable\n",
+            headers={"Content-Range": content_range} if content_range else None,
+        )
     if response.status == 429:
         retry_after = response.headers.get("Retry-After", "30")
         body = await response.text()
@@ -647,6 +659,7 @@ button.talk.active {{
     </div>
   </section>
   <div id="liveActions" class="live-actions" hidden>
+    <button id="sound" class="secondary" type="button" aria-pressed="false">Unmute</button>
     <button id="talk" class="talk" type="button" disabled>Hold Talk</button>
     <button id="end" class="danger" type="button">End</button>
   </div>
@@ -679,6 +692,7 @@ const liveActions = document.getElementById("liveActions");
 const restart = document.getElementById("restart");
 const save = document.getElementById("save");
 const talk = document.getElementById("talk");
+const sound = document.getElementById("sound");
 const endButton = document.getElementById("end");
 let player = null;
 let endTimer = null;
@@ -691,6 +705,70 @@ let talkMute = null;
 let talkActive = false;
 let talkStarting = false;
 let talkListening = false;
+
+// Sound, and why the stream starts without it.
+//
+// Every browser refuses to autoplay audio until someone has interacted with
+// the page, so the only live view that starts on its own is a muted one - and
+// a live view that silently never had sound reads as a broken one, especially
+// next to a saved clip, which plays with audio. The native control bar can
+// unmute, once you know to tap the picture to find it. This is the same
+// switch, in the open, next to the controls that are already there.
+const SOUND_PREFERENCE = "blink-liveview-sound";
+let restoringMute = false;
+
+function soundWanted() {{
+  try {{
+    return window.localStorage.getItem(SOUND_PREFERENCE) === "on";
+  }} catch (err) {{
+    // Storage can be unavailable outright in a private window or a webview
+    // with site data blocked. Sound then simply does not persist.
+    return false;
+  }}
+}}
+
+function rememberSound(on) {{
+  try {{
+    window.localStorage.setItem(SOUND_PREFERENCE, on ? "on" : "off");
+  }} catch (err) {{}}
+}}
+
+function syncSoundButton() {{
+  sound.textContent = video.muted ? "Unmute" : "Mute";
+  sound.setAttribute("aria-pressed", video.muted ? "false" : "true");
+}}
+
+function toggleSound() {{
+  video.muted = !video.muted;
+  if (!video.muted && video.volume === 0) video.volume = 1;
+  if (video.paused) video.play().catch(() => {{}});
+}}
+
+async function startPlayback() {{
+  // A tap on this frame counts as the gesture that permits sound, so someone
+  // who unmuted last time gets sound this time without asking again. If the
+  // browser refuses anyway, fall back to the muted start it does allow rather
+  // than leaving a still picture and "Tap play".
+  if (soundWanted()) video.muted = false;
+  try {{
+    await video.play();
+    return;
+  }} catch (err) {{
+    if (video.muted) {{
+      statusText.textContent = "Tap play to start live view";
+      return;
+    }}
+  }}
+  restoringMute = true;
+  video.muted = true;
+  restoringMute = false;
+  syncSoundButton();
+  try {{
+    await video.play();
+  }} catch (err) {{
+    statusText.textContent = "Tap play to start live view";
+  }}
+}}
 
 function positionLiveActions() {{
   liveActions.classList.remove("bottom-gutter");
@@ -1092,11 +1170,7 @@ async function startPlayer() {{
     }};
     video.src = hlsUrl();
     video.load();
-    try {{
-      await video.play();
-    }} catch (err) {{
-      statusText.textContent = "Tap play to start live view";
-    }}
+    await startPlayback();
     endTimer = setTimeout(() => {{
       endSession(`${{seconds}} second live view finished.`);
     }}, (seconds + 5) * 1000);
@@ -1145,11 +1219,7 @@ async function startPlayer() {{
   player.attachMediaElement(video);
   player.load();
 
-  try {{
-    await video.play();
-  }} catch (err) {{
-    statusText.textContent = "Tap play to start live view";
-  }}
+  await startPlayback();
 
   endTimer = setTimeout(() => {{
     endSession(`${{seconds}} second live view finished.`);
@@ -1159,6 +1229,14 @@ async function startPlayer() {{
 restart.addEventListener("click", startPlayer);
 save.addEventListener("click", saveLastView);
 endButton.addEventListener("click", endCurrentStream);
+sound.addEventListener("click", toggleSound);
+video.addEventListener("volumechange", () => {{
+  syncSoundButton();
+  // Keep the preference in step with the native control bar too, so unmuting
+  // there is remembered exactly like unmuting here. The one change that is
+  // not a choice - the fallback to a muted start - is excluded.
+  if (!restoringMute) rememberSound(!video.muted);
+}});
 talk.addEventListener("pointerdown", startTalk);
 talk.addEventListener("pointerup", stopTalk);
 talk.addEventListener("pointercancel", stopTalk);
@@ -1172,6 +1250,7 @@ window.addEventListener("beforeunload", () => {{
   stopTalk();
 }});
 talk.hidden = !pttSupported;
+syncSoundButton();
 
 // The dialog closes by removing this frame. On iOS that alone left the
 // <video> fetching HLS segments from a detached document, so the proxy never

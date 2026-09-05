@@ -322,6 +322,11 @@ The proxy reads it within seconds and deletes the file.
 2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
 3. Download it and restart Home Assistant.
 
+To install a release candidate, turn on **Show beta versions** for this
+repository first — HACS's three-dot menu, then Redownload. Without it the
+"Need a different version?" list stops at the last stable release and the RC
+you are looking for is simply not there.
+
 **Manually:**
 
 ```bash

@@ -902,6 +902,141 @@ def test_liveview_safe_areas_do_not_pad_the_player() -> None:
     )
 
 
+def test_sound_is_reachable_on_the_player() -> None:
+    print("\nlive view starts muted, and says how to change that")
+
+    player = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+
+    check(
+        '<video id="video" muted playsinline autoplay' in player,
+        "the stream still starts muted, which is the only way it starts at all",
+    )
+    check(
+        '<button id="sound"' in player and '>Unmute</button>' in player,
+        "the control bar carries a sound button, not just the native one",
+    )
+    check(
+        'sound.textContent = video.muted ? "Unmute" : "Mute"' in player,
+        "the button says what tapping it does",
+    )
+    check(
+        player.count("await startPlayback();") == 2,
+        "both the HLS and the MPEG-TS path start through the same helper",
+    )
+    check(
+        "if (soundWanted()) video.muted = false;" in player,
+        "someone who unmuted last time is not asked again",
+    )
+    check(
+        "restoringMute = true;" in player and "video.muted = true;" in player,
+        "a refused unmuted start falls back to the muted one, not to a still frame",
+    )
+    check(
+        player.count("statusText.textContent = \"Tap play to start live view\";") == 2,
+        "the fallback still ends in the old message when even muted is refused",
+    )
+    check(
+        "if (!restoringMute) rememberSound(!video.muted);" in player,
+        "that fallback is not remembered as a preference",
+    )
+    check(
+        "} catch (err) {" in player.split("function soundWanted()")[1][:400],
+        "storage that throws leaves the player working, without sound memory",
+    )
+
+
+def test_proxy_status_codes_survive_the_integration() -> None:
+    print("\nwhat the proxy answered is what the browser sees")
+
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+    mapping = views[views.index("async def _open_proxy_response") :]
+    mapping = mapping[: mapping.index("async def _proxy_stream")]
+
+    check(
+        "response.status == 416" in mapping,
+        "an unsatisfiable range is answered as one",
+    )
+    check(
+        "HTTPRequestRangeNotSatisfiable" in mapping,
+        "416 does not become a gateway error",
+    )
+    check(
+        mapping.index("response.status == 416") < mapping.index("response.status >= 400"),
+        "the 416 branch is reached before the catch-all",
+    )
+    check(
+        'headers={"Content-Range": content_range} if content_range else None' in mapping,
+        "the header that says what range would have worked is kept",
+    )
+
+
+def test_addon_reaches_the_options_that_matter() -> None:
+    print("\nthe add-on can be configured for what its users hit")
+
+    config = yaml.safe_load((ROOT / "addon/config.yaml").read_text())
+    build = (ROOT / "addon/build_config.py").read_text()
+
+    excluded = config.get("backup_exclude") or []
+    for name in ("clips/", "liveviews/"):
+        check(name in excluded, f"{name} stays out of every snapshot")
+
+    for key in (
+        "ptt_disabled_product_types",
+        "ptt_disabled_camera_types",
+        "ptt_force_enabled_slugs",
+    ):
+        check(key in config["schema"], f"{key} is settable from the add-on UI")
+        check(
+            config["options"].get(key) == [],
+            f"{key} starts empty, meaning 'keep the proxy default'",
+        )
+        check(key in build, f"{key} reaches the generated proxy config")
+
+    check(
+        "value = options.get(key) or []" in build and "if value:" in build,
+        "an empty list is left out, so it cannot overwrite a proxy default",
+    )
+
+    defaults = (ROOT / "proxy/blink_proxy/constants.py").read_text()
+    for key in (
+        "ptt_disabled_product_types",
+        "ptt_disabled_camera_types",
+        "ptt_force_enabled_slugs",
+    ):
+        check(
+            f'"{key}"' in defaults,
+            f"{key} is a key the proxy actually reads ({key})",
+        )
+
+
+def test_a_tag_cannot_ship_the_wrong_version() -> None:
+    print("\nthe tag and the build agree, or nothing publishes")
+
+    workflow = (ROOT / ".github/workflows/publish-image.yaml").read_text()
+    build = yaml.safe_load(workflow)["jobs"]["build"]["steps"]
+    names = [step.get("name") for step in build]
+
+    check(
+        "The tag and the shipped version must agree" in names,
+        "a tag build checks itself against the tag",
+    )
+    guard = names.index("The tag and the shipped version must agree")
+    check(
+        guard < names.index("Build (and push on a tag)"),
+        "the check runs before anything is built or pushed",
+    )
+    check(
+        build[guard].get("if", "").startswith("startsWith(github.ref, 'refs/tags/')"),
+        "it only applies where there is a tag to compare",
+    )
+    for name in (
+        "manifest.json",
+        "addon/config.yaml",
+        "proxy/blink_proxy/constants.py",
+    ):
+        check(name in build[guard]["run"], f"{name} is compared to the tag")
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -922,6 +1057,10 @@ def main() -> int:
         test_requirements_are_stated_once_and_true,
         test_asset_paths_avoid_the_service_worker,
         test_liveview_safe_areas_do_not_pad_the_player,
+        test_sound_is_reachable_on_the_player,
+        test_proxy_status_codes_survive_the_integration,
+        test_addon_reaches_the_options_that_matter,
+        test_a_tag_cannot_ship_the_wrong_version,
     ):
         test()
 

@@ -8,7 +8,7 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
-## [0.7.0-rc.3] — 2026-09-04
+## [0.7.0-rc.3] — 2026-09-05
 
 - **An add-on install is offered an address that actually reaches the add-on.**
   The setup form pre-filled `http://homeassistant.local:8088`, a host address —
@@ -24,6 +24,37 @@ fixes that change nothing about how it is used.
   `homeassistant.local`. Each candidate is probed before it is offered, so the
   address in the form is one that answered. Nothing needs a published port:
   every request to the proxy is made by Home Assistant, never by the browser.
+- **Live view has a sound button.** Autoplay policy means a stream that starts
+  on its own starts muted, and the only way to sound was to tap the picture and
+  find the native control bar — so live view read as silent while a saved clip
+  of the same camera played with audio. The control bar now carries Unmute
+  next to Hold Talk and End, the choice is remembered for the next live view,
+  and a browser that refuses an unmuted start falls back to the muted one
+  rather than to a still frame. Reported by @bbolinger.
+- **An unsatisfiable byte range is answered as one.** The integration mapped
+  every status it did not recognise to `502`, so a `416` the proxy answered
+  correctly reached the browser as a gateway error with `Content-Range`
+  stripped — the one header that says what range would have worked. Reported
+  by @bbolinger.
+- **The clip and live-view caches stay out of Home Assistant backups.** Up to
+  512 MB of cached clips, plus every recorded live view, rode into each add-on
+  snapshot. Both directories are rebuildable from Blink and are not needed to
+  restore an install, so `backup_exclude` now leaves them out. Reported by
+  @bbolinger.
+- **An add-on install can reach the push-to-talk gating.**
+  `ptt_disabled_product_types`, `ptt_disabled_camera_types` and
+  `ptt_force_enabled_slugs` were settable in a systemd or Docker `config.json`
+  and unreachable from the add-on, which is where the cameras that cannot use
+  Hold Talk are hardest to work around. They are add-on options now. Each is
+  empty by default and an empty list means "keep the proxy's default", so
+  clearing a box can never switch push-to-talk on for a family that cannot use
+  it. Reported by @bbolinger and @fritzzetik.
+- **A tag cannot ship a version that disagrees with it.** `v0.7.0-rc.1`
+  declared `0.7.0` in all three version files. They agreed with each other, so
+  the version test passed, and every host installed from that tag read itself
+  as the final release and would never update again. The image workflow now
+  compares all three against the tag before it builds or pushes anything.
+  Reported by @bbolinger.
 
 ## [0.7.0-rc.2] — 2026-09-04
 
@@ -460,7 +491,10 @@ Browser authentication, and setup that provisions itself.
   answer while authentication is pending; camera, live-view and clip routes
   answer `503` until a session exists. A login that needs a human no longer
   exits the process, which removes the restart cycle that could text a code each
-  time.
+  time. The session work this rests on — one login per start, a `hardware_id`
+  kept across the challenge, and the code redeemed inside the running session —
+  is @fritzzetik's (`e3004c8`), and should have been credited here when it
+  shipped.
 - **Access control for the credential routes.** `/auth/*` requires the proxy
   token as an `Authorization: Bearer` header, rejects it in a query string, and
   refuses to run at all when no token is configured. The Home Assistant routes

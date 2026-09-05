@@ -41,6 +41,16 @@ the host.
 | `port` | `8088` | Port the proxy HTTP API listens on |
 | `low_latency` | `false` | Re-encode the live view into one-second segments so it starts several seconds sooner. Costs CPU for each open stream; see [Low latency](../docs/CONFIGURATION.md#low-latency) |
 | `cameras` | `[]` | List of camera entries (see below) |
+| `ptt_disabled_product_types` | empty | Blink product types that are never offered Hold Talk, e.g. `owl`. Empty keeps the proxy's own default rather than allowing everything |
+| `ptt_disabled_camera_types` | empty | The same, by camera type, e.g. `mini`. Empty keeps the proxy's default |
+| `ptt_force_enabled_slugs` | empty | Cameras that are offered Hold Talk whatever the two lists above say |
+
+Push-to-talk needs Blink's IMMI transport. Cameras that stream over RTSP have
+no talk path at all, so listing their product type in
+`ptt_disabled_product_types` is what stops the button being offered where it
+can only fail. Each list is left empty by default and an empty list means
+"use the proxy's default", so clearing a box never turns push-to-talk on for a
+family that cannot use it.
 
 ### Camera fields
 
