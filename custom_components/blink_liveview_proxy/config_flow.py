@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from pathlib import Path
@@ -30,9 +31,18 @@ from .const import (
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
     TOKEN_HANDOFF_FILE,
+    URL_HANDOFF_FILE,
 )
+from .supervisor import addon_internal_url, addon_slug
 
 LOGGER = logging.getLogger(__name__)
+
+# How long one candidate address gets to answer /health while the form is
+# being built. The failures that matter here — no such host, connection
+# refused — come back in milliseconds; this only bounds the case where
+# something swallows the packets, and nobody should wait on the API's full
+# ten seconds per candidate to be shown a form they can edit.
+PROBE_TIMEOUT = 4
 
 
 def _schema(defaults: dict[str, Any]) -> vol.Schema:
@@ -63,8 +73,8 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
     )
 
 
-def _read_handoff_token(path: str) -> str:
-    """Read the token file the add-on writes into the config directory."""
+def _read_handoff(path: str) -> str:
+    """Read one of the files the add-on writes into the config directory."""
     try:
         return Path(path).read_text(encoding="utf-8").strip()
     except OSError:
@@ -74,8 +84,76 @@ def _read_handoff_token(path: str) -> str:
 async def _async_handoff_token(hass: HomeAssistant) -> str:
     """Return the add-on's shared token, so nobody has to copy one by hand."""
     return await hass.async_add_executor_job(
-        _read_handoff_token, hass.config.path(TOKEN_HANDOFF_FILE)
+        _read_handoff, hass.config.path(TOKEN_HANDOFF_FILE)
     )
+
+
+async def _async_handoff_url(hass: HomeAssistant) -> str:
+    """Return the address the add-on says it is reachable on."""
+    shared = await hass.async_add_executor_job(
+        _read_handoff, hass.config.path(URL_HANDOFF_FILE)
+    )
+    try:
+        return normalize_base_url(shared)
+    except ProxyConnectionError:
+        return ""
+
+
+def _supervisor_addon_url(hass: HomeAssistant) -> str:
+    """Derive the add-on's internal address by asking Supervisor for its slug.
+
+    Stays on the event loop on purpose: this reads Supervisor's inventory out
+    of hass.data, which is a callback-side read and not an executor's to make.
+    """
+    try:
+        from homeassistant.components.hassio import get_addons_info
+
+        addons = get_addons_info(hass) or {}
+    except Exception:  # noqa: BLE001 - no Supervisor here, or it moved this helper
+        return ""
+    return addon_internal_url(addon_slug(addons, DOMAIN))
+
+
+async def _async_answers(hass: HomeAssistant, base_url: str, token: str) -> bool:
+    """Report whether anything is listening on an address."""
+    client = BlinkLiveviewProxyClient(async_get_clientsession(hass), base_url, token)
+    try:
+        async with asyncio.timeout(PROBE_TIMEOUT):
+            await client.async_get_health()
+    except ProxyAuthError:
+        # Something answered. Whether it likes the token is the next screen's
+        # problem, not a reason to fill in a different address.
+        return True
+    except Exception:  # noqa: BLE001 - any failure means "try the next address"
+        return False
+    return True
+
+
+async def _async_addon_base_url(hass: HomeAssistant, token: str) -> str:
+    """Pick the address that reaches the add-on, best candidate first.
+
+    The add-on publishes no host port by default, so the old
+    homeassistant.local:8088 default reached nothing on a stock install and
+    setup failed with cannot_connect while the add-on sat there working. Ask
+    the add-on first, derive the Supervisor hostname second, and keep the host
+    address only as the fallback it should always have been.
+    """
+    candidates = [
+        await _async_handoff_url(hass),
+        _supervisor_addon_url(hass),
+        ADDON_BASE_URL,
+    ]
+    seen: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.append(candidate)
+
+    for candidate in seen:
+        if await _async_answers(hass, candidate, token):
+            return candidate
+    # Nothing answered — the add-on may simply be starting. Offer the best
+    # guess rather than an address that is known not to work.
+    return seen[0]
 
 
 async def _validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
@@ -143,7 +221,10 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # directory. Pre-fill from it so setup is one click, not a copy.
             token = await _async_handoff_token(self.hass)
             if token:
-                defaults = {CONF_TOKEN: token, CONF_BASE_URL: ADDON_BASE_URL}
+                defaults = {
+                    CONF_TOKEN: token,
+                    CONF_BASE_URL: await _async_addon_base_url(self.hass, token),
+                }
 
         return self.async_show_form(
             step_id="user",

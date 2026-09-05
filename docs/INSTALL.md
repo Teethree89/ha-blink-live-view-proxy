@@ -340,7 +340,7 @@ The URL depends on where the proxy runs:
 
 | Proxy | URL |
 |---|---|
-| Add-on | `http://homeassistant.local:8088` — pre-filled, along with the token |
+| Add-on | Pre-filled, along with the token: the add-on's own hostname on Home Assistant's internal network, like `http://a1b2c3d4-blink-liveview-proxy:8088`. The add-on publishes no host port by default, so `homeassistant.local:8088` only works if you map `8088` in its **Network** panel. |
 | systemd or Docker on the HA host | `http://127.0.0.1:8088` if HA uses host networking, otherwise the host's name |
 | Another machine | `http://<that-host>:8088` |
 

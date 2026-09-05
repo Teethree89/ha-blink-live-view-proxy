@@ -124,22 +124,41 @@ After the add-on starts, add the integration:
 Settings → Devices & Services → Add Integration → Blink Live View Proxy
 ```
 
-The form arrives pre-filled with `http://homeassistant.local:8088` and the
-token the add-on generated, so setup is usually a single click. If you replace
-`proxy_api_token` later, restart the add-on: it rewrites the shared file, and
-Home Assistant prompts once to accept the new token. The integration configures
-only the proxy URL, stream duration, and proxy token; Blink account
-authentication stays inside the proxy.
+The form arrives pre-filled with the token the add-on generated and the address
+it is reachable on, so setup is usually a single click. That address is the
+add-on's own hostname on Home Assistant's internal network — something like
+`http://a1b2c3d4-blink-liveview-proxy:8088`, where the prefix identifies the
+repository you installed from. It works with no port published to the host,
+which is the default: `8088/tcp` is offered in the add-on's **Network** panel
+and left unmapped unless you map it.
+
+If the form ever arrives with an address that does not work, the two things to
+try are the internal hostname above (take the slug from the add-on page's URL
+and swap `_` for `-`) or mapping `8088` in the Network panel and using
+`http://homeassistant.local:8088`.
+
+If you replace `proxy_api_token` later, restart the add-on: it rewrites the
+shared file, and Home Assistant prompts once to accept the new token. The
+integration configures only the proxy URL, stream duration, and proxy token;
+Blink account authentication stays inside the proxy.
 
 ## Storage
 
-Everything the add-on keeps is under `/data`: the Blink refresh token
+Two files are written outside `/data`, both into the Home Assistant config
+directory and both rewritten on every start: `blink_liveview_proxy.token` and
+`blink_liveview_proxy.url`, which are what the integration's setup form fills
+itself in from.
+
+Everything else the add-on keeps is under `/data`: the Blink refresh token
 (`blink-auth.json`), the generated proxy token, HLS segments while a live view
 is open, the last watched live view per camera, and from 0.7.0 a clip cache at
 `/data/clips` — each local clip fetched from Blink once, with its first-frame
 thumbnail beside it, pruned oldest-first past 512 MB.
 
 ## Health Check
+
+From a machine on your network, with `8088` mapped in the add-on's **Network**
+panel — without that mapping nothing on the host is listening, by design:
 
 ```bash
 curl http://homeassistant.local:8088/health

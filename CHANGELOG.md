@@ -8,6 +8,23 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.7.0-rc.3] — 2026-09-04
+
+- **An add-on install is offered an address that actually reaches the add-on.**
+  The setup form pre-filled `http://homeassistant.local:8088`, a host address —
+  and the add-on publishes no host port unless someone maps `8088` by hand, so
+  the one path documented as a single click was the one path that could not
+  work: `cannot_connect` on the first screen, with a healthy proxy sitting
+  behind it ([#30](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/30)).
+  The add-on now writes the address it is reachable on next to the token it
+  already shared — its own hostname on Home Assistant's internal network, and
+  the port this start is really listening on. The config flow prefers that,
+  falls back to deriving the hostname from Supervisor's add-on inventory (so an
+  older add-on is fixed by updating the integration alone), and only then tries
+  `homeassistant.local`. Each candidate is probed before it is offered, so the
+  address in the form is one that answered. Nothing needs a published port:
+  every request to the proxy is made by Home Assistant, never by the browser.
+
 ## [0.7.0-rc.2] — 2026-09-04
 
 - **Prereleases now identify and update themselves as prereleases.** The HACS

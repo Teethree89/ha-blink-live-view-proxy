@@ -13,9 +13,16 @@ CONF_STREAM_SECONDS = "stream_seconds"
 CONF_TOKEN = "token"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8088"
-# Where the add-on leaves its generated proxy token, and the URL that reaches
-# an add-on from inside Home Assistant. Both only apply to the add-on install.
+# What the add-on leaves in the Home Assistant config directory: its generated
+# proxy token, and — from 0.7.0 — the address it is actually reachable on,
+# which only it knows for certain because only it knows its own hostname and
+# the port option it was given. Both only apply to the add-on install.
 TOKEN_HANDOFF_FILE = "blink_liveview_proxy.token"
+URL_HANDOFF_FILE = "blink_liveview_proxy.url"
+# The last-resort address for an add-on install, and a poor one: the add-on
+# publishes no host port by default, so nothing answers here unless someone
+# mapped 8088 by hand. It stays only as the final fallback for the case where
+# Supervisor cannot be asked and the add-on is too old to have said.
 ADDON_BASE_URL = "http://homeassistant.local:8088"
 # The oldest proxy this integration can drive without hitting routes that
 # build never had. Raise it only when something here genuinely requires a newer

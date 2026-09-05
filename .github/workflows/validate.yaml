@@ -103,3 +103,6 @@ jobs:
 
       - name: Clip cache and thumbnail tests
         run: python tests/test_clip_cache.py
+
+      - name: Add-on address tests
+        run: python tests/test_addon_address.py

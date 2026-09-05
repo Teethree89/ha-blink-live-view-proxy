@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import ProxyAuthError, ProxyConnectionError
 from .const import DOMAIN
+from .supervisor import addon_slug
 from .version_check import (
     UPDATE_METHOD_SUPERVISOR,
     can_start_update,
@@ -93,7 +94,7 @@ async def _async_update_addon(
         LOGGER.error("Supervisor add-on inventory is unavailable: %s", err)
         raise UpdateAborted(ABORT_UPDATE_FAILED) from err
 
-    slug = _addon_slug(addons)
+    slug = addon_slug(addons, DOMAIN)
     if slug is None:
         LOGGER.error("Supervisor lists no add-on matching %s", DOMAIN)
         raise UpdateAborted(ABORT_NO_ADDON)
@@ -116,12 +117,3 @@ async def _async_update_addon(
     except Exception as err:  # noqa: BLE001 - Supervisor raises its own types
         LOGGER.exception("Supervisor could not update add-on %s", slug)
         raise UpdateAborted(ABORT_UPDATE_FAILED) from err
-
-
-def _addon_slug(addons: dict) -> str | None:
-    """Find this add-on despite Supervisor's repository slug prefix."""
-    for candidate in addons:
-        slug = str(candidate or "")
-        if slug == DOMAIN or slug.endswith(f"_{DOMAIN}"):
-            return slug
-    return None

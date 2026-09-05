@@ -16,7 +16,6 @@ are replaced with a recorder. Run from the repo root:
 from __future__ import annotations
 
 import asyncio
-import ast
 import inspect
 import json
 import pathlib
@@ -466,23 +465,11 @@ def test_strings_and_flow() -> None:
         "current and minimum-supported Home Assistant can both update the add-on",
     )
 
-    tree = ast.parse(updates)
-    slug_function = next(
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_addon_slug"
-    )
-    namespace = {"DOMAIN": "blink_liveview_proxy"}
-    exec(compile(ast.Module([slug_function], []), str(updates_path), "exec"), namespace)
-    addon_slug = namespace["_addon_slug"]
+    # The slug rule itself lives in supervisor.py, shared with the config
+    # flow, and is covered there - see tests/test_addon_address.py.
     check(
-        addon_slug({"local_blink_liveview_proxy": {}})
-        == "local_blink_liveview_proxy",
-        "a repository-prefixed add-on slug is found",
-    )
-    check(
-        addon_slug({"unrelated": {}}) is None,
-        "an unrelated add-on is never selected",
+        "from .supervisor import addon_slug" in updates,
+        "the add-on is identified by the same rule the config flow uses",
     )
 
 

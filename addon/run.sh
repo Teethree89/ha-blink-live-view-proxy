@@ -29,16 +29,36 @@ else
 fi
 export BLINK_USERNAME BLINK_PASSWORD BLINK_PROXY_TOKEN
 
-# Hand the token to the Home Assistant integration so nobody has to copy it.
-# Its config flow reads this file out of the Home Assistant config directory and
-# pre-fills the token field. Rewritten every start, so changing the option
-# heals the integration on the next restart. The value is never logged: add-on
-# logs get pasted into issues.
+PORT="$(bashio::config 'port')"
+
+# Hand the token and the address to the Home Assistant integration, so nobody
+# has to copy either. Its config flow reads both out of the Home Assistant
+# config directory and pre-fills the form. Rewritten every start, so changing
+# an option heals the integration on the next restart. The token is never
+# logged: add-on logs get pasted into issues.
+#
+# The address is the one Supervisor gave this container — its own hostname on
+# Home Assistant's network — and the port this start is actually listening on.
+# Not homeassistant.local: the add-on publishes no host port unless someone
+# maps one by hand, so that name reached nothing on a stock install and setup
+# failed with "cannot connect" while the proxy sat here working.
+ADDON_HOST="$(bashio::addon.hostname 2>/dev/null)" || ADDON_HOST=""
+if [ -z "$ADDON_HOST" ]; then
+    # Supervisor sets the container hostname to exactly that name, so this
+    # fallback is the same answer from the other direction.
+    ADDON_HOST="$(hostname 2>/dev/null)" || ADDON_HOST=""
+fi
+
 for HA_CONFIG in /homeassistant /config; do
     if [ -d "$HA_CONFIG" ] && [ -w "$HA_CONFIG" ]; then
         ( umask 077
           printf '%s\n' "$BLINK_PROXY_TOKEN" > "$HA_CONFIG/blink_liveview_proxy.token" )
         bashio::log.info "Shared the proxy token with Home Assistant."
+        if [ -n "$ADDON_HOST" ]; then
+            printf 'http://%s:%s\n' "$ADDON_HOST" "$PORT" \
+                > "$HA_CONFIG/blink_liveview_proxy.url"
+            bashio::log.info "Home Assistant will reach the proxy at http://${ADDON_HOST}:${PORT}."
+        fi
         break
     fi
 done
@@ -75,7 +95,6 @@ fi
 # The proxy reads the option live from the Supervisor while it waits, so a
 # code typed during the wait is picked up without this.
 
-PORT="$(bashio::config 'port')"
 bashio::log.info "Starting Blink Live View Proxy on port ${PORT}..."
 exec "$PYTHON" /opt/proxy/blink_liveview_proxy.py \
     --config "$CONFIG_FILE" \
