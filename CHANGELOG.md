@@ -49,6 +49,22 @@ fixes that change nothing about how it is used.
   empty by default and an empty list means "keep the proxy's default", so
   clearing a box can never switch push-to-talk on for a family that cannot use
   it. Reported by @bbolinger and @fritzzetik.
+- **Push-to-talk is no longer hidden from Blink Minis.** The shipped defaults
+  denied `mini` and `owl`, set before anyone had put one on the air. The
+  family has a speaker, Blink's own app talks to it, and it has been confirmed
+  audible here, so the default was refusing a control that works. Both lists
+  ship empty; what belongs on them is a family that genuinely cannot do it.
+- **The clip viewer lists cloud clips, without fetching them.** An account
+  whose Sync Module has no local storage saw an empty viewer, which was every
+  tester on this PR. Cloud clips are listed now — metadata only, one paged
+  call. They draw a placeholder rather than a thumbnail, because a thumbnail
+  is the first frame of the clip and a screenful of them would pull every clip
+  in the window off Blink's servers. A cloud clip is fetched when someone
+  plays it, and its tile fills in afterwards at no further cost; **Load cloud
+  thumbnails** does the rest in one go and says how many clips that is before
+  it starts. Local clips are unaffected: they come off your own Sync Module
+  and are drawn without asking. Raised by @bbolinger, whose account is
+  cloud-only.
 - **A tag cannot ship a version that disagrees with it.** `v0.7.0-rc.1`
   declared `0.7.0` in all three version files. They agreed with each other, so
   the version test passed, and every host installed from that tag read itself

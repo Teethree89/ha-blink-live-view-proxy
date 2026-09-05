@@ -22,8 +22,8 @@ Important fields:
   "mpegts_session_seconds": 60,
   "mpegts_cooldown_seconds": 30,
   "ptt_force_enabled_slugs": [],
-  "ptt_disabled_camera_types": ["mini"],
-  "ptt_disabled_product_types": ["owl"],
+  "ptt_disabled_camera_types": [],
+  "ptt_disabled_product_types": [],
   "cameras": {}
 }
 ```
@@ -192,24 +192,37 @@ PTT is hidden for camera families in:
 
 ```json
 "ptt_force_enabled_slugs": [],
-"ptt_disabled_camera_types": ["mini"],
-"ptt_disabled_product_types": ["owl"]
+"ptt_disabled_camera_types": [],
+"ptt_disabled_product_types": []
 ```
 
-Add a slug such as `"kitchen"` to `ptt_force_enabled_slugs` only for targeted
-testing of cameras that are disabled by family defaults. A Blink Mini/`owl`
-camera was confirmed audible this way on June 30, 2026.
+Both lists are empty by default. They used to carry `mini` and `owl`, set
+before anyone had actually tried it, and a Blink Mini/`owl` was confirmed
+audible on June 30, 2026 — so the default was hiding a control that works. Put
+a family on a list when it genuinely cannot do this, and use
+`ptt_force_enabled_slugs` for a single camera you want back regardless.
+
+An add-on install can set all three; they are add-on options. There, an empty
+box means "keep these defaults" rather than "allow everything", so the lists
+can only be added to from the add-on UI.
 
 ## Local Clips
 
-The HA clip viewer intentionally uses local Sync Module clips:
+The HA clip viewer lists both inventories:
 
 ```text
 /api/blink_liveview_proxy/clips/viewer
 ```
 
-The proxy also has diagnostic support for cloud clips, but the HA viewer does
-not expose them.
+Cloud clips exist only for an account with a Blink subscription; without one,
+motion clips are written to a Sync Module's local storage and nothing else.
+Listing them is metadata only. Fetching one is not, and that is why cloud
+clips show a placeholder rather than a thumbnail: a thumbnail is the first
+frame of the clip, so drawing a screenful would pull every clip in the window
+off Blink's servers. A cloud clip is fetched when someone plays it, or when
+someone presses **Load cloud thumbnails**, which says how many clips that is
+before it starts. Local clips come off your own Sync Module and are drawn
+without asking.
 
 Each clip is fetched from Blink once and kept, and its first frame is cut as
 the thumbnail the viewer shows. Two keys control that:

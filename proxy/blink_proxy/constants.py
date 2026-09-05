@@ -68,8 +68,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ptt_strip_adts": False,
     "ptt_send_audio_config": False,
     "ptt_force_enabled_slugs": [],
-    "ptt_disabled_camera_types": ["mini"],
-    "ptt_disabled_product_types": ["owl"],
+    # Empty, and deliberately so. These lists used to carry "mini"/"owl",
+    # from before anyone had put a Mini on the air: the family does have a
+    # speaker, Blink's own app talks to it, and it has been confirmed audible
+    # here — so the default was refusing a feature that works. What belongs on
+    # these lists is a family that *cannot* do it, which is a property of the
+    # transport rather than the model.
+    "ptt_disabled_camera_types": [],
+    "ptt_disabled_product_types": [],
     "prefer_v6_liveview": True,
     "send_liveview_token": True,
     "cameras": {},

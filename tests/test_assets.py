@@ -1037,6 +1037,83 @@ def test_a_tag_cannot_ship_the_wrong_version() -> None:
         check(name in build[guard]["run"], f"{name} is compared to the tag")
 
 
+def test_cloud_clips_cost_nothing_until_asked() -> None:
+    print("\ncloud clips are listed, and fetched only on purpose")
+
+    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
+
+    check(
+        'source: "both"' in views,
+        "the viewer asks for both inventories, not just the Sync Module",
+    )
+    check(
+        'if (clip.source === "cloud" && !cloudThumbnailReady(clip))' in views,
+        "a cloud clip draws a placeholder rather than fetching itself",
+    )
+    check(
+        "cloudThumbnailsOn || fetchedClips.has(clip.id)" in views,
+        "a cloud thumbnail is drawn once its clip is on disk anyway",
+    )
+    check(
+        "window.confirm(warning)" in views and "downloaded from Blink first" in views,
+        "the bulk button says what it is about to download, and can be refused",
+    )
+    check(
+        'fetchedClips.add(clip.id);' in views and "upgradeThumbnail(clip)" in views,
+        "playing a cloud clip fills its tile in, at no further cost",
+    )
+    check(
+        views.index("function loadCloudThumbnails") < views.index("cloudThumbnailsOn = true"),
+        "nothing turns cloud thumbnails on except that button",
+    )
+
+    # The source has to survive the integration, or a cloud clip 404s on the
+    # way to its own bytes.
+    check(
+        "def _clip_query(request: web.Request, *, allow_both: bool)" in views,
+        "one place decides which clip sources a request may name",
+    )
+    check(
+        'permitted = {"local", "cloud", "both"} if allow_both else {"local", "cloud"}' in views,
+        "the source is an enum, and only the listing may say both",
+    )
+    check(
+        views.count("_clip_query(request, allow_both=False)") == 2,
+        "the download and thumbnail routes carry a source too",
+    )
+    check(
+        'query["source"] = "local"' not in views,
+        "no route pins itself to local any more",
+    )
+
+    docs = (ROOT / "docs/CONFIGURATION.md").read_text()
+    check(
+        "only for an account with a Blink subscription" in docs,
+        "the docs say what a cloud clip costs and who has one",
+    )
+
+
+def test_push_to_talk_defaults_to_offered() -> None:
+    print("\npush-to-talk is not hidden from a family that has it")
+
+    defaults = (ROOT / "proxy/blink_proxy/constants.py").read_text()
+    for key in ("ptt_disabled_camera_types", "ptt_disabled_product_types"):
+        check(
+            f'"{key}": [],' in defaults,
+            f"{key} ships empty, so no family is refused by default",
+        )
+    check(
+        '"ptt_force_enabled_slugs": [],' in defaults,
+        "the per-camera override is still there for a family that is listed",
+    )
+
+    docs = (ROOT / "docs/CONFIGURATION.md").read_text()
+    check(
+        '"ptt_disabled_product_types": []' in docs,
+        "the documented default is the shipped one",
+    )
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -1061,6 +1138,8 @@ def main() -> int:
         test_proxy_status_codes_survive_the_integration,
         test_addon_reaches_the_options_that_matter,
         test_a_tag_cannot_ship_the_wrong_version,
+        test_cloud_clips_cost_nothing_until_asked,
+        test_push_to_talk_defaults_to_offered,
     ):
         test()
 

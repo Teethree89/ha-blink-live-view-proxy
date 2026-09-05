@@ -1706,7 +1706,7 @@ def _rewrite_clip_download_urls(
 
 
 def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
-    """Return the local Sync Module clip viewer page.
+    """Return the clip viewer page, for Sync Module and cloud clips alike.
 
     Two panes that scroll independently: the list on its own, and the
     player locked to the viewport beside it. A plain string, not an
@@ -1720,7 +1720,7 @@ def _clips_viewer_html(camera_slug: str | None, access_token: str) -> str:
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Local clips</title>
+<title>Clips</title>
 <link rel="icon" href="__ASSET_BASE__/icon.png">
 <style>
 :root{color-scheme:dark;--bg:#05070a;--panel:#0b1018;--card:#111827;--line:rgba(148,163,184,.16);--text:#f8fafc;--muted:#cbd5e1;--dim:#94a3b8;--accent:#0284c7;--accent-2:#38bdf8}
@@ -1744,6 +1744,8 @@ button,a.button{display:inline-grid;place-items:center;padding:0 12px;font-weigh
 button.primary{border-color:var(--accent);background:var(--accent)}
 button:disabled{opacity:.6;cursor:default}
 .summary{margin-left:auto;align-self:center;color:var(--dim);font-size:13px}
+.badge{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--dim);font-size:11px;font-weight:600;vertical-align:middle}
+.thumb.cloud .fallback{display:grid;font-size:11px;font-weight:600;text-align:center;line-height:1.25;padding:0 6px}
 main{display:grid;grid-template-columns:minmax(300px,400px) minmax(0,1fr);min-height:0}
 .list{overflow-y:auto;overscroll-behavior:contain;border-right:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0px)}
 .empty,.loading{padding:28px 18px;color:var(--muted);line-height:1.5}
@@ -1818,7 +1820,7 @@ video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;ba
 </head>
 <body>
 <section class="toolbar">
-  <h1>Local clips</h1>
+  <h1>Clips</h1>
   <label>Window
     <select id="hours">
       <option value="24">24 hours</option>
@@ -1840,6 +1842,7 @@ video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;ba
     </select>
   </label>
   <button id="refresh" class="primary" type="button">Refresh</button>
+  <button id="cloudThumbs" class="secondary" type="button" hidden>Load cloud thumbnails</button>
   <span id="summary" class="summary"></span>
 </section>
 <main>
@@ -1858,7 +1861,7 @@ video{display:block;width:100%;height:100%;max-height:100%;object-fit:contain;ba
     </div>
   </section>
   <section id="list" class="list" role="list" aria-label="Clips">
-    <div class="loading">Loading local Sync Module clips…</div>
+    <div class="loading">Loading clips…</div>
   </section>
 </main>
 <script>
@@ -1874,6 +1877,7 @@ const hours = document.getElementById("hours");
 const limit = document.getElementById("limit");
 const camera = document.getElementById("camera");
 const refresh = document.getElementById("refresh");
+const cloudThumbs = document.getElementById("cloudThumbs");
 const initial = new URLSearchParams(window.location.search);
 const fixedCamera = __CAMERA_JSON__;
 const accessToken = __TOKEN_JSON__;
@@ -1990,6 +1994,23 @@ function updateCameraOptions() {
   if (selected && seen.has(selected)) camera.value = selected;
 }
 
+// What a cloud thumbnail actually costs.
+//
+// A thumbnail is the first frame cut from the clip file, so there is no cheap
+// way to draw one: the clip has to be on disk first. For a local clip that
+// download is the Sync Module on your own network. For a cloud clip it is
+// Blink's servers, and a screenful of tiles would pull every clip in the
+// window off them - so cloud tiles stay placeholders until someone asks,
+// either by playing one clip or by pressing the button, which says what it is
+// about to do. Blink's own app behaves the same way: a list is cheap, a clip
+// is fetched when you tap it.
+let cloudThumbnailsOn = false;
+const fetchedClips = new Set();
+
+function cloudThumbnailReady(clip) {
+  return cloudThumbnailsOn || fetchedClips.has(clip.id);
+}
+
 function thumbnail(clip) {
   const box = document.createElement("div");
   box.className = "thumb";
@@ -2000,6 +2021,12 @@ function thumbnail(clip) {
   if (!clip.thumbnail_url) {
     // An older proxy lists clips without thumbnails. Say so quietly.
     box.classList.add("none");
+    return box;
+  }
+  if (clip.source === "cloud" && !cloudThumbnailReady(clip)) {
+    box.classList.add("none", "cloud");
+    fallback.textContent = "In Blink's cloud";
+    box.title = "Play this clip, or load cloud thumbnails, to see a frame";
     return box;
   }
   const skeleton = document.createElement("div");
@@ -2017,8 +2044,25 @@ function thumbnail(clip) {
   return box;
 }
 
+function upgradeThumbnail(clip) {
+  // Swap one placeholder for a real tile without rebuilding the list, which
+  // would move the scroll position out from under whoever just clicked.
+  const row = list.querySelector(`.clip[data-id="${CSS.escape(clip.id)}"]`);
+  const existing = row && row.querySelector(".thumb");
+  if (!existing) return;
+  existing.replaceWith(thumbnail(clip));
+}
+
 function play(clip) {
   activeId = clip.id;
+  if (clip.source === "cloud" && !fetchedClips.has(clip.id)) {
+    // Playing it puts it in the proxy's cache, so the thumbnail now costs
+    // nothing more. The proxy locks per clip, so this waits on the same
+    // download rather than starting a second one.
+    fetchedClips.add(clip.id);
+    updateCloudThumbnailButton();
+    upgradeThumbnail(clip);
+  }
   for (const row of list.querySelectorAll(".clip")) {
     row.classList.toggle("active", row.dataset.id === clip.id);
   }
@@ -2042,7 +2086,7 @@ function render() {
   if (!shown.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
-    empty.textContent = "No local Sync Module clips in this window. Try a longer one, or check that the Sync Module has local storage.";
+    empty.textContent = "No clips in this window, from the Sync Module or from Blink's cloud. Try a longer one.";
     list.append(empty);
     return;
   }
@@ -2057,6 +2101,12 @@ function render() {
     text.className = "text";
     const title = document.createElement("strong");
     title.textContent = optionLabel(clip);
+    if (clip.source === "cloud") {
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = "Cloud";
+      title.append(badge);
+    }
     const meta = document.createElement("div");
     meta.className = "meta";
     const size = formatSize(clip.size);
@@ -2068,10 +2118,50 @@ function render() {
   }
 }
 
+function pendingCloudThumbnails() {
+  const selected = fixedCamera || camera.value;
+  return clips.filter(
+    (clip) =>
+      clip.source === "cloud" &&
+      clip.thumbnail_url &&
+      !cloudThumbnailReady(clip) &&
+      (!selected || clip.slug === selected)
+  );
+}
+
+function updateCloudThumbnailButton() {
+  cloudThumbs.hidden = cloudThumbnailsOn || pendingCloudThumbnails().length === 0;
+}
+
+function loadCloudThumbnails() {
+  const pending = pendingCloudThumbnails();
+  if (!pending.length) return;
+  const count = pending.length;
+  // Spelled out rather than softened: this is the one action here that pulls
+  // video off Blink's servers without anyone having asked for that clip.
+  const warning =
+    `Load ${count} cloud thumbnail${count === 1 ? "" : "s"}?\n\n` +
+    "A thumbnail is the first frame of the clip, so each one has to be " +
+    `downloaded from Blink first — ${count} clip${count === 1 ? "" : "s"}, ` +
+    "kept in the proxy's cache afterwards. Clips already on your Sync Module " +
+    "are not affected.";
+  if (!window.confirm(warning)) return;
+  cloudThumbnailsOn = true;
+  updateCloudThumbnailButton();
+  render();
+}
+
 async function loadClips() {
   refresh.disabled = true;
-  list.innerHTML = '<div class="loading">Loading local Sync Module clips…</div>';
-  const params = new URLSearchParams({ hours: hours.value, limit: limit.value });
+  list.innerHTML = '<div class="loading">Loading clips…</div>';
+  const params = new URLSearchParams({
+    hours: hours.value,
+    limit: limit.value,
+    // Both inventories. Local clips come off the Sync Module; cloud clips
+    // exist only for an account with a Blink subscription, and listing them
+    // is metadata only - no clip is fetched to build this list.
+    source: "both"
+  });
   if (fixedCamera || camera.value) params.set("camera", fixedCamera || camera.value);
   if (accessToken) params.set("token", accessToken);
   try {
@@ -2083,12 +2173,13 @@ async function loadClips() {
     const data = await response.json();
     clips = Array.isArray(data.clips) ? data.clips : [];
   } catch (err) {
-    list.innerHTML = '<div class="empty">Could not load local clips. Check that the proxy is running and signed in to Blink, then refresh.</div>';
+    list.innerHTML = '<div class="empty">Could not load clips. Check that the proxy is running and signed in to Blink, then refresh.</div>';
     summary.textContent = "";
     refresh.disabled = false;
     return;
   }
   updateCameraOptions();
+  updateCloudThumbnailButton();
   render();
   refresh.disabled = false;
 }
@@ -2108,9 +2199,13 @@ document.addEventListener("keydown", (event) => {
 });
 
 refresh.addEventListener("click", loadClips);
+cloudThumbs.addEventListener("click", loadCloudThumbnails);
 hours.addEventListener("change", loadClips);
 limit.addEventListener("change", loadClips);
-camera.addEventListener("change", render);
+camera.addEventListener("change", () => {
+  updateCloudThumbnailButton();
+  render();
+});
 loadClips();
 </script>
 </body>
@@ -2120,6 +2215,26 @@ loadClips();
         .replace("__ASSET_BASE__", ASSET_URL_BASE)
         .replace("__TOKEN_JSON__", token_json)
     )
+
+
+def _clip_query(request: web.Request, *, allow_both: bool) -> dict[str, str]:
+    """The listing arguments a clip request may carry, and its clip source.
+
+    `source` decides which Blink inventory a clip is looked for in. It used to
+    be pinned to "local" here, which is why an account whose clips are all in
+    Blink's cloud saw an empty viewer. It is an enum, checked against the
+    values the proxy accepts, and never passed through as free text.
+    """
+    allowed = {"camera", "hours", "pages", "limit"}
+    query = {
+        key: value for key, value in request.query.items() if key in allowed
+    }
+    source = request.query.get("source", "local")
+    permitted = {"local", "cloud", "both"} if allow_both else {"local", "cloud"}
+    if source not in permitted:
+        raise web.HTTPBadRequest(text="Unknown clip source\n")
+    query["source"] = source
+    return query
 
 
 class BlinkLiveviewProxyClipsView(HomeAssistantView):
@@ -2133,7 +2248,7 @@ class BlinkLiveviewProxyClipsView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return recent local Sync Module clip metadata from the local proxy."""
+        """Return recent clip metadata from the local proxy."""
         camera_slug = request.query.get("camera") or None
         if camera_slug:
             _camera(self.hass, camera_slug)
@@ -2141,13 +2256,7 @@ class BlinkLiveviewProxyClipsView(HomeAssistantView):
         elif not request.get(KEY_AUTHENTICATED, False):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
-        allowed = {"camera", "hours", "pages", "limit"}
-        query = {
-            key: value
-            for key, value in request.query.items()
-            if key in allowed
-        }
-        query["source"] = "local"
+        query = _clip_query(request, allow_both=True)
         upstream = await _open_proxy_response(_client(self.hass), "/clips", query)
         try:
             body = await upstream.read()
@@ -2170,7 +2279,7 @@ class BlinkLiveviewProxyClipsView(HomeAssistantView):
 
 
 class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
-    """Proxy one local Sync Module clip download."""
+    """Proxy one clip download, from the Sync Module or from Blink's cloud."""
 
     requires_auth = False
     url = "/api/blink_liveview_proxy/clips/{clip_id}.mp4"
@@ -2180,7 +2289,7 @@ class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request, clip_id: str) -> web.StreamResponse:
-        """Download one local Sync Module clip."""
+        """Download one clip."""
         camera_slug = request.query.get("camera") or None
         if camera_slug:
             _camera(self.hass, camera_slug)
@@ -2188,13 +2297,7 @@ class BlinkLiveviewProxyClipDownloadView(HomeAssistantView):
         elif not request.get(KEY_AUTHENTICATED, False):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
-        allowed = {"camera", "hours", "pages", "limit"}
-        query = {
-            key: value
-            for key, value in request.query.items()
-            if key in allowed
-        }
-        query["source"] = "local"
+        query = _clip_query(request, allow_both=False)
         return await _proxy_stream(
             self.hass,
             request,
@@ -2228,13 +2331,7 @@ class BlinkLiveviewProxyClipThumbnailView(HomeAssistantView):
         elif not request.get(KEY_AUTHENTICATED, False):
             raise web.HTTPForbidden(text="Missing camera token\n")
 
-        allowed = {"camera", "hours", "pages", "limit"}
-        query = {
-            key: value
-            for key, value in request.query.items()
-            if key in allowed
-        }
-        query["source"] = "local"
+        query = _clip_query(request, allow_both=False)
         return await _proxy_stream(
             self.hass,
             request,
@@ -2246,7 +2343,7 @@ class BlinkLiveviewProxyClipThumbnailView(HomeAssistantView):
 
 
 class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
-    """Serve the local Sync Module clips viewer."""
+    """Serve the clips viewer."""
 
     requires_auth = False
     url = "/api/blink_liveview_proxy/clips/viewer"
@@ -2256,7 +2353,7 @@ class BlinkLiveviewProxyClipsViewerView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request: web.Request) -> web.Response:
-        """Return the local clips viewer HTML."""
+        """Return the clips viewer HTML."""
         camera_slug = request.query.get("camera") or None
         access_token = ""
         if camera_slug:
