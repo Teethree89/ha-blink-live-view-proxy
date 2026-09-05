@@ -8,6 +8,7 @@ import datetime
 import logging
 import os
 import platform
+import re
 import secrets
 import shutil
 import time
@@ -390,6 +391,15 @@ def _cached_clip_filename(cache: ClipCache, clip_key: str) -> str:
     except (KeyError, ValueError, TypeError):
         return f"{clip_key}.mp4"
 
+# A decoded %2F in the id would escape the cache directory unchecked.
+_CLIP_ID_RE = re.compile(r"[0-9a-f]{24}")
+
+def _clip_key(request: web.Request) -> str:
+    key = request.match_info["clip_id"]
+    if not _CLIP_ID_RE.fullmatch(key):
+        raise web.HTTPNotFound()
+    return key
+
 async def clip_download_handler(request: web.Request) -> web.FileResponse:
     """One clip, from the cache - filled from Blink the first time it is asked for.
 
@@ -399,7 +409,7 @@ async def clip_download_handler(request: web.Request) -> web.FileResponse:
     never touches Blink.
     """
     check_authorized(request)
-    clip_key = request.match_info["clip_id"]
+    clip_key = _clip_key(request)
     cache: ClipCache = request.app["clip_cache"]
 
     path = cache.cached_clip(clip_key)
@@ -427,7 +437,7 @@ async def clip_download_handler(request: web.Request) -> web.FileResponse:
 async def clip_thumbnail_handler(request: web.Request) -> web.FileResponse:
     """The first frame of one clip as a JPEG, cut once and kept beside the clip."""
     check_authorized(request)
-    clip_key = request.match_info["clip_id"]
+    clip_key = _clip_key(request)
     cache: ClipCache = request.app["clip_cache"]
 
     path = cache.cached_thumbnail(clip_key)

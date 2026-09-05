@@ -106,3 +106,6 @@ jobs:
 
       - name: Add-on address tests
         run: python tests/test_addon_address.py
+
+      - name: Clip route guard tests
+        run: python tests/test_clip_route_guard.py
