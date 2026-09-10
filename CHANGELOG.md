@@ -8,6 +8,42 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [Unreleased]
+
+### Added
+
+- **A Camera Controls sheet in the live-view player.** A Controls pill under
+  the Unmute / Hold Talk / End row opens a sheet — from the bottom in portrait,
+  from the side in landscape — with the camera's flood light, night vision,
+  lamp brightness, temperature and speaker volume, each shown only where the
+  camera has it. The Wired Floodlight also gets its dusk-to-dawn, motion
+  activation and timeout settings at the bottom of the same sheet. In portrait
+  the picture stays centred until the sheet opens, then rises with it; the
+  native control bar, AirPlay and picture-in-picture stay as they were.
+  Designed and tested on an iPhone by @bbolinger.
+- **Proxy routes for those controls: `GET` and `POST /cameras/{slug}/controls`.**
+  One flat document per camera, whichever of Blink's two config shapes it
+  answers. The Wired Floodlight is an "owl" with its lamp settings nested under
+  a `superior` block; every other camera answers the classic camera config with
+  integer codes. Writes go back through the routes the Blink app itself uses,
+  including two blinkpy has no call for: the floodlight lamp's on/off route,
+  and the v2 camera config route that carries the speaker volume of the
+  Outdoor 4 and XT2 as `lfr_sync_interval`, 1 to 8 — found by watching the app
+  save its own Speaker Volume slider. Blink answers 200 to everything, so a
+  write counts as taken only when the answer carries a command; "System is
+  busy" is reported back to the sheet instead of being swallowed.
+- **The integration view `/api/blink_liveview_proxy/cameras/{slug}/controls`**
+  fronts those routes for the player with the same browser token the player
+  already holds, and expresses the temperature in the unit Home Assistant is
+  set to.
+
+### Fixed
+
+- **The side sheet clears the notch on whichever side it is.** Inside the
+  dialog's frame the safe-area insets read as zero, and iOS reports the same
+  inset on both sides in landscape anyway, so the dialog now measures the
+  insets and the rotation angle and hands them to the player; only the sheet
+  and the header step in, and the picture still paints edge to edge.
 ## [0.8.1] — 2026-09-10
 
 ### Fixed
