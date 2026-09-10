@@ -923,13 +923,19 @@ body:not(.portrait) .live-actions button {{
 }}
 .sheet .body {{
   display:grid;
+  /* minmax(0, ...) or Safari sizes the column to the widest card's minimum
+     content and the whole stack runs off the right edge of the screen. */
+  grid-template-columns:minmax(0, 1fr);
   gap:10px;
   min-height:0;
+  min-width:0;
   overflow-y:auto;
+  overflow-x:hidden;
   -webkit-overflow-scrolling:touch;
 }}
 .section {{
   display:grid;
+  grid-template-columns:minmax(0, 1fr);
   gap:10px;
 }}
 .section[hidden] {{
@@ -946,6 +952,7 @@ body:not(.portrait) .live-actions button {{
 .card {{
   display:flex;
   align-items:center;
+  min-width:0;
   gap:14px;
   padding:14px 16px;
   border-radius:14px;
@@ -994,8 +1001,9 @@ body:not(.portrait) .live-actions button {{
 }}
 .pair {{
   display:grid;
-  grid-template-columns:1fr 1fr;
+  grid-template-columns:minmax(0, 1fr) minmax(0, 1fr);
   gap:10px;
+  min-width:0;
 }}
 .pair .card {{
   flex-direction:column;
@@ -1023,7 +1031,7 @@ body:not(.portrait) .live-actions button {{
   display:none;
 }}
 .pair:has(> .card[hidden]) {{
-  grid-template-columns:1fr;
+  grid-template-columns:minmax(0, 1fr);
 }}
 .switch {{
   position:relative;
@@ -1070,6 +1078,7 @@ input[type=range] {{
   -webkit-appearance:none;
   appearance:none;
   width:100%;
+  min-width:0;
   height:6px;
   margin:8px 0;
   border-radius:999px;
@@ -1388,6 +1397,12 @@ function positionLiveActions() {{
   livePillTop.hidden = !live || portrait;
   controlsHint.hidden = !live || openSheet !== null;
   if (!live) return;
+  // Inside the dashboard dialog its close button sits at the picture's left
+  // edge, which in landscape is where the title starts.
+  const framed = !!(window.parent && window.parent !== window);
+  topbar.style.paddingLeft = framed && !portrait
+    ? `${{Math.round(video.getBoundingClientRect().left) + 64}}px`
+    : "";
   if (portrait && controlsHint.parentNode !== stage) stage.appendChild(controlsHint);
   if (!portrait && controlsHint.parentNode !== liveActions) liveActions.appendChild(controlsHint);
   liveActions.style.top = "";
