@@ -694,6 +694,9 @@ button.talk.active {{
   --sheet-h:0px;
   --sheet-w:0px;
   --lift:0px;
+  /* Side safe areas as the dialog measures them; env() reads zero in a frame. */
+  --safe-left:env(safe-area-inset-left, 0px);
+  --safe-right:env(safe-area-inset-right, 0px);
 }}
 .stage {{
   background-color:var(--navy);
@@ -708,7 +711,7 @@ button.talk.active {{
   align-items:center;
   gap:6px;
   height:var(--topbar-h);
-  padding:env(safe-area-inset-top, 0px) calc(10px + env(safe-area-inset-right, 0px)) 0 calc(6px + env(safe-area-inset-left, 0px));
+  padding:env(safe-area-inset-top, 0px) calc(10px + var(--safe-right)) 0 calc(6px + var(--safe-left));
   box-sizing:content-box;
   background:linear-gradient(rgba(5,7,10,.72),rgba(5,7,10,0));
 }}
@@ -881,7 +884,7 @@ body:not(.portrait) .live-actions button {{
   right:0;
   bottom:0;
   width:min(340px, 46vw);
-  padding:calc(10px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) 12px;
+  padding:calc(10px + env(safe-area-inset-top, 0px)) calc(12px + var(--safe-right)) calc(10px + env(safe-area-inset-bottom, 0px)) 12px;
   transform:translateX(100%);
 }}
 .sheet.open {{
@@ -2227,6 +2230,14 @@ overlay.addEventListener("click", () => {{
   if (statusText.textContent.startsWith("Tap play")) video.play().catch(() => {{}});
 }});
 window.addEventListener("resize", layoutSheets);
+window.addEventListener("message", (event) => {{
+  const data = event.data || {{}};
+  if (event.origin !== window.location.origin || data.type !== "blink-liveview-insets") return;
+  const root = document.documentElement.style;
+  root.setProperty("--safe-left", `${{Math.max(0, Number(data.left) || 0)}}px`);
+  root.setProperty("--safe-right", `${{Math.max(0, Number(data.right) || 0)}}px`);
+  layoutSheets();
+}});
 
 window.__blinkStopPlayer = () => {{
   try {{ stopPlayer(); }} catch (err) {{}}

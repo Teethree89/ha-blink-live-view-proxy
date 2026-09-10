@@ -126,11 +126,14 @@
         height: 100%;
         border: 0;
         background: #05070a;
-        /* The player cannot see the safe-area insets from inside a frame, so
-           the frame itself steps in from the notch, and only on that side. */
-        box-sizing: border-box;
-        padding-left: env(safe-area-inset-left, 0px);
-        padding-right: env(safe-area-inset-right, 0px);
+      }
+      #${DIALOG_ID} .blink-liveview-insets {
+        position: absolute;
+        visibility: hidden;
+        pointer-events: none;
+        /* Written as a shorthand so the shell itself stays unpadded: this
+           element only exists to be measured. */
+        padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
       }
       #${DIALOG_ID} .blink-liveview-error {
         display: grid;
@@ -322,6 +325,28 @@
     };
 
     iframe.addEventListener("load", connectVideo);
+    // The player cannot read the safe-area insets from inside a frame, so
+    // measure them here and hand them over; it keeps its side sheet clear of
+    // the notch with them while the picture still paints behind it.
+    const probe = document.createElement("div");
+    probe.className = "blink-liveview-insets";
+    root.appendChild(probe);
+    const sendInsets = () => {
+      const style = getComputedStyle(probe);
+      const frame = iframe.contentWindow;
+      if (!frame) return;
+      frame.postMessage(
+        {
+          type: "blink-liveview-insets",
+          left: parseFloat(style.paddingLeft) || 0,
+          right: parseFloat(style.paddingRight) || 0,
+        },
+        window.location.origin
+      );
+    };
+    iframe.addEventListener("load", sendInsets);
+    window.addEventListener("resize", sendInsets);
+    window.addEventListener("orientationchange", () => setTimeout(sendInsets, 300));
     window.addEventListener("resize", apply);
     window.addEventListener("orientationchange", applyThroughRotation);
     connectVideo();
