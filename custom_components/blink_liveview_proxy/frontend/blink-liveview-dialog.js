@@ -126,6 +126,11 @@
         height: 100%;
         border: 0;
         background: #05070a;
+        /* The player cannot see the safe-area insets from inside a frame, so
+           the frame itself steps in from the notch, and only on that side. */
+        box-sizing: border-box;
+        padding-left: env(safe-area-inset-left, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
       }
       #${DIALOG_ID} .blink-liveview-error {
         display: grid;
