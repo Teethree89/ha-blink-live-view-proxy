@@ -335,11 +335,19 @@
       const style = getComputedStyle(probe);
       const frame = iframe.contentWindow;
       if (!frame) return;
+      // iOS reports the same inset on both sides in landscape, so the
+      // angle says which side the notch is actually on: 90 puts it on the
+      // left, -90 on the right.
+      const type = screen.orientation && screen.orientation.type;
+      const angle = typeof window.orientation === "number"
+        ? window.orientation
+        : type === "landscape-primary" ? 90 : type === "landscape-secondary" ? -90 : 0;
       frame.postMessage(
         {
           type: "blink-liveview-insets",
           left: parseFloat(style.paddingLeft) || 0,
           right: parseFloat(style.paddingRight) || 0,
+          angle,
         },
         window.location.origin
       );

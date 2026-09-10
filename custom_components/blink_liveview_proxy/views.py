@@ -2233,9 +2233,13 @@ window.addEventListener("resize", layoutSheets);
 window.addEventListener("message", (event) => {{
   const data = event.data || {{}};
   if (event.origin !== window.location.origin || data.type !== "blink-liveview-insets") return;
+  // Both sides come back equal on iOS in landscape; the angle says which
+  // side the notch is really on, and only that side steps in.
+  const inset = Math.max(0, Number(data.left) || 0, Number(data.right) || 0);
+  const angle = Number(data.angle) || 0;
   const root = document.documentElement.style;
-  root.setProperty("--safe-left", `${{Math.max(0, Number(data.left) || 0)}}px`);
-  root.setProperty("--safe-right", `${{Math.max(0, Number(data.right) || 0)}}px`);
+  root.setProperty("--safe-left", angle === 90 ? `${{inset}}px` : "0px");
+  root.setProperty("--safe-right", angle === -90 ? `${{inset}}px` : "0px");
   layoutSheets();
 }});
 
