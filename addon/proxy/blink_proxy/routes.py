@@ -34,6 +34,7 @@ from .auth_flow import (
     StaleChallengeError,
 )
 from .blink import BlinkStreamBroker, LiveViewHandle, _wait_for_pin
+from .camera_controls import ControlError, apply_changes, fetch_state
 from .clip_cache import ClipCache
 from .clips import (
     ClipManager,
@@ -296,6 +297,47 @@ async def update_log_handler(request: web.Request) -> web.Response:
 async def cameras_handler(request: web.Request) -> web.Response:
     check_authorized(request)
     return web.json_response({"cameras": _require_client(request).list_cameras()})
+
+def _camera_row(request: web.Request, slug: str) -> dict[str, Any]:
+    client = _require_client(request)
+    row = next((c for c in client.list_cameras() if c.get("slug") == slug), None)
+    if row is None:
+        raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n")
+    return row
+
+async def camera_controls_handler(request: web.Request) -> web.Response:
+    """Read the lamp, night vision, volume and temperature state of one camera."""
+    check_authorized(request)
+    slug = request.match_info["slug"]
+    row = _camera_row(request, slug)
+    blink = _require_client(request)._require_blink()  # noqa: SLF001
+    try:
+        async with asyncio.timeout(20):
+            state = await fetch_state(blink, row)
+    except (TimeoutError, OSError) as err:
+        raise web.HTTPBadGateway(text=f"Blink did not answer: {err}\n") from err
+    return web.json_response(state, headers={"Cache-Control": "no-store"})
+
+async def camera_controls_update_handler(request: web.Request) -> web.Response:
+    """Change one or more controls; the body names them, the answer is the new state."""
+    check_authorized(request)
+    slug = request.match_info["slug"]
+    row = _camera_row(request, slug)
+    if request.content_length is not None and request.content_length > 4096:
+        raise web.HTTPRequestEntityTooLarge(max_size=4096, actual_size=request.content_length)
+    try:
+        body = await request.json()
+    except ValueError as err:
+        raise web.HTTPBadRequest(text="Body must be JSON\n") from err
+    blink = _require_client(request)._require_blink()  # noqa: SLF001
+    try:
+        async with asyncio.timeout(30):
+            state = await apply_changes(blink, row, body)
+    except ControlError as err:
+        raise web.HTTPBadRequest(text=f"{err}\n") from err
+    except (TimeoutError, OSError) as err:
+        raise web.HTTPBadGateway(text=f"Blink did not answer: {err}\n") from err
+    return web.json_response(state, headers={"Cache-Control": "no-store"})
 
 def _clamped_float(value: str | None, default: float, minimum: float, maximum: float) -> float:
     try:
@@ -791,6 +833,8 @@ async def make_app(
     app.router.add_post("/update", update_handler)
     app.router.add_get("/update/log", update_log_handler)
     app.router.add_get("/cameras", cameras_handler)
+    app.router.add_get("/cameras/{slug}/controls", camera_controls_handler)
+    app.router.add_post("/cameras/{slug}/controls", camera_controls_update_handler)
     app.router.add_get("/clips", clips_handler)
     app.router.add_get("/clips/{clip_id}.mp4", clip_download_handler)
     app.router.add_get("/clips/{clip_id}.jpg", clip_thumbnail_handler)

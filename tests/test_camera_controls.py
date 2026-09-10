@@ -1,0 +1,223 @@
+"""The camera controls fold two Blink config shapes into one flat state.
+
+The Wired Floodlight answers the owl config route with its lamp settings under
+a ``superior`` block; every other camera answers the classic camera config
+route with integer codes. These tests pin the translation both ways, the
+field whitelist on writes, and the accepted/rejected reading of Blink's
+answers, without touching Blink. Run from the repo root:
+
+    python tests/test_camera_controls.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "proxy"))
+
+from blink_proxy import camera_controls as cc  # noqa: E402
+
+FAILURES: list[str] = []
+CHECKS = 0
+
+FLOOD_ROW = {
+    "slug": "flood_light",
+    "name": "Flood light",
+    "id": "318367",
+    "network_id": "1",
+    "product_type": "superior",
+}
+INDOOR_ROW = {
+    "slug": "back_door",
+    "name": "Back Door",
+    "id": "2",
+    "network_id": "1",
+    "product_type": "white",
+}
+OWL_CONFIG = {
+    "illuminator_enable": "auto",
+    "illuminator_intensity": 4,
+    "light_brightness": 3,
+    "light_status": "off",
+    "volume_control": 8,
+    "superior": {
+        "motion_alert": True,
+        "illuminator_intensity": 3,
+        "illuminator_duration": 30,
+        "manual_illuminator_duration": 180,
+        "illuminator_duration_options": [30, 60, 180],
+        "manual_illuminator_duration_options": [65535, 30, 60, 180],
+        "auto_on_off_enabled": False,
+    },
+}
+CLASSIC_CONFIG = {
+    "camera": {"illuminator_enable": 2, "illuminator_intensity": 7, "temperature": 71},
+    "signals": {"temp": 71},
+}
+
+
+def check(condition: bool, label: str) -> None:
+    global CHECKS
+    CHECKS += 1
+    print(f"  {'PASS' if condition else 'FAIL'}  {label}")
+    if not condition:
+        FAILURES.append(label)
+
+
+def test_read_state() -> None:
+    print("read_state")
+    flood = cc.read_state(FLOOD_ROW, None, OWL_CONFIG)
+    check(flood["flood_light"] is False, "lamp off reads as false")
+    check(flood["night_vision"] == "auto", "owl night vision word passes through")
+    check(flood["brightness"] == 3, "lamp brightness comes from the superior block, not IR")
+    check(flood["volume"] == 8, "volume_control is the volume")
+    check(flood["temperature_f"] is None, "floodlight has no temperature")
+    check(flood["light_settings"]["dusk_to_dawn"] is False, "dusk to dawn maps auto_on_off_enabled")
+    check(flood["light_settings"]["manual_duration"] == 180, "manual timeout comes from superior")
+    check(flood["capabilities"]["volume"] and not flood["capabilities"]["temperature"], "floodlight capabilities")
+
+    indoor = cc.read_state(INDOOR_ROW, CLASSIC_CONFIG, None)
+    check(indoor["night_vision"] == "auto", "classic code 2 is auto")
+    check(indoor["temperature_f"] == 71, "temperature comes from signals")
+    check(indoor["brightness"] is None and indoor["volume"] is None, "no lamp or volume on an indoor camera")
+    check(not indoor["capabilities"]["flood_light"], "indoor camera offers no flood light")
+
+    listed = cc.read_state(INDOOR_ROW, {"camera": [{"illuminator_enable": 0}]}, None)
+    check(listed["night_vision"] == "off", "a list-shaped camera block still reads")
+    check(cc.read_state(FLOOD_ROW, None, None)["night_vision"] is None, "no config means unknown, not a crash")
+
+
+def test_validate() -> None:
+    print("validate_changes")
+    clean = cc.validate_changes(FLOOD_ROW, {"flood_light": True, "brightness": 7, "volume": 5, "night_vision": "off"})
+    check(clean == {"flood_light": True, "brightness": 7, "volume": 5, "night_vision": "off"}, "floodlight accepts all four")
+    for body, label in [
+        ({}, "an empty body"),
+        ({"volume": 0}, "volume 0"),
+        ({"volume": 9}, "volume 9"),
+        ({"brightness": 11}, "brightness 11"),
+        ({"brightness": "5"}, "a string brightness"),
+        ({"night_vision": "dim"}, "an unknown night vision word"),
+        ({"flood_light": 1}, "a non-boolean flood light"),
+        ({"siren": True}, "an unknown control"),
+        ({"light_settings": {"dusk_to_dawn": "yes"}}, "a non-boolean light setting"),
+        ({"light_settings": {"manual_duration": -1}}, "a negative timeout"),
+    ]:
+        try:
+            cc.validate_changes(FLOOD_ROW, body)
+            check(False, f"{label} is refused")
+        except cc.ControlError:
+            check(True, f"{label} is refused")
+    for body, label in [
+        ({"flood_light": True}, "flood light on an indoor camera"),
+        ({"volume": 4}, "volume on an indoor camera"),
+        ({"brightness": 4}, "brightness on an indoor camera"),
+    ]:
+        try:
+            cc.validate_changes(INDOOR_ROW, body)
+            check(False, f"{label} is refused")
+        except cc.ControlError:
+            check(True, f"{label} is refused")
+    check(cc.validate_changes(INDOOR_ROW, {"night_vision": 1}) == {"night_vision": "on"}, "indoor accepts a night vision code")
+
+
+def test_write_plan() -> None:
+    print("write_plan")
+    plan = cc.write_plan(FLOOD_ROW, {"flood_light": True, "night_vision": "off", "brightness": 6, "volume": 2,
+                                     "light_settings": {"dusk_to_dawn": True, "manual_duration": 65535}})
+    kinds = [kind for kind, _ in plan]
+    check(kinds == ["lights", "owl_config"], "lamp goes through its own route, the rest in one owl post")
+    owl = dict(plan)["owl_config"]
+    check(owl["illuminator_enable"] == "off", "owl night vision is a word")
+    check(owl["superior"]["illuminator_intensity"] == 6 and owl["light_brightness"] == 6, "brightness lands in both places")
+    check(owl["volume_control"] == 2, "volume_control carries the volume")
+    check(owl["superior"]["auto_on_off_enabled"] is True and owl["superior"]["manual_illuminator_duration"] == 65535, "light settings nest under superior")
+    check(dict(plan)["lights"] is True, "lamp payload is the boolean")
+
+    plan = cc.write_plan(INDOOR_ROW, {"night_vision": "auto"})
+    check(plan == [("camera_update", {"illuminator_enable": 2})], "indoor night vision is a code on the update route")
+
+
+class FakeResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def json(self, content_type=None):
+        return self.payload
+
+
+class FakeUrls:
+    base_url = "https://blink.example"
+
+
+class FakeBlink:
+    urls = FakeUrls()
+    account_id = "77"
+
+
+def test_apply(monkey_calls: list) -> None:
+    print("apply_changes")
+    answers = {"owl_config": {"command": "config_set", "state": "new"}, "camera_update": {"state": "done"}}
+
+    async def fake_post(blink, url, is_retry=False, data=None, json=True, timeout=10):
+        kind = "owl_config" if "/owls/" in url else "camera_update"
+        monkey_calls.append((kind, url, data))
+        return FakeResponse(answers[kind])
+
+    async def fake_lights(blink, network, camera_id, enable):
+        monkey_calls.append(("lights", enable))
+        return {"code": 307, "message": "System is busy, please wait"}
+
+    async def fake_get_config(blink, network, camera_id, product_type="owl"):
+        return OWL_CONFIG
+
+    async def fake_camera_info(blink, network, camera_id):
+        return CLASSIC_CONFIG
+
+    cc.blink_api.http_post = fake_post
+    cc.blink_api.request_floodlight = fake_lights
+    cc.blink_api.request_get_config = fake_get_config
+    cc.blink_api.request_camera_info = fake_camera_info
+
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True, "volume": 3}))
+    kinds = [call[0] for call in monkey_calls]
+    check(kinds == ["lights", "owl_config"], "both calls were made in order")
+    body = monkey_calls[1][2]
+    check(isinstance(body, str) and json.loads(body) == {"volume_control": 3}, "the owl body is a JSON string, not a dict")
+    check("/accounts/77/networks/1/owls/318367/config" in monkey_calls[1][1], "owl config URL carries account, network, camera")
+    check(state["rejected"] == ["flood_light"], "a busy lamp is reported as rejected")
+    check(state["volume"] == 8, "the answer is the re-read state")
+
+    monkey_calls.clear()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
+    check(monkey_calls[0][1].endswith("/network/1/camera/2/update"), "indoor writes go to the classic update route")
+    check(state["rejected"] == ["illuminator_enable"], "a done-without-command answer counts as rejected")
+
+    try:
+        asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"volume": 3}))
+        check(False, "apply refuses an unsupported control before calling Blink")
+    except cc.ControlError:
+        check(True, "apply refuses an unsupported control before calling Blink")
+
+
+def main() -> int:
+    test_read_state()
+    test_validate()
+    test_write_plan()
+    test_apply([])
+    print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
+    if FAILURES:
+        print("\nfailed:")
+        for failure in FAILURES:
+            print(f"  {failure}")
+        return 1
+    print("all passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

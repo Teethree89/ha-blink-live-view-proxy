@@ -644,6 +644,14 @@
   );
 
   window.addEventListener("message", answerClipsTokens);
+  window.addEventListener("message", (event) => {
+    // The player's back arrow: it cannot reach this dialog directly.
+    const data = event.data || {};
+    if (event.origin !== window.location.origin || data.type !== "blink-liveview-close") return;
+    const root = document.getElementById(DIALOG_ID);
+    const iframe = root ? root.querySelector("iframe") : null;
+    if (iframe && event.source === iframe.contentWindow) closeDialog();
+  });
 
   window.addEventListener(
     "ll-custom",

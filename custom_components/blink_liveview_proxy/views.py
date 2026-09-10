@@ -71,6 +71,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
     hass.http.register_view(BlinkLiveviewProxyStopView(hass))
+    hass.http.register_view(BlinkLiveviewProxyControlsView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewMp4DownloadView(hass))
@@ -490,7 +491,7 @@ html,body {{
   height:100%;
   background:#05070a;
   color:#f8fafc;
-  font-family:Arial,Helvetica,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
 }}
 body {{
   overflow:hidden;
@@ -568,7 +569,10 @@ video.ready {{
 .live-actions {{
   position:absolute;
   top:calc(16px + env(safe-area-inset-top, 0px));
-  right:calc(16px + env(safe-area-inset-right, 0px));
+  /* Centred over the picture, which gives up the right edge to a side sheet. */
+  left:calc((100% - var(--sheet-w)) / 2);
+  right:auto;
+  transform:translateX(-50%);
   z-index:4;
   display:flex;
   gap:10px;
@@ -657,7 +661,7 @@ button.talk.active {{
   /* Centred, not tucked into the corner. On a phone the picture reaches the
      edges and these sat on top of the native mute and AirPlay controls. */
   .live-actions {{
-    left:50%;
+    left:calc((100% - var(--sheet-w)) / 2);
     right:auto;
     transform:translateX(-50%);
   }}
@@ -674,11 +678,447 @@ button.talk.active {{
     max-height:100%;
   }}
 }}
+/* Camera Controls sheet: a header over the picture, a hint pill under the
+   buttons, and a sheet that slides up from the bottom in portrait or in from
+   the right in landscape. Colours follow the dark navy of the companion app. */
+:root {{
+  --ink:#f1f5f9;
+  --ink-dim:#94a3b8;
+  --navy:#0b1220;
+  --sheet:#111a2b;
+  --card:#1a2438;
+  --card-edge:rgba(255,255,255,.06);
+  --blue:#2f7cf6;
+  --grey-btn:#2a3446;
+  --topbar-h:64px;
+  --sheet-h:0px;
+  --sheet-w:0px;
+}}
+.stage {{
+  background-color:var(--navy);
+}}
+.topbar {{
+  position:absolute;
+  top:0;
+  left:0;
+  right:var(--sheet-w);
+  z-index:6;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  height:var(--topbar-h);
+  padding:env(safe-area-inset-top, 0px) calc(10px + env(safe-area-inset-right, 0px)) 0 calc(6px + env(safe-area-inset-left, 0px));
+  box-sizing:content-box;
+  background:linear-gradient(rgba(5,7,10,.72),rgba(5,7,10,0));
+}}
+.topbar .icon-btn {{
+  width:44px;
+  height:44px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  background:transparent;
+  border-radius:12px;
+}}
+.topbar .icon-btn[hidden] {{
+  display:none;
+}}
+.topbar .icon-btn svg {{
+  width:24px;
+  height:24px;
+}}
+.topbar .titles {{
+  flex:1;
+  min-width:0;
+}}
+.topbar .name {{
+  font-size:20px;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}}
+.topbar .sub {{
+  font-size:14px;
+  color:var(--ink-dim);
+  margin-top:1px;
+}}
+.topbar .live-pill {{
+  margin-right:2px;
+}}
+.live-pill {{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  height:32px;
+  padding:0 12px;
+  border-radius:999px;
+  background:rgba(15,23,42,.78);
+  border:1px solid rgba(255,255,255,.08);
+  font-size:14px;
+  font-weight:600;
+  -webkit-user-select:none;
+  user-select:none;
+}}
+.live-pill::before {{
+  content:"";
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:#22c55e;
+  box-shadow:0 0 6px #22c55e;
+}}
+.live-pill[hidden] {{
+  display:none;
+}}
+.video-corner {{
+  position:absolute;
+  z-index:5;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}}
+.video-corner[hidden] {{
+  display:none;
+}}
+button.icon-btn.corner {{
+  width:36px;
+  height:36px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  border-radius:10px;
+  background:rgba(15,23,42,.78);
+  border:1px solid rgba(255,255,255,.08);
+}}
+button.icon-btn.corner svg {{
+  width:18px;
+  height:18px;
+}}
+.live-actions {{
+  align-items:stretch;
+}}
+.live-actions button {{
+  min-height:52px;
+  padding:0 20px;
+  border-radius:12px;
+  font-size:17px;
+  font-weight:600;
+  white-space:nowrap;
+}}
+.live-actions button.secondary {{
+  background:var(--grey-btn);
+}}
+.controls-hint {{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:4;
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  height:44px;
+  padding:0 22px 0 18px;
+  border-radius:999px;
+  background:rgba(20,28,44,.88);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--ink);
+  font-size:15px;
+  font-weight:500;
+}}
+.controls-hint svg {{
+  width:16px;
+  height:16px;
+}}
+.controls-hint[hidden] {{
+  display:none;
+}}
+.sheet {{
+  position:fixed;
+  z-index:8;
+  display:flex;
+  flex-direction:column;
+  background:var(--sheet);
+  color:var(--ink);
+  box-shadow:0 -12px 40px rgba(0,0,0,.45);
+  transition:transform .28s cubic-bezier(.2,.8,.2,1);
+  -webkit-user-select:none;
+  user-select:none;
+}}
+.sheet[hidden] {{
+  display:none;
+}}
+.sheet.bottom {{
+  left:0;
+  right:0;
+  bottom:0;
+  max-height:calc(100% - var(--topbar-h));
+  border-radius:22px 22px 0 0;
+  padding:8px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  transform:translateY(100%);
+}}
+.sheet.side {{
+  top:0;
+  right:0;
+  bottom:0;
+  width:min(340px, 46vw);
+  padding:calc(10px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) 12px;
+  transform:translateX(100%);
+}}
+.sheet.open {{
+  transform:none;
+}}
+.sheet .grabber {{
+  width:38px;
+  height:4px;
+  margin:0 auto 10px;
+  border-radius:999px;
+  background:rgba(148,163,184,.45);
+}}
+.sheet.side .grabber {{
+  display:none;
+}}
+.sheet .head {{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin:0 2px 12px;
+}}
+.sheet .head h2 {{
+  margin:0;
+  font-size:20px;
+  font-weight:700;
+}}
+.sheet .close {{
+  width:40px;
+  height:40px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  border-radius:12px;
+  background:var(--grey-btn);
+}}
+.sheet .close svg {{
+  width:18px;
+  height:18px;
+}}
+.sheet .body {{
+  display:grid;
+  gap:10px;
+  min-height:0;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+}}
+.sheet .slot {{
+  display:flex;
+  gap:10px;
+}}
+.sheet .slot:empty {{
+  display:none;
+}}
+.sheet .slot .live-actions {{
+  position:static;
+  transform:none;
+  flex:1;
+  gap:10px;
+}}
+.sheet .slot .live-actions button {{
+  flex:1;
+  padding:0 8px;
+}}
+.card {{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:var(--card);
+  border:1px solid var(--card-edge);
+}}
+.card[hidden] {{
+  display:none;
+}}
+.card svg.glyph {{
+  width:26px;
+  height:26px;
+  flex:none;
+  color:var(--ink);
+}}
+.card .text {{
+  flex:1;
+  min-width:0;
+}}
+.card .label {{
+  font-size:16px;
+  font-weight:600;
+}}
+.card .hint {{
+  font-size:13px;
+  color:var(--ink-dim);
+  margin-top:2px;
+}}
+.card .value {{
+  font-size:14px;
+  color:var(--ink-dim);
+  font-weight:500;
+}}
+.card.slider .text {{
+  display:grid;
+  grid-template-columns:1fr auto;
+  align-items:center;
+  row-gap:10px;
+}}
+.card.slider input {{
+  grid-column:1 / -1;
+}}
+.card.busy {{
+  opacity:.6;
+  pointer-events:none;
+}}
+.pair {{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}}
+.pair .card {{
+  flex-direction:column;
+  align-items:flex-start;
+  gap:6px;
+  padding:14px;
+}}
+.pair .card .top {{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+}}
+.pair .card .top .label {{
+  flex:1;
+}}
+.pair .card .big {{
+  font-size:24px;
+  font-weight:700;
+}}
+.pair .card input {{
+  width:100%;
+}}
+.pair .card[hidden] {{
+  display:none;
+}}
+.pair:has(> .card[hidden]) {{
+  grid-template-columns:1fr;
+}}
+.switch {{
+  position:relative;
+  width:52px;
+  height:30px;
+  flex:none;
+}}
+.switch input {{
+  position:absolute;
+  inset:0;
+  margin:0;
+  opacity:0;
+  cursor:pointer;
+}}
+.switch span {{
+  position:absolute;
+  inset:0;
+  border-radius:999px;
+  background:#3b4658;
+  transition:background .18s ease;
+}}
+.switch span::after {{
+  content:"";
+  position:absolute;
+  top:3px;
+  left:3px;
+  width:24px;
+  height:24px;
+  border-radius:999px;
+  background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.4);
+  transition:transform .18s ease;
+}}
+.switch input:checked + span {{
+  background:var(--blue);
+}}
+.switch input:checked + span::after {{
+  transform:translateX(22px);
+}}
+.switch input:disabled + span {{
+  opacity:.5;
+}}
+input[type=range] {{
+  -webkit-appearance:none;
+  appearance:none;
+  width:100%;
+  height:6px;
+  margin:8px 0;
+  border-radius:999px;
+  background:linear-gradient(to right, var(--blue) 0 var(--fill, 0%), #3b4658 var(--fill, 0%) 100%);
+  outline:none;
+  touch-action:pan-y;
+}}
+input[type=range]::-webkit-slider-thumb {{
+  -webkit-appearance:none;
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  background:#fff;
+  border:0;
+  box-shadow:0 1px 4px rgba(0,0,0,.45);
+}}
+input[type=range]::-moz-range-thumb {{
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  background:#fff;
+  border:0;
+}}
+.sheet .note {{
+  min-height:18px;
+  margin-top:8px;
+  font-size:13px;
+  color:#fca5a5;
+  text-align:center;
+}}
+.sheet select {{
+  appearance:none;
+  border:0;
+  border-radius:10px;
+  background:var(--grey-btn);
+  color:var(--ink);
+  font-size:14px;
+  font-weight:600;
+  padding:8px 12px;
+}}
+/* While a sheet is open the picture gives up the space it takes. */
+body.sheet-open .stage {{
+  padding-right:var(--sheet-w);
+  box-sizing:border-box;
+}}
+body.sheet-open video {{
+  width:auto;
+  right:var(--sheet-w);
+}}
+@media (max-width: 720px), (max-height: 520px) {{
+  /* In portrait the picture sits under the header, buttons below it, as the
+     design has it, instead of floating in the middle of the black. */
+  body.portrait .stage {{
+    align-items:flex-start;
+    padding-top:calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+    box-sizing:border-box;
+  }}
+  body.sheet-open.portrait video {{
+    max-height:calc(100% - var(--sheet-h) - 8px);
+  }}
+}}
 </style>
 </head>
 <body>
 <main class="stage">
-  <video id="video" muted playsinline autoplay controls></video>
+  <video id="video" muted playsinline autoplay></video>
   <section id="overlay" class="overlay">
     <div class="panel">
       <div id="spinner" class="spinner"></div>
@@ -696,6 +1136,128 @@ button.talk.active {{
     <button id="talk" class="talk" type="button" disabled>Hold Talk</button>
     <button id="end" class="danger" type="button">End</button>
   </div>
+  <header class="topbar">
+    <button id="back" class="icon-btn" type="button" aria-label="Back">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <div class="titles">
+      <div class="name">{name}</div>
+      <div class="sub">Live • Camera</div>
+    </div>
+    <span id="livePillTop" class="live-pill" hidden>Live</span>
+    <button id="gear" class="icon-btn" type="button" aria-label="Light settings" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+  <div id="videoCorner" class="video-corner" hidden>
+    <span class="live-pill">Live</span>
+    <button id="fullscreen" class="icon-btn corner" type="button" aria-label="Full screen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+  </div>
+  <button id="controlsHint" class="controls-hint" type="button" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15l7-7 7 7"/></svg>
+    Controls
+  </button>
+  <section id="sheet" class="sheet" hidden aria-label="Camera Controls">
+    <div class="grabber"></div>
+    <div class="head">
+      <h2>Camera Controls</h2>
+      <button id="sheetClose" class="close" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="body">
+      <div id="sheetSlot" class="slot"></div>
+      <label id="cardFlood" class="card" hidden>
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 3z"/><path d="M3 12h1M20 12h1M5.5 5.5l.7.7M17.8 5.5l-.7.7"/></svg>
+        <div class="text">
+          <div class="label">Flood Light</div>
+          <div id="floodHint" class="hint">Illuminate your yard</div>
+        </div>
+        <span class="switch"><input id="floodSwitch" type="checkbox"><span></span></span>
+      </label>
+      <label id="cardNight" class="card" hidden>
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <div class="text">
+          <div class="label">Night Vision</div>
+          <div class="hint">Better visibility at night</div>
+        </div>
+        <span class="switch"><input id="nightSwitch" type="checkbox"><span></span></span>
+      </label>
+      <div id="cardBright" class="card slider" hidden>
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <div class="text">
+          <div class="label">Brightness</div>
+          <div id="brightValue" class="value"></div>
+          <input id="brightRange" type="range" min="1" max="10" step="1" aria-label="Brightness">
+        </div>
+      </div>
+      <div class="pair">
+        <div id="cardTemp" class="card" hidden>
+          <div class="top">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 10v6"/></svg>
+            <div class="label">Temperature</div>
+          </div>
+          <div id="tempValue" class="big">--</div>
+          <div class="hint">At the camera</div>
+        </div>
+        <div id="cardVolume" class="card" hidden>
+          <div class="top">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>
+            <div class="label">Volume</div>
+            <div id="volumeValue" class="value"></div>
+          </div>
+          <input id="volumeRange" type="range" min="1" max="8" step="1" aria-label="Volume">
+        </div>
+      </div>
+      <div id="sheetNote" class="note"></div>
+    </div>
+  </section>
+  <section id="lightSheet" class="sheet" hidden aria-label="Light Settings">
+    <div class="grabber"></div>
+    <div class="head">
+      <h2>Light Settings</h2>
+      <button id="lightSheetClose" class="close" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="body">
+      <label class="card">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18M5 17a7 7 0 0 1 14 0M12 4v2M4.2 8.2l1.4 1.4M19.8 8.2l-1.4 1.4"/></svg>
+        <div class="text">
+          <div class="label">Dusk to Dawn</div>
+          <div class="hint">Light stays on overnight</div>
+        </div>
+        <span class="switch"><input id="duskSwitch" type="checkbox"><span></span></span>
+      </label>
+      <label class="card">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L4 14h6l-1 7 9-11h-6l1-7z"/></svg>
+        <div class="text">
+          <div class="label">Motion Activation</div>
+          <div class="hint">Light comes on with motion</div>
+        </div>
+        <span class="switch"><input id="motionSwitch" type="checkbox"><span></span></span>
+      </label>
+      <div class="card">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>
+        <div class="text">
+          <div class="label">Motion Timeout</div>
+          <div class="hint">Stays on this long after motion</div>
+        </div>
+        <select id="motionDuration" aria-label="Motion light timeout"></select>
+      </div>
+      <div class="card">
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8M12 3v3M6 21h12M12 8a5 5 0 0 0-5 5v8h10v-8a5 5 0 0 0-5-5z"/></svg>
+        <div class="text">
+          <div class="label">Manual Timeout</div>
+          <div class="hint">When switched on by hand</div>
+        </div>
+        <select id="manualDuration" aria-label="Manual timeout"></select>
+      </div>
+      <div id="lightNote" class="note"></div>
+    </div>
+  </section>
 </main>
 <script src="{PLAYER_LIBRARY_URL}"></script>
 <script>
@@ -723,6 +1285,7 @@ const statusText = document.getElementById("status");
 const actions = document.getElementById("actions");
 const liveActions = document.getElementById("liveActions");
 const liveNotice = document.getElementById("liveNotice");
+const topbar = document.querySelector(".topbar");
 const restart = document.getElementById("restart");
 const save = document.getElementById("save");
 const talk = document.getElementById("talk");
@@ -809,18 +1372,44 @@ async function startPlayback() {{
 
 function positionLiveActions() {{
   liveActions.classList.remove("bottom-gutter");
-  if (window.innerWidth >= window.innerHeight || liveActions.hidden) return;
-
+  const portrait = isPortrait();
+  const live = !liveActions.hidden;
+  // The Live pill sits on the picture in portrait and in the header in
+  // landscape, where the picture reaches the top edge anyway.
+  videoCorner.hidden = !live || !portrait;
+  livePillTop.hidden = !live || portrait;
+  controlsHint.hidden = !live || openSheet !== null;
+  if (!live) return;
   const videoRect = video.getBoundingClientRect();
-  const roomBelow = window.innerHeight - videoRect.bottom;
-  // Safari does not expose whether its native media controls are currently
-  // showing. The rendered geometry tells us what matters: if a portrait
-  // letterbox leaves enough room below the video for both these buttons and
-  // the home indicator, use that gutter. Otherwise keep them at the top,
-  // clear of the native controls along the video's bottom edge.
-  if (roomBelow >= liveActions.offsetHeight + 80) {{
-    liveActions.classList.add("bottom-gutter");
+  const topbarBottom = topbar.getBoundingClientRect().bottom;
+  if (portrait) {{
+    videoCorner.style.top = `${{Math.max(videoRect.top, topbarBottom) + 10}}px`;
+    videoCorner.style.right = `${{Math.max(10, window.innerWidth - videoRect.right + 10)}}px`;
   }}
+  if (liveActions.parentNode !== stage) return;
+  liveActions.style.top = "";
+  liveActions.style.bottom = "";
+  for (const key of ["top", "bottom", "left", "right", "transform"]) controlsHint.style[key] = "";
+  if (portrait) {{
+    // Under the picture when the letterbox leaves room for the buttons and
+    // the hint together, otherwise along the bottom edge over the picture.
+    const roomBelow = window.innerHeight - videoRect.bottom;
+    const needed = liveActions.offsetHeight + controlsHint.offsetHeight + 44;
+    if (roomBelow >= needed) {{
+      liveActions.style.top = `${{videoRect.bottom + 16}}px`;
+      controlsHint.style.top = `${{videoRect.bottom + 16 + liveActions.offsetHeight + 14}}px`;
+    }} else {{
+      liveActions.classList.add("bottom-gutter");
+      liveActions.style.bottom = `calc(${{controlsHint.offsetHeight + 30}}px + env(safe-area-inset-bottom, 0px))`;
+      controlsHint.style.bottom = "calc(16px + env(safe-area-inset-bottom, 0px))";
+    }}
+    return;
+  }}
+  liveActions.classList.add("bottom-gutter");
+  controlsHint.style.bottom = "calc(16px + env(safe-area-inset-bottom, 0px))";
+  controlsHint.style.left = "auto";
+  controlsHint.style.right = "calc(16px + env(safe-area-inset-right, 0px) + var(--sheet-w))";
+  controlsHint.style.transform = "none";
 }}
 
 function positionLiveActionsThroughRotation() {{
@@ -1179,6 +1768,7 @@ function setLoading(message) {{
   spinner.hidden = false;
   actions.hidden = true;
   liveActions.hidden = true;
+  hideLiveChrome();
   talk.disabled = true;
   statusText.textContent = message;
 }}
@@ -1189,6 +1779,7 @@ function setEnded(message) {{
   spinner.hidden = true;
   actions.hidden = false;
   liveActions.hidden = true;
+  hideLiveChrome();
   talk.disabled = true;
   statusText.textContent = message;
 }}
@@ -1201,6 +1792,7 @@ function stopPlayer() {{
   }}
   video.classList.remove("ready");
   liveActions.hidden = true;
+  hideLiveChrome();
   talk.disabled = true;
   video.onplaying = null;
   video.onended = null;
@@ -1235,6 +1827,7 @@ async function startPlayer() {{
       talk.hidden = !pttSupported;
       talk.disabled = !pttSupported;
       positionLiveActions();
+      showLiveChrome();
     }};
     video.onended = () => {{
       endSession("Live view ended.");
@@ -1284,6 +1877,7 @@ async function startPlayer() {{
     talk.hidden = !pttSupported;
     talk.disabled = !pttSupported;
     positionLiveActions();
+    showLiveChrome();
   }};
 
   video.onended = () => {{
@@ -1337,6 +1931,279 @@ syncSoundButton();
 // <video> fetching HLS segments from a detached document, so the proxy never
 // saw the stream go idle and kept the Blink live view open behind it. The
 // parent calls this first; pagehide covers a normal navigation away.
+
+// ---- Camera Controls sheet -------------------------------------------------
+const stage = document.querySelector(".stage");
+const back = document.getElementById("back");
+const gear = document.getElementById("gear");
+const livePillTop = document.getElementById("livePillTop");
+const videoCorner = document.getElementById("videoCorner");
+const fullscreenButton = document.getElementById("fullscreen");
+const controlsHint = document.getElementById("controlsHint");
+const sheet = document.getElementById("sheet");
+const sheetClose = document.getElementById("sheetClose");
+const sheetSlot = document.getElementById("sheetSlot");
+const sheetNote = document.getElementById("sheetNote");
+const cardFlood = document.getElementById("cardFlood");
+const floodSwitch = document.getElementById("floodSwitch");
+const floodHint = document.getElementById("floodHint");
+const cardNight = document.getElementById("cardNight");
+const nightSwitch = document.getElementById("nightSwitch");
+const cardBright = document.getElementById("cardBright");
+const brightRange = document.getElementById("brightRange");
+const brightValue = document.getElementById("brightValue");
+const cardTemp = document.getElementById("cardTemp");
+const tempValue = document.getElementById("tempValue");
+const cardVolume = document.getElementById("cardVolume");
+const volumeRange = document.getElementById("volumeRange");
+const volumeValue = document.getElementById("volumeValue");
+const lightSheet = document.getElementById("lightSheet");
+const lightSheetClose = document.getElementById("lightSheetClose");
+const lightNote = document.getElementById("lightNote");
+const duskSwitch = document.getElementById("duskSwitch");
+const motionSwitch = document.getElementById("motionSwitch");
+const motionDuration = document.getElementById("motionDuration");
+const manualDuration = document.getElementById("manualDuration");
+let controlsState = null;
+let controlsLoad = null;
+let openSheet = null;
+
+function controlsUrl() {{
+  return `/api/blink_liveview_proxy/cameras/${{slug}}/controls?token=${{encodeURIComponent(accessToken)}}`;
+}}
+
+function isPortrait() {{
+  return window.innerHeight > window.innerWidth;
+}}
+
+function durationLabel(seconds) {{
+  if (seconds === 65535) return "Until turned off";
+  if (seconds >= 60) return `${{Math.round(seconds / 60)}} min`;
+  return `${{seconds}} sec`;
+}}
+
+function fillOptions(select, options, current) {{
+  select.replaceChildren();
+  const values = options.includes(current) || current == null ? options : [current, ...options];
+  for (const value of values) {{
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = durationLabel(value);
+    option.selected = value === current;
+    select.appendChild(option);
+  }}
+}}
+
+function setRangeFill(input) {{
+  const min = Number(input.min) || 0;
+  const max = Number(input.max) || 100;
+  const pct = ((Number(input.value) - min) / (max - min)) * 100;
+  input.style.setProperty("--fill", `${{pct}}%`);
+}}
+
+function percentOf(value, max) {{
+  return `${{Math.round((Number(value) / max) * 100)}}%`;
+}}
+
+function floodHintText(state) {{
+  if (!state.flood_light) return "Illuminate your yard";
+  const timeout = state.light_settings && state.light_settings.manual_duration;
+  if (timeout === 65535) return "On until turned off";
+  if (timeout) return `On for ${{durationLabel(timeout)}}`;
+  return "On";
+}}
+
+function renderControls() {{
+  const state = controlsState;
+  if (!state) return;
+  const caps = state.capabilities || {{}};
+  cardFlood.hidden = !caps.flood_light;
+  floodSwitch.checked = !!state.flood_light;
+  floodHint.textContent = floodHintText(state);
+  cardNight.hidden = !caps.night_vision || state.night_vision == null;
+  nightSwitch.checked = state.night_vision !== "off";
+  cardBright.hidden = !caps.brightness || state.brightness == null;
+  if (state.brightness != null) {{
+    brightRange.value = state.brightness;
+    setRangeFill(brightRange);
+    brightValue.textContent = percentOf(state.brightness, 10);
+  }}
+  cardTemp.hidden = !caps.temperature || state.temperature == null;
+  if (state.temperature != null) {{
+    tempValue.textContent = `${{state.temperature}}${{state.temperature_unit || "°F"}}`;
+  }}
+  cardVolume.hidden = !caps.volume || state.volume == null;
+  if (state.volume != null) {{
+    volumeRange.value = state.volume;
+    setRangeFill(volumeRange);
+    volumeValue.textContent = percentOf(state.volume, 8);
+  }}
+  gear.hidden = !caps.light_settings || !state.light_settings || liveActions.hidden;
+  const light = state.light_settings;
+  if (light) {{
+    duskSwitch.checked = !!light.dusk_to_dawn;
+    motionSwitch.checked = !!light.motion_activation;
+    fillOptions(motionDuration, light.motion_duration_options || [], light.motion_duration);
+    fillOptions(manualDuration, light.manual_duration_options || [], light.manual_duration);
+  }}
+  layoutSheets();
+}}
+
+async function loadControls() {{
+  if (controlsLoad) return controlsLoad;
+  sheetNote.textContent = controlsState ? "" : "Reading camera settings";
+  controlsLoad = (async () => {{
+    try {{
+      const response = await fetch(controlsUrl(), {{ cache: "no-store" }});
+      if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${{response.status}}`);
+      controlsState = await response.json();
+      sheetNote.textContent = "";
+    }} catch (err) {{
+      sheetNote.textContent = `Camera settings unavailable: ${{err.message}}`;
+    }} finally {{
+      controlsLoad = null;
+      renderControls();
+    }}
+  }})();
+  return controlsLoad;
+}}
+
+async function sendControls(changes, card, note) {{
+  card.classList.add("busy");
+  note.textContent = "";
+  try {{
+    const response = await fetch(controlsUrl(), {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify(changes)
+    }});
+    if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${{response.status}}`);
+    controlsState = await response.json();
+    const rejected = controlsState.rejected || [];
+    if (rejected.length) note.textContent = "The camera is busy. Try again in a moment.";
+  }} catch (err) {{
+    note.textContent = `Could not change that: ${{err.message}}`;
+  }} finally {{
+    card.classList.remove("busy");
+    renderControls();
+  }}
+}}
+
+function showSheet(el) {{
+  if (openSheet && openSheet !== el) hideSheet(openSheet, true);
+  openSheet = el;
+  el.hidden = false;
+  layoutSheets();
+  // A forced layout here is what lets the slide-in transition start from
+  // off-screen instead of the sheet simply appearing.
+  void el.offsetHeight;
+  el.classList.add("open");
+}}
+
+function hideSheet(el, now) {{
+  if (openSheet === el) openSheet = null;
+  el.classList.remove("open");
+  const finish = () => {{
+    if (!el.classList.contains("open")) el.hidden = true;
+  }};
+  if (now) finish(); else setTimeout(finish, 300);
+  layoutSheets();
+}}
+
+function closeSheets() {{
+  if (openSheet) hideSheet(openSheet, true);
+}}
+
+function layoutSheets() {{
+  const portrait = isPortrait();
+  document.body.classList.toggle("portrait", portrait);
+  for (const el of [sheet, lightSheet]) {{
+    el.classList.toggle("bottom", portrait);
+    el.classList.toggle("side", !portrait);
+  }}
+  const open = openSheet;
+  document.body.classList.toggle("sheet-open", !!open);
+  // In portrait the action row rides inside the sheet, as the design has it.
+  if (portrait && open === sheet) {{
+    if (liveActions.parentNode !== sheetSlot) sheetSlot.appendChild(liveActions);
+  }} else if (liveActions.parentNode !== stage) {{
+    stage.appendChild(liveActions);
+  }}
+  const root = document.documentElement.style;
+  root.setProperty("--sheet-h", open && portrait ? `${{open.offsetHeight}}px` : "0px");
+  root.setProperty("--sheet-w", open && !portrait ? `${{open.offsetWidth}}px` : "0px");
+  positionLiveActions();
+}}
+
+function showLiveChrome() {{
+  controlsHint.hidden = false;
+  loadControls();
+  renderControls();
+  positionLiveActionsThroughRotation();
+}}
+
+function hideLiveChrome() {{
+  controlsHint.hidden = true;
+  videoCorner.hidden = true;
+  livePillTop.hidden = true;
+  gear.hidden = true;
+  closeSheets();
+}}
+
+function toggleFullscreen() {{
+  if (document.fullscreenElement) {{
+    document.exitFullscreen().catch(() => {{}});
+    return;
+  }}
+  const root = document.documentElement;
+  if (root.requestFullscreen) {{
+    root.requestFullscreen().catch(() => {{}});
+  }} else if (video.webkitEnterFullscreen) {{
+    video.webkitEnterFullscreen();
+  }}
+}}
+
+function goBack() {{
+  if (window.parent && window.parent !== window) {{
+    window.parent.postMessage({{ type: "blink-liveview-close" }}, window.location.origin);
+    return;
+  }}
+  endCurrentStream();
+}}
+
+back.addEventListener("click", goBack);
+gear.addEventListener("click", () => {{
+  if (openSheet === lightSheet) hideSheet(lightSheet); else showSheet(lightSheet);
+}});
+controlsHint.addEventListener("click", () => showSheet(sheet));
+sheetClose.addEventListener("click", () => hideSheet(sheet));
+lightSheetClose.addEventListener("click", () => hideSheet(lightSheet));
+fullscreenButton.addEventListener("click", toggleFullscreen);
+floodSwitch.addEventListener("change", () => sendControls({{ flood_light: floodSwitch.checked }}, cardFlood, sheetNote));
+nightSwitch.addEventListener("change", () => sendControls({{ night_vision: nightSwitch.checked ? "auto" : "off" }}, cardNight, sheetNote));
+brightRange.addEventListener("input", () => {{
+  setRangeFill(brightRange);
+  brightValue.textContent = percentOf(brightRange.value, 10);
+}});
+brightRange.addEventListener("change", () => sendControls({{ brightness: Number(brightRange.value) }}, cardBright, sheetNote));
+volumeRange.addEventListener("input", () => {{
+  setRangeFill(volumeRange);
+  volumeValue.textContent = percentOf(volumeRange.value, 8);
+}});
+volumeRange.addEventListener("change", () => sendControls({{ volume: Number(volumeRange.value) }}, cardVolume, sheetNote));
+duskSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ dusk_to_dawn: duskSwitch.checked }} }}, duskSwitch.closest(".card"), lightNote));
+motionSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ motion_activation: motionSwitch.checked }} }}, motionSwitch.closest(".card"), lightNote));
+motionDuration.addEventListener("change", () => sendControls({{ light_settings: {{ motion_duration: Number(motionDuration.value) }} }}, motionDuration.closest(".card"), lightNote));
+manualDuration.addEventListener("change", () => sendControls({{ light_settings: {{ manual_duration: Number(manualDuration.value) }} }}, manualDuration.closest(".card"), lightNote));
+// Without the native control bar a paused picture needs a way to resume.
+video.addEventListener("click", () => {{
+  if (video.paused && video.classList.contains("ready")) video.play().catch(() => {{}});
+}});
+overlay.addEventListener("click", () => {{
+  if (statusText.textContent.startsWith("Tap play")) video.play().catch(() => {{}});
+}});
+window.addEventListener("resize", layoutSheets);
+
 window.__blinkStopPlayer = () => {{
   try {{ stopPlayer(); }} catch (err) {{}}
   // Closing the dialog should free the camera too, not leave it streaming to
@@ -1625,6 +2492,74 @@ class BlinkLiveviewProxyStopView(HomeAssistantView):
             payload if isinstance(payload, dict) else {"stopped": True},
             headers={"Cache-Control": "no-store"},
         )
+
+
+class BlinkLiveviewProxyControlsView(HomeAssistantView):
+    """Read and change a camera's lamp, night vision, volume and temperature.
+
+    The proxy does the talking to Blink; this view only checks the browser
+    token the player already holds and converts the temperature to the unit
+    Home Assistant is set to, so the player shows what the rest of the house
+    shows.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/controls"
+    name = "api:blink_liveview_proxy:controls"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request: web.Request, slug: str) -> web.Response:
+        """Return the camera's current controls."""
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        return await self._forward(slug, None)
+
+    async def post(self, request: web.Request, slug: str) -> web.Response:
+        """Change one or more controls and return the new state."""
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        if request.content_length is not None and request.content_length > 4096:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=4096, actual_size=request.content_length
+            )
+        body = await request.read()
+        return await self._forward(slug, body)
+
+    async def _forward(self, slug: str, body: bytes | None) -> web.Response:
+        client = _client(self.hass)
+        headers = {**client.auth_headers(), "Content-Type": "application/json"}
+        try:
+            async with asyncio.timeout(40):
+                async with client._session.request(  # noqa: SLF001
+                    "POST" if body is not None else "GET",
+                    client.proxy_url(f"/cameras/{slug}/controls"),
+                    headers=headers,
+                    data=body,
+                ) as response:
+                    if response.status >= 400:
+                        text = (await response.text()).strip()
+                        return web.Response(
+                            text=f"{text}\n", status=response.status,
+                            headers={"Cache-Control": "no-store"},
+                        )
+                    payload = await response.json(content_type=None)
+        except (ClientError, asyncio.TimeoutError, ValueError) as err:
+            LOGGER.warning("Camera controls request for %s failed: %s", slug, err)
+            raise web.HTTPBadGateway(text="The proxy did not answer\n") from err
+        if isinstance(payload, dict):
+            payload.update(self._temperature(payload.get("temperature_f")))
+        return web.json_response(payload, headers={"Cache-Control": "no-store"})
+
+    def _temperature(self, fahrenheit: Any) -> dict[str, Any]:
+        """Express Blink's Fahrenheit reading in the house's unit."""
+        if fahrenheit is None:
+            return {"temperature": None, "temperature_unit": None}
+        unit = str(getattr(self.hass.config.units, "temperature_unit", "°F"))
+        if unit == "°C":
+            return {"temperature": round((float(fahrenheit) - 32) * 5 / 9), "temperature_unit": unit}
+        return {"temperature": int(fahrenheit), "temperature_unit": unit}
 
 
 class BlinkLiveviewProxyLastLiveviewInfoView(HomeAssistantView):
