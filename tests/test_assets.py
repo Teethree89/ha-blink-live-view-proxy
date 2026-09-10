@@ -893,7 +893,7 @@ def test_liveview_safe_areas_do_not_pad_the_player() -> None:
         "portrait can put live actions in the gutter below the video",
     )
     check(
-        "window.innerHeight - videoRect.bottom" in player,
+        "window.innerHeight - bottom" in player,
         "bottom placement uses the rendered video edge",
     )
     check(

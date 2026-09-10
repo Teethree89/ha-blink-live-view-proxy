@@ -512,7 +512,7 @@ video {{
   object-fit:contain;
   background:#05070a;
   opacity:0;
-  transition:opacity .18s ease;
+  transition:opacity .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
 }}
 video.ready {{
   opacity:1;
@@ -693,6 +693,7 @@ button.talk.active {{
   --topbar-h:64px;
   --sheet-h:0px;
   --sheet-w:0px;
+  --lift:0px;
 }}
 .stage {{
   background-color:var(--navy);
@@ -836,6 +837,7 @@ button.icon-btn.corner svg {{
 .sheet {{
   position:fixed;
   z-index:8;
+  box-sizing:border-box;
   display:flex;
   flex-direction:column;
   background:var(--sheet);
@@ -889,7 +891,7 @@ button.icon-btn.corner svg {{
   font-size:20px;
   font-weight:700;
 }}
-.sheet .close {{
+.sheet .head .close {{
   width:40px;
   height:40px;
   padding:0;
@@ -909,22 +911,20 @@ button.icon-btn.corner svg {{
   overflow-y:auto;
   -webkit-overflow-scrolling:touch;
 }}
-.sheet .slot {{
-  display:flex;
+.section {{
+  display:grid;
   gap:10px;
 }}
-.sheet .slot:empty {{
+.section[hidden] {{
   display:none;
 }}
-.sheet .slot .live-actions {{
-  position:static;
-  transform:none;
-  flex:1;
-  gap:10px;
-}}
-.sheet .slot .live-actions button {{
-  flex:1;
-  padding:0 8px;
+.section-title {{
+  margin:6px 2px 0;
+  font-size:13px;
+  font-weight:600;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--ink-dim);
 }}
 .card {{
   display:flex;
@@ -1093,7 +1093,7 @@ input[type=range]::-moz-range-thumb {{
   font-weight:600;
   padding:8px 12px;
 }}
-/* While a sheet is open the picture gives up the space it takes. */
+/* While a side sheet is open the picture gives up the width it takes. */
 body.sheet-open .stage {{
   padding-right:var(--sheet-w);
   box-sizing:border-box;
@@ -1103,22 +1103,26 @@ body.sheet-open video {{
   right:var(--sheet-w);
 }}
 @media (max-width: 720px), (max-height: 520px) {{
-  /* In portrait the picture sits under the header, buttons below it, as the
-     design has it, instead of floating in the middle of the black. */
-  body.portrait .stage {{
-    align-items:flex-start;
-    padding-top:calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
-    box-sizing:border-box;
+  /* The picture stays centred until the sheet opens; then it, the buttons
+     and the Live pill glide up together to make room, shrinking only when
+     the header would otherwise be in the way. */
+  body.portrait video {{
+    transform:translateY(calc(-1 * var(--lift)));
   }}
-  body.sheet-open.portrait video {{
-    max-height:calc(100% - var(--sheet-h) - 8px);
+  body.portrait .live-actions {{
+    transform:translate(-50%, calc(-1 * var(--lift)));
+    transition:transform .28s cubic-bezier(.2,.8,.2,1);
+  }}
+  body.portrait .video-corner {{
+    transform:translateY(calc(-1 * var(--lift)));
+    transition:transform .28s cubic-bezier(.2,.8,.2,1);
   }}
 }}
 </style>
 </head>
 <body>
 <main class="stage">
-  <video id="video" muted playsinline autoplay></video>
+  <video id="video" muted playsinline autoplay controls></video>
   <section id="overlay" class="overlay">
     <div class="panel">
       <div id="spinner" class="spinner"></div>
@@ -1145,9 +1149,6 @@ body.sheet-open video {{
       <div class="sub">Live • Camera</div>
     </div>
     <span id="livePillTop" class="live-pill" hidden>Live</span>
-    <button id="gear" class="icon-btn" type="button" aria-label="Light settings" hidden>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-    </button>
   </header>
   <div id="videoCorner" class="video-corner" hidden>
     <span class="live-pill">Live</span>
@@ -1168,7 +1169,6 @@ body.sheet-open video {{
       </button>
     </div>
     <div class="body">
-      <div id="sheetSlot" class="slot"></div>
       <label id="cardFlood" class="card" hidden>
         <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 3z"/><path d="M3 12h1M20 12h1M5.5 5.5l.7.7M17.8 5.5l-.7.7"/></svg>
         <div class="text">
@@ -1211,51 +1211,42 @@ body.sheet-open video {{
           <input id="volumeRange" type="range" min="1" max="8" step="1" aria-label="Volume">
         </div>
       </div>
+      <div id="lightSection" class="section" hidden>
+        <div class="section-title">Light Settings</div>
+      <label class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18M5 17a7 7 0 0 1 14 0M12 4v2M4.2 8.2l1.4 1.4M19.8 8.2l-1.4 1.4"/></svg>
+          <div class="text">
+            <div class="label">Dusk to Dawn</div>
+            <div class="hint">Light stays on overnight</div>
+          </div>
+          <span class="switch"><input id="duskSwitch" type="checkbox"><span></span></span>
+        </label>
+        <label class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L4 14h6l-1 7 9-11h-6l1-7z"/></svg>
+          <div class="text">
+            <div class="label">Motion Activation</div>
+            <div class="hint">Light comes on with motion</div>
+          </div>
+          <span class="switch"><input id="motionSwitch" type="checkbox"><span></span></span>
+        </label>
+        <div class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>
+          <div class="text">
+            <div class="label">Motion Timeout</div>
+            <div class="hint">Stays on this long after motion</div>
+          </div>
+          <select id="motionDuration" aria-label="Motion light timeout"></select>
+        </div>
+        <div class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8M12 3v3M6 21h12M12 8a5 5 0 0 0-5 5v8h10v-8a5 5 0 0 0-5-5z"/></svg>
+          <div class="text">
+            <div class="label">Manual Timeout</div>
+            <div class="hint">When switched on by hand</div>
+          </div>
+          <select id="manualDuration" aria-label="Manual timeout"></select>
+        </div>
+      </div>
       <div id="sheetNote" class="note"></div>
-    </div>
-  </section>
-  <section id="lightSheet" class="sheet" hidden aria-label="Light Settings">
-    <div class="grabber"></div>
-    <div class="head">
-      <h2>Light Settings</h2>
-      <button id="lightSheetClose" class="close" type="button" aria-label="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-      </button>
-    </div>
-    <div class="body">
-      <label class="card">
-        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18M5 17a7 7 0 0 1 14 0M12 4v2M4.2 8.2l1.4 1.4M19.8 8.2l-1.4 1.4"/></svg>
-        <div class="text">
-          <div class="label">Dusk to Dawn</div>
-          <div class="hint">Light stays on overnight</div>
-        </div>
-        <span class="switch"><input id="duskSwitch" type="checkbox"><span></span></span>
-      </label>
-      <label class="card">
-        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L4 14h6l-1 7 9-11h-6l1-7z"/></svg>
-        <div class="text">
-          <div class="label">Motion Activation</div>
-          <div class="hint">Light comes on with motion</div>
-        </div>
-        <span class="switch"><input id="motionSwitch" type="checkbox"><span></span></span>
-      </label>
-      <div class="card">
-        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>
-        <div class="text">
-          <div class="label">Motion Timeout</div>
-          <div class="hint">Stays on this long after motion</div>
-        </div>
-        <select id="motionDuration" aria-label="Motion light timeout"></select>
-      </div>
-      <div class="card">
-        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8M12 3v3M6 21h12M12 8a5 5 0 0 0-5 5v8h10v-8a5 5 0 0 0-5-5z"/></svg>
-        <div class="text">
-          <div class="label">Manual Timeout</div>
-          <div class="hint">When switched on by hand</div>
-        </div>
-        <select id="manualDuration" aria-label="Manual timeout"></select>
-      </div>
-      <div id="lightNote" class="note"></div>
     </div>
   </section>
 </main>
@@ -1380,24 +1371,23 @@ function positionLiveActions() {{
   livePillTop.hidden = !live || portrait;
   controlsHint.hidden = !live || openSheet !== null;
   if (!live) return;
-  const videoRect = video.getBoundingClientRect();
-  const topbarBottom = topbar.getBoundingClientRect().bottom;
-  if (portrait) {{
-    videoCorner.style.top = `${{Math.max(videoRect.top, topbarBottom) + 10}}px`;
-    videoCorner.style.right = `${{Math.max(10, window.innerWidth - videoRect.right + 10)}}px`;
-  }}
-  if (liveActions.parentNode !== stage) return;
   liveActions.style.top = "";
   liveActions.style.bottom = "";
   for (const key of ["top", "bottom", "left", "right", "transform"]) controlsHint.style[key] = "";
   if (portrait) {{
+    // Layout geometry, so the lift transform above does not feed back in.
+    const top = video.offsetTop;
+    const bottom = top + video.offsetHeight;
+    const right = video.offsetLeft + video.offsetWidth;
+    videoCorner.style.top = `${{Math.max(top, topbar.offsetHeight) + 10}}px`;
+    videoCorner.style.right = `${{Math.max(10, window.innerWidth - right + 10)}}px`;
     // Under the picture when the letterbox leaves room for the buttons and
     // the hint together, otherwise along the bottom edge over the picture.
-    const roomBelow = window.innerHeight - videoRect.bottom;
+    const roomBelow = window.innerHeight - bottom;
     const needed = liveActions.offsetHeight + controlsHint.offsetHeight + 44;
     if (roomBelow >= needed) {{
-      liveActions.style.top = `${{videoRect.bottom + 16}}px`;
-      controlsHint.style.top = `${{videoRect.bottom + 16 + liveActions.offsetHeight + 14}}px`;
+      liveActions.style.top = `${{bottom + 16}}px`;
+      controlsHint.style.top = `${{bottom + 16 + liveActions.offsetHeight + 14}}px`;
     }} else {{
       liveActions.classList.add("bottom-gutter");
       liveActions.style.bottom = `calc(${{controlsHint.offsetHeight + 30}}px + env(safe-area-inset-bottom, 0px))`;
@@ -1405,8 +1395,12 @@ function positionLiveActions() {{
     }}
     return;
   }}
+  // The native control bar slides in along the picture's bottom edge on a
+  // tap, so everything sits a bar's height above that edge, wherever it is.
+  const clear = window.innerHeight - video.getBoundingClientRect().bottom + 60;
   liveActions.classList.add("bottom-gutter");
-  controlsHint.style.bottom = "calc(16px + env(safe-area-inset-bottom, 0px))";
+  liveActions.style.bottom = `calc(${{Math.round(clear)}}px + env(safe-area-inset-bottom, 0px))`;
+  controlsHint.style.bottom = `calc(${{Math.round(clear)}}px + env(safe-area-inset-bottom, 0px))`;
   controlsHint.style.left = "auto";
   controlsHint.style.right = "calc(16px + env(safe-area-inset-right, 0px) + var(--sheet-w))";
   controlsHint.style.transform = "none";
@@ -1935,14 +1929,12 @@ syncSoundButton();
 // ---- Camera Controls sheet -------------------------------------------------
 const stage = document.querySelector(".stage");
 const back = document.getElementById("back");
-const gear = document.getElementById("gear");
 const livePillTop = document.getElementById("livePillTop");
 const videoCorner = document.getElementById("videoCorner");
 const fullscreenButton = document.getElementById("fullscreen");
 const controlsHint = document.getElementById("controlsHint");
 const sheet = document.getElementById("sheet");
 const sheetClose = document.getElementById("sheetClose");
-const sheetSlot = document.getElementById("sheetSlot");
 const sheetNote = document.getElementById("sheetNote");
 const cardFlood = document.getElementById("cardFlood");
 const floodSwitch = document.getElementById("floodSwitch");
@@ -1957,9 +1949,7 @@ const tempValue = document.getElementById("tempValue");
 const cardVolume = document.getElementById("cardVolume");
 const volumeRange = document.getElementById("volumeRange");
 const volumeValue = document.getElementById("volumeValue");
-const lightSheet = document.getElementById("lightSheet");
-const lightSheetClose = document.getElementById("lightSheetClose");
-const lightNote = document.getElementById("lightNote");
+const lightSection = document.getElementById("lightSection");
 const duskSwitch = document.getElementById("duskSwitch");
 const motionSwitch = document.getElementById("motionSwitch");
 const motionDuration = document.getElementById("motionDuration");
@@ -2038,7 +2028,7 @@ function renderControls() {{
     setRangeFill(volumeRange);
     volumeValue.textContent = percentOf(state.volume, 8);
   }}
-  gear.hidden = !caps.light_settings || !state.light_settings || liveActions.hidden;
+  lightSection.hidden = !caps.light_settings || !state.light_settings;
   const light = state.light_settings;
   if (light) {{
     duskSwitch.checked = !!light.dusk_to_dawn;
@@ -2117,22 +2107,35 @@ function closeSheets() {{
 function layoutSheets() {{
   const portrait = isPortrait();
   document.body.classList.toggle("portrait", portrait);
-  for (const el of [sheet, lightSheet]) {{
-    el.classList.toggle("bottom", portrait);
-    el.classList.toggle("side", !portrait);
-  }}
+  sheet.classList.toggle("bottom", portrait);
+  sheet.classList.toggle("side", !portrait);
   const open = openSheet;
   document.body.classList.toggle("sheet-open", !!open);
-  // In portrait the action row rides inside the sheet, as the design has it.
-  if (portrait && open === sheet) {{
-    if (liveActions.parentNode !== sheetSlot) sheetSlot.appendChild(liveActions);
-  }} else if (liveActions.parentNode !== stage) {{
-    stage.appendChild(liveActions);
-  }}
   const root = document.documentElement.style;
   root.setProperty("--sheet-h", open && portrait ? `${{open.offsetHeight}}px` : "0px");
   root.setProperty("--sheet-w", open && !portrait ? `${{open.offsetWidth}}px` : "0px");
+  liftPicture(open && portrait ? open : null);
   positionLiveActions();
+}}
+
+function liftPicture(open) {{
+  // How far the picture and its buttons rise so the sheet stops just under
+  // them. The sheet is capped so they always fit above it; layout values
+  // are used, not rendered ones, so the transform being set here never
+  // feeds back into the next measurement.
+  const root = document.documentElement.style;
+  sheet.style.maxHeight = "";
+  if (!open || liveActions.hidden) {{
+    root.setProperty("--lift", "0px");
+    return;
+  }}
+  const topLimit = topbar.offsetHeight + 8;
+  const stack = 16 + liveActions.offsetHeight + 12;
+  const room = window.innerHeight - topLimit - video.offsetHeight - stack;
+  open.style.maxHeight = `${{Math.max(220, room)}}px`;
+  const sheetTop = window.innerHeight - open.offsetHeight;
+  const lift = video.offsetTop + video.offsetHeight + stack - sheetTop;
+  root.setProperty("--lift", `${{Math.max(0, Math.round(lift))}}px`);
 }}
 
 function showLiveChrome() {{
@@ -2146,7 +2149,6 @@ function hideLiveChrome() {{
   controlsHint.hidden = true;
   videoCorner.hidden = true;
   livePillTop.hidden = true;
-  gear.hidden = true;
   closeSheets();
 }}
 
@@ -2172,12 +2174,8 @@ function goBack() {{
 }}
 
 back.addEventListener("click", goBack);
-gear.addEventListener("click", () => {{
-  if (openSheet === lightSheet) hideSheet(lightSheet); else showSheet(lightSheet);
-}});
 controlsHint.addEventListener("click", () => showSheet(sheet));
 sheetClose.addEventListener("click", () => hideSheet(sheet));
-lightSheetClose.addEventListener("click", () => hideSheet(lightSheet));
 fullscreenButton.addEventListener("click", toggleFullscreen);
 floodSwitch.addEventListener("change", () => sendControls({{ flood_light: floodSwitch.checked }}, cardFlood, sheetNote));
 nightSwitch.addEventListener("change", () => sendControls({{ night_vision: nightSwitch.checked ? "auto" : "off" }}, cardNight, sheetNote));
@@ -2191,14 +2189,10 @@ volumeRange.addEventListener("input", () => {{
   volumeValue.textContent = percentOf(volumeRange.value, 8);
 }});
 volumeRange.addEventListener("change", () => sendControls({{ volume: Number(volumeRange.value) }}, cardVolume, sheetNote));
-duskSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ dusk_to_dawn: duskSwitch.checked }} }}, duskSwitch.closest(".card"), lightNote));
-motionSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ motion_activation: motionSwitch.checked }} }}, motionSwitch.closest(".card"), lightNote));
-motionDuration.addEventListener("change", () => sendControls({{ light_settings: {{ motion_duration: Number(motionDuration.value) }} }}, motionDuration.closest(".card"), lightNote));
-manualDuration.addEventListener("change", () => sendControls({{ light_settings: {{ manual_duration: Number(manualDuration.value) }} }}, manualDuration.closest(".card"), lightNote));
-// Without the native control bar a paused picture needs a way to resume.
-video.addEventListener("click", () => {{
-  if (video.paused && video.classList.contains("ready")) video.play().catch(() => {{}});
-}});
+duskSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ dusk_to_dawn: duskSwitch.checked }} }}, duskSwitch.closest(".card"), sheetNote));
+motionSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ motion_activation: motionSwitch.checked }} }}, motionSwitch.closest(".card"), sheetNote));
+motionDuration.addEventListener("change", () => sendControls({{ light_settings: {{ motion_duration: Number(motionDuration.value) }} }}, motionDuration.closest(".card"), sheetNote));
+manualDuration.addEventListener("change", () => sendControls({{ light_settings: {{ manual_duration: Number(manualDuration.value) }} }}, manualDuration.closest(".card"), sheetNote));
 overlay.addEventListener("click", () => {{
   if (statusText.textContent.startsWith("Tap play")) video.play().catch(() => {{}});
 }});
