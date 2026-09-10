@@ -883,7 +883,9 @@ body:not(.portrait) .live-actions button {{
   top:0;
   right:0;
   bottom:0;
-  width:min(340px, 46vw);
+  /* The notch inset is added outside the cards, so the sheet reads the same
+     in both rotations and the picture gives up the difference instead. */
+  width:calc(min(340px, 46vw) + var(--safe-right));
   padding:calc(10px + env(safe-area-inset-top, 0px)) calc(12px + var(--safe-right)) calc(10px + env(safe-area-inset-bottom, 0px)) 12px;
   transform:translateX(100%);
 }}
