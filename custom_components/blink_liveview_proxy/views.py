@@ -839,8 +839,12 @@ button.icon-btn.corner svg {{
   position:static;
   transform:none;
   height:auto;
-  padding:0 16px 0 14px;
+  padding:0 16px;
   font-size:16px;
+}}
+/* The sheet comes in from the side there, so the up chevron would lie. */
+.live-actions .controls-hint svg {{
+  display:none;
 }}
 body:not(.portrait) .live-actions button {{
   min-height:44px;
