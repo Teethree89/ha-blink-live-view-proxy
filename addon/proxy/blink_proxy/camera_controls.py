@@ -19,6 +19,9 @@ from blinkpy import api as blink_api
 LOGGER = logging.getLogger(__name__)
 
 FLOODLIGHT_TYPES = {"superior"}
+# Cameras whose speaker volume the app keeps in the classic config as
+# lfr_sync_interval (found by watching the app save its Speaker Volume slider).
+SPEAKER_TYPES = {"catalina", "xt2"}
 NIGHT_VISION_CODES = {0: "off", 1: "on", 2: "auto"}
 NIGHT_VISION_WORDS = {"off", "on", "auto"}
 LAMP_BRIGHTNESS_RANGE = (1, 10)
@@ -38,9 +41,7 @@ def capabilities(product_type: str) -> dict[str, bool]:
         "brightness": floodlight,
         # The floodlight has no thermometer; every battery and plug-in camera does.
         "temperature": not floodlight,
-        # volume_control only exists on the owl config today. Where the other
-        # cameras keep their speaker volume is still unknown, so no slider there.
-        "volume": floodlight,
+        "volume": floodlight or product_type.casefold() in SPEAKER_TYPES,
         "light_settings": floodlight,
     }
 
@@ -112,6 +113,8 @@ def read_state(
 
     camera = _standard_camera(config)
     state["night_vision"] = _night_vision_word(camera.get("illuminator_enable"))
+    if caps["volume"]:
+        state["volume"] = _clamp(camera.get("lfr_sync_interval"), *VOLUME_RANGE)
     signals = config.get("signals") if isinstance(config, dict) else None
     temperature = None
     if isinstance(signals, dict):
@@ -201,8 +204,9 @@ def write_plan(row: dict[str, Any], clean: dict[str, Any]) -> list[tuple[str, An
 
     Returns ``(kind, payload)`` pairs: ``lights`` flips the floodlight lamp
     through its own on/off route, ``owl_config`` posts a JSON document to the
-    owl config route, and ``camera_update`` posts one to the classic camera
-    update route.
+    owl config route, ``camera_update`` posts one to the classic camera
+    update route, and ``camera_config_v2`` posts one to the v2 camera config
+    route the app uses for its Speaker Volume slider.
     """
     floodlight = _product_type(row) in FLOODLIGHT_TYPES
     plan: list[tuple[str, Any]] = []
@@ -220,7 +224,10 @@ def write_plan(row: dict[str, Any], clean: dict[str, Any]) -> list[tuple[str, An
         owl.setdefault("superior", {})["illuminator_intensity"] = clean["brightness"]
         owl["light_brightness"] = clean["brightness"]
     if "volume" in clean:
-        owl["volume_control"] = clean["volume"]
+        if floodlight:
+            owl["volume_control"] = clean["volume"]
+        else:
+            plan.append(("camera_config_v2", {"lfr_sync_interval": clean["volume"]}))
     for key, value in clean.get("light_settings", {}).items():
         owl.setdefault("superior", {})[LIGHT_SETTING_FIELDS[key]] = value
     if owl:
@@ -274,6 +281,11 @@ async def apply_changes(
             url = (
                 f"{blink.urls.base_url}/api/v1/accounts/{blink.account_id}"
                 f"/networks/{network}/owls/{camera_id}/config"
+            )
+        elif kind == "camera_config_v2":
+            url = (
+                f"{blink.urls.base_url}/api/v2/accounts/{blink.account_id}"
+                f"/networks/{network}/cameras/{camera_id}/config"
             )
         else:
             url = f"{blink.urls.base_url}/network/{network}/camera/{camera_id}/update"

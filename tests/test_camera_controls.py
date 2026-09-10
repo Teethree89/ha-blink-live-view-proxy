@@ -55,8 +55,15 @@ OWL_CONFIG = {
     },
 }
 CLASSIC_CONFIG = {
-    "camera": {"illuminator_enable": 2, "illuminator_intensity": 7, "temperature": 71},
+    "camera": {"illuminator_enable": 2, "illuminator_intensity": 7, "temperature": 71, "lfr_sync_interval": 8},
     "signals": {"temp": 71},
+}
+GRILL_ROW = {
+    "slug": "grill_camera",
+    "name": "Grill Camera",
+    "id": "3",
+    "network_id": "1",
+    "product_type": "catalina",
 }
 
 
@@ -86,6 +93,8 @@ def test_read_state() -> None:
     check(indoor["brightness"] is None and indoor["volume"] is None, "no lamp or volume on an indoor camera")
     check(not indoor["capabilities"]["flood_light"], "indoor camera offers no flood light")
 
+    grill = cc.read_state(GRILL_ROW, CLASSIC_CONFIG, None)
+    check(grill["volume"] == 8 and grill["capabilities"]["volume"], "a speaker camera reads lfr_sync_interval as its volume")
     listed = cc.read_state(INDOOR_ROW, {"camera": [{"illuminator_enable": 0}]}, None)
     check(listed["night_vision"] == "off", "a list-shaped camera block still reads")
     check(cc.read_state(FLOOD_ROW, None, None)["night_vision"] is None, "no config means unknown, not a crash")
@@ -140,6 +149,8 @@ def test_write_plan() -> None:
 
     plan = cc.write_plan(INDOOR_ROW, {"night_vision": "auto"})
     check(plan == [("camera_update", {"illuminator_enable": 2})], "indoor night vision is a code on the update route")
+    plan = cc.write_plan(GRILL_ROW, {"volume": 3})
+    check(plan == [("camera_config_v2", {"lfr_sync_interval": 3})], "speaker volume goes to the v2 config route as lfr_sync_interval")
 
 
 class FakeResponse:
@@ -161,10 +172,11 @@ class FakeBlink:
 
 def test_apply(monkey_calls: list) -> None:
     print("apply_changes")
-    answers = {"owl_config": {"command": "config_set", "state": "new"}, "camera_update": {"state": "done"}}
+    answers = {"owl_config": {"command": "config_set", "state": "new"}, "camera_update": {"state": "done"},
+               "camera_config_v2": {"id": 1, "command": "config_set", "state": "new"}}
 
     async def fake_post(blink, url, is_retry=False, data=None, json=True, timeout=10):
-        kind = "owl_config" if "/owls/" in url else "camera_update"
+        kind = "owl_config" if "/owls/" in url else "camera_config_v2" if "/api/v2/" in url else "camera_update"
         monkey_calls.append((kind, url, data))
         return FakeResponse(answers[kind])
 
@@ -196,6 +208,11 @@ def test_apply(monkey_calls: list) -> None:
     state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
     check(monkey_calls[0][1].endswith("/network/1/camera/2/update"), "indoor writes go to the classic update route")
     check(state["rejected"] == ["illuminator_enable"], "a done-without-command answer counts as rejected")
+
+    monkey_calls.clear()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
+    check("/api/v2/accounts/77/networks/1/cameras/3/config" in monkey_calls[0][1], "speaker volume posts to the v2 camera config route")
+    check(json.loads(monkey_calls[0][2]) == {"lfr_sync_interval": 5} and state["rejected"] == [], "the v2 body is the one field and a command answer is accepted")
 
     try:
         asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"volume": 3}))
