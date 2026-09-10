@@ -834,6 +834,19 @@ button.icon-btn.corner svg {{
 .controls-hint[hidden] {{
   display:none;
 }}
+/* In landscape the hint rides in the button row as a fourth chip. */
+.live-actions .controls-hint {{
+  position:static;
+  transform:none;
+  height:auto;
+  padding:0 16px 0 14px;
+  font-size:16px;
+}}
+body:not(.portrait) .live-actions button {{
+  min-height:44px;
+  padding:0 16px;
+  font-size:16px;
+}}
 .sheet {{
   position:fixed;
   z-index:8;
@@ -1371,6 +1384,8 @@ function positionLiveActions() {{
   livePillTop.hidden = !live || portrait;
   controlsHint.hidden = !live || openSheet !== null;
   if (!live) return;
+  if (portrait && controlsHint.parentNode !== stage) stage.appendChild(controlsHint);
+  if (!portrait && controlsHint.parentNode !== liveActions) liveActions.appendChild(controlsHint);
   liveActions.style.top = "";
   liveActions.style.bottom = "";
   for (const key of ["top", "bottom", "left", "right", "transform"]) controlsHint.style[key] = "";
@@ -1395,15 +1410,9 @@ function positionLiveActions() {{
     }}
     return;
   }}
-  // The native control bar slides in along the picture's bottom edge on a
-  // tap, so everything sits a bar's height above that edge, wherever it is.
-  const clear = window.innerHeight - video.getBoundingClientRect().bottom + 60;
+  // One row along the bottom edge, the hint riding in it as a chip. The
+  // native control bar overlaps it while showing, and hides itself again.
   liveActions.classList.add("bottom-gutter");
-  liveActions.style.bottom = `calc(${{Math.round(clear)}}px + env(safe-area-inset-bottom, 0px))`;
-  controlsHint.style.bottom = `calc(${{Math.round(clear)}}px + env(safe-area-inset-bottom, 0px))`;
-  controlsHint.style.left = "auto";
-  controlsHint.style.right = "calc(16px + env(safe-area-inset-right, 0px) + var(--sheet-w))";
-  controlsHint.style.transform = "none";
 }}
 
 function positionLiveActionsThroughRotation() {{
@@ -2174,6 +2183,8 @@ function goBack() {{
 }}
 
 back.addEventListener("click", goBack);
+// Inside the dashboard dialog its own close button sits in the same corner.
+back.hidden = !!(window.parent && window.parent !== window);
 controlsHint.addEventListener("click", () => showSheet(sheet));
 sheetClose.addEventListener("click", () => hideSheet(sheet));
 fullscreenButton.addEventListener("click", toggleFullscreen);
