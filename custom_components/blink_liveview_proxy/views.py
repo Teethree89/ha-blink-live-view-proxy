@@ -701,6 +701,9 @@ button.talk.active {{
 .stage {{
   background-color:var(--navy);
 }}
+.topbar[hidden] {{
+  display:none;
+}}
 .topbar {{
   position:absolute;
   top:0;
@@ -1171,7 +1174,7 @@ body.sheet-open video {{
     <button id="talk" class="talk" type="button" disabled>Hold Talk</button>
     <button id="end" class="danger" type="button">End</button>
   </div>
-  <header class="topbar">
+  <header class="topbar" hidden>
     <button id="back" class="icon-btn" type="button" aria-label="Back">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
     </button>
@@ -1402,11 +1405,18 @@ function positionLiveActions() {{
   livePillTop.hidden = !live || portrait;
   controlsHint.hidden = !live || openSheet !== null;
   if (!live) return;
-  // The dashboard dialog puts its close button over this header; the dialog
-  // measures where it ends, so the title can start just after it.
-  topbar.style.paddingLeft = closeRight
-    ? `${{Math.round(closeRight) + 12}}px`
-    : "";
+  // The dashboard dialog puts its close button over this header. It reports
+  // where that button ends, but the report can arrive late or not at all, so
+  // the title also keeps clear of where the button sits by default: its own
+  // 10px offset plus the safe area, plus room for the button itself.
+  if (window.parent && window.parent !== window) {{
+    const safeLeft = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--safe-left")
+    ) || 0;
+    topbar.style.paddingLeft = `${{Math.round(Math.max(closeRight + 12, safeLeft + 78))}}px`;
+  }} else {{
+    topbar.style.paddingLeft = "";
+  }}
   if (portrait && controlsHint.parentNode !== stage) stage.appendChild(controlsHint);
   if (!portrait && controlsHint.parentNode !== liveActions) liveActions.appendChild(controlsHint);
   liveActions.style.top = "";
@@ -2172,6 +2182,7 @@ function liftPicture(open) {{
 }}
 
 function showLiveChrome() {{
+  topbar.hidden = false;
   controlsHint.hidden = false;
   loadControls();
   renderControls();
@@ -2179,6 +2190,7 @@ function showLiveChrome() {{
 }}
 
 function hideLiveChrome() {{
+  topbar.hidden = true;
   controlsHint.hidden = true;
   videoCorner.hidden = true;
   livePillTop.hidden = true;
@@ -2245,6 +2257,7 @@ window.addEventListener("message", (event) => {{
   // The dialog's close button sits over this header; start the title after it.
   closeRight = Math.max(0, Number(data.closeRight) || 0);
   layoutSheets();
+  positionLiveActions();
 }});
 
 window.__blinkStopPlayer = () => {{
