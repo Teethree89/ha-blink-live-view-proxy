@@ -1402,11 +1402,10 @@ function positionLiveActions() {{
   livePillTop.hidden = !live || portrait;
   controlsHint.hidden = !live || openSheet !== null;
   if (!live) return;
-  // Inside the dashboard dialog its close button sits at the picture's left
-  // edge, which in landscape is where the title starts.
-  const framed = !!(window.parent && window.parent !== window);
-  topbar.style.paddingLeft = framed && !portrait
-    ? `${{Math.round(video.getBoundingClientRect().left) + 64}}px`
+  // The dashboard dialog puts its close button over this header; the dialog
+  // measures where it ends, so the title can start just after it.
+  topbar.style.paddingLeft = closeRight
+    ? `${{Math.round(closeRight) + 12}}px`
     : "";
   if (portrait && controlsHint.parentNode !== stage) stage.appendChild(controlsHint);
   if (!portrait && controlsHint.parentNode !== liveActions) liveActions.appendChild(controlsHint);
@@ -1990,6 +1989,7 @@ const manualDuration = document.getElementById("manualDuration");
 let controlsState = null;
 let controlsLoad = null;
 let openSheet = null;
+let closeRight = 0;
 
 function controlsUrl() {{
   return `/api/blink_liveview_proxy/cameras/${{slug}}/controls?token=${{encodeURIComponent(accessToken)}}`;
@@ -2242,6 +2242,8 @@ window.addEventListener("message", (event) => {{
   const root = document.documentElement.style;
   root.setProperty("--safe-left", angle === 90 ? `${{inset}}px` : "0px");
   root.setProperty("--safe-right", angle === -90 ? `${{inset}}px` : "0px");
+  // The dialog's close button sits over this header; start the title after it.
+  closeRight = Math.max(0, Number(data.closeRight) || 0);
   layoutSheets();
 }});
 
