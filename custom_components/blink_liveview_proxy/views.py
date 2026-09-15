@@ -2143,15 +2143,19 @@ async function sendControls(changes, card, note) {{
     controlsState = await response.json();
     const rejected = controlsState.rejected || [];
     const busy = controlsState.busy || [];
+    const pending = controlsState.pending || [];
+    const volumeChanged = Object.prototype.hasOwnProperty.call(changes, "volume")
+      && !(controlsState.capabilities || {{}}).flood_light;
     if (busy.length) {{
       note.textContent = `The camera was busy and did not change ${{namesFor(busy)}}. Try again in a moment.`;
     }} else if (rejected.length) {{
       note.textContent = `The camera refused to change ${{namesFor(rejected)}}.`;
-    }} else if (Object.prototype.hasOwnProperty.call(changes, "volume")
-               && !(controlsState.capabilities || {{}}).flood_light) {{
-      // Observed on an xt2: the camera reads this at session setup, so the
-      // level that is playing does not change under you.
-      note.textContent = "Volume applies to the next live view, not this one.";
+    }} else if (volumeChanged || pending.length) {{
+      // The camera reads volume at session setup, and anything Blink is still
+      // carrying out lands the same way: not on the stream that is playing.
+      note.textContent = volumeChanged
+        ? "Volume applies to the next live view, not this one."
+        : `${{namesFor(pending)}} applies to the next live view, not this one.`;
     }}
   }} catch (err) {{
     note.textContent = `Could not change ${{namesFor(changedControls(changes))}}: ${{err.message}}`;

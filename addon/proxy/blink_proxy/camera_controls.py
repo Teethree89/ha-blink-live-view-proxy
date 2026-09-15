@@ -1,13 +1,21 @@
 """Per-camera controls for the live-view player: lamp, night vision, volume.
 
 Blink keeps these behind three different config endpoints. The Wired Floodlight
-(product type ``superior``) is an "owl" and answers the owl config route,
-with the lamp settings nested under a ``superior`` block. Every other camera
-answers the classic ``/network/{n}/camera/{id}/config`` route, where the same
-knobs use integer codes. Speaker volume is the exception: the app saves it to a
-v2 camera config route that blinkpy does not carry, as ``lfr_sync_interval``.
-This module hides that split behind one flat state document so the player never
-has to know which kind of camera it is looking at.
+(product type ``superior``) is addressed under Blink's ``/owls/`` path, with its
+lamp settings nested in a ``superior`` block; that path is Blink's own grouping
+and covers more than the Blink Mini, which is the camera blinkpy calls an owl.
+Every other camera answers the classic ``/network/{n}/camera/{id}/update``
+route, where the same knobs use integer codes. Speaker volume is the exception:
+the app saves it to a v2 camera config route that blinkpy does not carry, as
+``lfr_sync_interval``. This module hides that split behind one flat state
+document so the player never has to know which kind of camera it is looking at.
+
+``request_update_config`` picks its route from ``product_type``, so the word
+passed to it is a route selector rather than a description of the camera:
+``owl`` for the ``/owls/`` config route the floodlight answers, ``catalina``
+for the classic update route that catalina, xt, xt2 and white all answer.
+blinkpy passes each camera's literal product type, which is why its own
+night-vision call does nothing on a floodlight or an xt2.
 
 Every write goes through a blinkpy function except the v2 speaker volume route,
 which has none.
@@ -15,6 +23,7 @@ which has none.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -35,6 +44,9 @@ NIGHT_VISION_CODES = {0: "off", 1: "on", 2: "auto"}
 NIGHT_VISION_WORDS = {"off", "on", "auto"}
 LAMP_BRIGHTNESS_RANGE = (1, 10)
 VOLUME_RANGE = (1, 8)
+# The app's own writes finished in about six seconds; blinkpy would wait two
+# minutes, which is far longer than the sheet can hold a request open.
+COMMAND_WAIT_SECONDS = 12
 
 
 def _product_type(row: dict[str, Any]) -> str:
@@ -276,6 +288,35 @@ async def fetch_state(blink: Any, row: dict[str, Any]) -> dict[str, Any]:
     return read_state(row, config, owl_config)
 
 
+async def _command_finished(blink: Any, network: Any, answer: Any) -> bool:
+    """Wait, briefly, for Blink to actually carry out a queued change.
+
+    Blink answers a write immediately and queues the work as a command; the
+    camera's config keeps the old value until it is done. Read back before then
+    and the control snaps to where it was, which is what the Blink app avoids by
+    polling the command first.
+
+    blinkpy's own wait gives up after MAX_RETRY seconds, far too long to hold a
+    request from the sheet open, so it is bounded here. A change that has not
+    landed by then is reported as pending rather than waited on.
+    """
+    command_id = answer.get("id") if isinstance(answer, dict) else None
+    if not command_id:
+        return True
+    try:
+        return await asyncio.wait_for(
+            blink_api.wait_for_command(
+                blink, {"network_id": network, "id": command_id}
+            ),
+            timeout=COMMAND_WAIT_SECONDS,
+        )
+    except (TimeoutError, asyncio.TimeoutError):
+        return False
+    except Exception:  # noqa: BLE001
+        LOGGER.debug("Could not follow command %s", command_id, exc_info=True)
+        return False
+
+
 def _answer_busy(answer: Any) -> bool:
     """Blink returns 307 when the camera is mid-command and cannot take another.
 
@@ -302,6 +343,7 @@ async def apply_changes(
     camera_id = row["id"]
     rejected: list[str] = []
     busy: list[str] = []
+    pending: list[str] = []
     for kind, payload, controls in write_plan(row, clean):
         if kind == "lights":
             answer = await blink_api.request_floodlight(
@@ -310,6 +352,8 @@ async def apply_changes(
             if _answer_busy(answer):
                 busy.extend(controls)
                 rejected.extend(controls)
+            elif not await _command_finished(blink, network, answer):
+                pending.extend(controls)
             continue
         # blinkpy documents the body as a JSON string. A dict is sent
         # form-encoded and Blink answers 200 while ignoring it.
@@ -345,7 +389,20 @@ async def apply_changes(
             rejected.extend(controls)
             if _answer_busy(answer):
                 busy.extend(controls)
+        elif not await _command_finished(blink, network, answer):
+            pending.extend(controls)
     state = await fetch_state(blink, row)
     state["rejected"] = rejected
     state["busy"] = busy
+    state["pending"] = pending
+    # A change Blink has taken but not finished carrying out is still absent
+    # from the config, so show what was asked for rather than snapping the
+    # control back to the old value.
+    for name in pending:
+        if name in clean:
+            state[name] = clean[name]
+        elif name in LIGHT_SETTING_FIELDS and isinstance(
+            state.get("light_settings"), dict
+        ):
+            state["light_settings"][name] = clean["light_settings"][name]
     return state

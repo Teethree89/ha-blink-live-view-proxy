@@ -301,7 +301,7 @@ it.
 | Lamp brightness | the floodlight's config | yes, `request_update_config` |
 | Light settings (dusk to dawn, motion activation, both timeouts) | the floodlight's config | yes, `request_update_config` |
 | Volume, wired floodlight | the floodlight's config, as `volume_control` | yes, `request_update_config` |
-| Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | **no, see below** |
+| Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | **no, the only one, see below** |
 | Temperature | read only | reads only |
 
 These are settings, not automations. They live in the player sheet and are not
@@ -309,15 +309,14 @@ exposed as Home Assistant entities, so a script or automation cannot reach them.
 
 ### What to know about speaker volume
 
-On the Outdoor 4 and XT2 the app saves Speaker Volume to a route blinkpy does
-not carry, in a field called `lfr_sync_interval`, 1 to 8. Writing it does move
-the Blink app's own Volume slider to match, and the speaker is audibly louder or
-quieter for it, so it is doing the job the sheet says it is.
+On the Outdoor 4 and XT2, Speaker Volume is the one setting here that blinkpy
+has no call for. The Blink app saves it to a v2 camera config route, in a field
+named `lfr_sync_interval`, 1 to 8, which is what this sends.
 
-What is not known is whether volume is *all* it does. The name reads like a
-radio setting and it sits among the camera's radio telemetry, so a second effect
-cannot be ruled out. If that bothers you, leave the slider alone; nothing else
-in the sheet touches that route.
+That mapping was established from the app rather than guessed at: the app's
+Audio screen has a single Volume slider, saving it writes that field, a level
+written from this sheet moves the app's own slider to match, and the speaker is
+audibly louder or quieter for it.
 
 **A new level applies to the next live view, not the one playing.** The camera
 reads it when a session starts, so change it, end the stream, and start it again
@@ -325,12 +324,17 @@ to hear the difference. The sheet says so when you move the slider.
 
 ### When a change does not take
 
-Blink answers a request while a camera is still busy with the last one by
-refusing it. The sheet tells you which control did not change and whether it is
-worth trying again in a moment, and each control is disabled while its own
-change is in flight so a second one cannot be sent by accident. After every
-write, successful or not, the sheet re-reads the camera and shows what Blink
-actually holds rather than what you asked for.
+Blink answers every write immediately and then carries it out in the background,
+so the camera's settings keep the old values for a few seconds afterwards. The
+sheet follows the change through before it re-reads, which is why a control
+does not snap back to where it was while Blink catches up. If a change is still
+in flight when the sheet gives up waiting, it keeps showing what you asked for
+and says the value applies to the next live view.
+
+A camera that is still busy with a previous command refuses the next one. The
+sheet names the control that did not change and says whether it is worth trying
+again in a moment, and each control is disabled while its own change is in
+flight so a second one cannot be sent by accident.
 
 ## Dashboards
 

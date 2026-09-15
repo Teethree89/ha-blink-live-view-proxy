@@ -195,10 +195,15 @@ def test_apply(monkey_calls: list) -> None:
     async def fake_camera_info(blink, network, camera_id):
         return CLASSIC_CONFIG
 
+    async def fake_wait(blink, json_data):
+        monkey_calls.append(("wait", json_data))
+        return True
+
     cc.blink_api.http_post = fake_post
     cc.blink_api.request_floodlight = fake_lights
     cc.blink_api.request_get_config = fake_get_config
     cc.blink_api.request_camera_info = fake_camera_info
+    cc.blink_api.wait_for_command = fake_wait
 
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True, "volume": 3}))
     kinds = [call[0] for call in monkey_calls]
@@ -220,6 +225,21 @@ def test_apply(monkey_calls: list) -> None:
     state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
     check("/api/v2/accounts/77/networks/1/cameras/3/config" in monkey_calls[0][1], "speaker volume posts to the v2 camera config route")
     check(json.loads(monkey_calls[0][2]) == {"lfr_sync_interval": 5} and state["rejected"] == [], "the v2 body is the one field and a command answer is accepted")
+    waits = [call for call in monkey_calls if call[0] == "wait"]
+    check(waits and waits[0][1] == {"network_id": GRILL_ROW["network_id"], "id": 1},
+          "an accepted write is followed through its command before the re-read")
+    check(state["pending"] == [], "a command that finished is not left pending")
+
+    # A command Blink never finishes must not snap the control back.
+    async def slow_wait(blink, json_data):
+        return False
+
+    cc.blink_api.wait_for_command = slow_wait
+    monkey_calls.clear()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
+    check(state["pending"] == ["volume"], "an unfinished command is reported pending")
+    check(state["volume"] == 5, "and the control keeps the value that was asked for")
+    cc.blink_api.wait_for_command = fake_wait
 
     try:
         asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"volume": 3}))
