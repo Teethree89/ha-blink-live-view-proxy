@@ -4,6 +4,9 @@ __pycache__/
 *.pyc
 *.log
 
+# Local agent instructions
+AGENTS.md
+
 # Local Blink auth/config/cache
 proxy/config.json
 secrets/
