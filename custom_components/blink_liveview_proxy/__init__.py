@@ -10,6 +10,7 @@ from homeassistant.components import frontend, panel_custom
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later
 
@@ -231,6 +232,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "clip_recording": bool(merged.get(CONF_CLIP_RECORDING, DEFAULT_CLIP_RECORDING)),
     }
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    # Register the proxy device here rather than letting it appear as a side
+    # effect of the binary sensor's device_info. Cameras hang off it with
+    # `via_device_id`, and that field wants a device registry id, so the parent
+    # has to exist before the camera platform runs. PLATFORMS lists CAMERA
+    # first, so relying on the sensor to create it would be a race.
+    hub = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name="Blink Live View Proxy",
+        manufacturer="Local",
+    )
+    hass.data[DOMAIN][entry.entry_id]["hub_device_id"] = hub.id
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

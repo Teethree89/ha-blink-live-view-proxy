@@ -58,8 +58,10 @@ async def async_setup_entry(
     coordinator: BlinkLiveviewProxyCoordinator = runtime["coordinator"]
     cameras = coordinator.data.get("cameras", [])
 
+    hub_device_id = runtime["hub_device_id"]
+
     async_add_entities(
-        BlinkLiveviewProxyCamera(coordinator, client, entry, camera)
+        BlinkLiveviewProxyCamera(coordinator, client, entry, camera, hub_device_id)
         for camera in cameras
     )
 
@@ -78,6 +80,7 @@ class BlinkLiveviewProxyCamera(
         client: BlinkLiveviewProxyClient,
         entry: ConfigEntry,
         camera: dict[str, Any],
+        hub_device_id: str,
     ) -> None:
         super().__init__(coordinator)
         Camera.__init__(self)
@@ -95,7 +98,11 @@ class BlinkLiveviewProxyCamera(
             "name": f"Blink {name}",
             "manufacturer": "Blink",
             "model": camera.get("product_type") or camera.get("camera_type"),
-            "via_device": (DOMAIN, entry.entry_id),
+            # `via_device` is deprecated and stops working in Home Assistant
+            # 2027.8. Its replacement takes a device registry id, not an
+            # identifier tuple, so __init__ registers the proxy device up front
+            # and hands its id down.
+            "via_device_id": hub_device_id,
         }
 
     @property

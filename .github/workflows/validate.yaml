@@ -174,3 +174,6 @@ jobs:
 
       - name: const export tests
         run: python tests/test_const_exports.py
+
+      - name: device tree tests
+        run: python tests/test_via_device_id.py
