@@ -296,9 +296,11 @@ async def fetch_state(
     anything with a ``flood_light`` attribute holding what the camera has
     reported over that session, or None. That report wins over the config
     document's ``light_status`` while the session is open. The document is
-    served from Blink's cloud, and it was seen still reading off after the
-    Blink app had turned the lamp on from inside its own live view; whether it
-    ever catches up is not known.
+    served from Blink's cloud and does not record a lamp worked this way: it
+    still read off 23 s after this proxy had lit the lamp over a session and
+    the camera had confirmed it. The lamp itself lasts for that live view. It
+    was off again, by the camera's own report and by the picture, when the
+    next session opened 8 s after the first ended.
     """
     network = row["network_id"]
     camera_id = row["id"]

@@ -45,8 +45,9 @@ LIVEVIEW_INLINE_COMMAND_LIGHTS_OFF = 2
 
 # The camera speaks back on its accessory channel, msgtype 0x15, with the state
 # in the sequence field: 0 is lights off, 1 is lights on. A Wired Floodlight
-# sends one as the session opens, seen in a capture of the app's own session,
-# so the lamp's state is known before anyone asks for it.
+# sends one as the session opens, and another about 120 ms after a command
+# changes the lamp, so the lamp's state is known before anyone asks for it
+# and confirmed as soon as it moves. Measured 2026-09-15.
 IMMI_DATA_FLAG_ACCESSORY_MESSAGE = 0x15
 
 LIVEVIEW_ACCESSORY_LIGHTS_OFF = 0
