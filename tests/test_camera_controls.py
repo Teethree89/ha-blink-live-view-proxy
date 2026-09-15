@@ -267,6 +267,70 @@ def test_apply(monkey_calls: list) -> None:
         check(True, "apply refuses an unsupported control before calling Blink")
 
 
+class FakeLiveView:
+    """The proxy's open live view on the floodlight, as apply_changes sees it."""
+
+    def __init__(self, reports: bool = True):
+        self.flood_light = None
+        self.sent: list[bool] = []
+        self.reports = reports
+
+    async def set_flood_light(self, on: bool) -> None:
+        self.sent.append(on)
+        if self.reports:
+            self.flood_light = on
+
+
+def test_lamp_over_live_view() -> None:
+    """With a live view open the lamp rides it, not the route Blink refuses."""
+    print("lamp over the live view")
+    cc.COMMAND_WAIT_SECONDS = 0.2
+    cc.READ_BACK_INTERVAL = 0.01
+    route_calls: list = []
+
+    async def fake_lights(blink, network, camera_id, enable):
+        route_calls.append(enable)
+        return {"code": 307, "message": "System is busy, please wait"}
+
+    async def fake_get_config(blink, network, camera_id, product_type="owl"):
+        return OWL_CONFIG
+
+    cc.blink_api.request_floodlight = fake_lights
+    cc.blink_api.request_get_config = fake_get_config
+
+    liveview = FakeLiveView()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True}, liveview))
+    check(liveview.sent == [True], "the lamp command goes over the live view")
+    check(route_calls == [], "and the lights route, which Blink refuses mid-stream, is not tried")
+    check(state["flood_light"] is True, "the camera's own report is the lamp state, not the config's stale off")
+    check(state["rejected"] == [] and state["busy"] == [] and state["pending"] == [],
+          "a lamp the camera confirms is neither refused nor pending")
+
+    silent = FakeLiveView(reports=False)
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True}, silent))
+    check(silent.sent == [True] and state["flood_light"] is True and state["pending"] == ["flood_light"],
+          "a lamp the camera has not confirmed keeps the requested state and is reported pending")
+
+    class ClosedLiveView(FakeLiveView):
+        async def set_flood_light(self, on: bool) -> None:
+            raise RuntimeError("Blink IMMI target is not connected")
+
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": False}, ClosedLiveView()))
+    check(route_calls == [False], "a session that cannot carry it hands the lamp back to the lights route")
+    check(state["busy"] == ["flood_light"], "and that route's refusal is reported as before")
+
+    lit = FakeLiveView()
+    lit.flood_light = True
+    state = asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, lit))
+    check(state["flood_light"] is True, "a read during a live view reports the lamp the camera reports")
+    check(asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, None))["flood_light"] is False,
+          "and without one the config document still decides")
+
+    route_calls.clear()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True}))
+    check(route_calls == [True], "with nothing streaming the lamp goes through blinkpy's lights route")
+
+
 def test_capability_map() -> None:
     """Pin who gets what, because the README describes this table."""
     print("capabilities")
@@ -331,6 +395,7 @@ def main() -> int:
     test_validate()
     test_write_plan()
     test_apply([])
+    test_lamp_over_live_view()
     test_capability_map()
     test_blinkpy_routes()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")

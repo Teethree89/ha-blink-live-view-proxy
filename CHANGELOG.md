@@ -27,15 +27,21 @@ fixes that change nothing about how it is used.
   a `superior` block; every other camera answers the classic camera config with
   integer codes. Every write goes through a blinkpy function —
   `request_floodlight` for the lamp, `request_update_config` for the rest —
-  except one: the v2 camera config route carrying the speaker volume of the
-  Outdoor 4 and XT2 as `lfr_sync_interval`, 1 to 8, which blinkpy does not
-  cover. That one was found by watching the Blink app save its own Speaker
-  Volume slider, and confirmed both ways: a level written here moves the app's
-  slider to match, and the speaker is audibly louder or quieter for it. Whether
-  volume is all it does is still unknown, and the README says so. Blink answers
-  200 to everything, so a write counts as taken only when the answer carries a
-  command; "System is busy" is reported back to the sheet instead of being
-  swallowed.
+  with two exceptions. One is the v2 camera config route carrying the speaker
+  volume of the Outdoor 4 and XT2 as `lfr_sync_interval`, 1 to 8, which
+  blinkpy does not cover. That one was found by watching the Blink app save
+  its own Speaker Volume slider, and confirmed both ways: a level written here
+  moves the app's slider to match, and the speaker is audibly louder or
+  quieter for it. Whether volume is all it does is still unknown, and the
+  README says so. The other is the flood light while a live view is open:
+  Blink answers the lights route 307 "system is busy" for as long as any live
+  view is running on the camera, and the sheet only exists inside one. The
+  Blink app sends the lamp as an inline command over the live-view session
+  instead, and the camera reports the lamp's state on that session as it
+  opens, so the proxy now does the same whenever it holds that session, and
+  falls back to the route when nothing is streaming. Blink answers 200 to everything, so a write
+  counts as taken only when the answer carries a command; "System is busy" is
+  reported back to the sheet instead of being swallowed.
 - **The integration view `/api/blink_liveview_proxy/cameras/{slug}/controls`**
   fronts those routes for the player with the same browser token the player
   already holds, and expresses the temperature in the unit Home Assistant is

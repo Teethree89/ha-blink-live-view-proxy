@@ -106,6 +106,10 @@ def test_saving_state() -> None:
           "a busy camera and a refusal read differently")
     check("Volume applies to the next live view" in page,
           "the volume slider says when it takes effect")
+    check("/controls?token=" in page and "&session=${encodeURIComponent(sessionId)}" in page,
+          "the controls route is told which live view is this player's, so the lamp can ride it")
+    check("The camera has not confirmed the flood light yet." in page,
+          "a lamp the camera has not yet reported reads as unconfirmed, not as next-session")
     load = page.split("async function loadControls", 1)[1].split("\nconst ", 1)[0]
     check("const startedAt = controlsEpoch;" in load and "if (startedAt !== controlsEpoch) return;" in load,
           "a read that started before a write cannot land after it")

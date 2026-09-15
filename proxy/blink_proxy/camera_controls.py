@@ -25,6 +25,14 @@ that distinction is worth keeping visible rather than reading as though blinkpy
 supports these cameras.
 
 Only the v2 speaker volume route has no blinkpy function at all.
+
+The lamp is the other exception, for a different reason. blinkpy's
+``request_floodlight`` builds the right route, but Blink answers it 307 "system
+is busy" for as long as any live view is open on the camera, and the Controls
+sheet exists only inside one. The Blink app never contends with that: while it
+is watching, it sends the lamp as an inline command over the live-view session
+itself. So, when the proxy holds a live view on the camera, the lamp goes over
+that session; the route is kept for a write that arrives with nothing streaming.
 """
 
 from __future__ import annotations
@@ -279,8 +287,19 @@ def write_plan(
     return plan
 
 
-async def fetch_state(blink: Any, row: dict[str, Any]) -> dict[str, Any]:
-    """Read the camera's current settings from Blink."""
+async def fetch_state(
+    blink: Any, row: dict[str, Any], liveview: Any | None = None
+) -> dict[str, Any]:
+    """Read the camera's current settings from Blink.
+
+    ``liveview`` is the proxy's open live view on this camera, if it has one:
+    anything with a ``flood_light`` attribute holding what the camera has
+    reported over that session, or None. That report wins over the config
+    document's ``light_status`` while the session is open. The document is
+    served from Blink's cloud, and it was seen still reading off after the
+    Blink app had turned the lamp on from inside its own live view; whether it
+    ever catches up is not known.
+    """
     network = row["network_id"]
     camera_id = row["id"]
     config = None
@@ -291,7 +310,11 @@ async def fetch_state(blink: Any, row: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         config = await blink_api.request_camera_info(blink, network, camera_id)
-    return read_state(row, config, owl_config)
+    state = read_state(row, config, owl_config)
+    reported = getattr(liveview, "flood_light", None)
+    if reported is not None and state["capabilities"]["flood_light"]:
+        state["flood_light"] = reported
+    return state
 
 
 def _unreflected(clean: dict[str, Any], state: dict[str, Any]) -> list[str]:
@@ -361,10 +384,39 @@ def _answer_accepted(answer: Any) -> bool:
     return answer.get("command") is not None or answer.get("state") == "new"
 
 
+async def _lamp_in_band(liveview: Any, on: bool, row: dict[str, Any]) -> bool:
+    """Work the lamp over the open live view; say whether that was possible.
+
+    Blink refuses the lights route with 307 for as long as any live view is
+    open on the camera, and the Controls sheet only exists inside one, so from
+    the player that route can never succeed. The Blink app never uses it while
+    watching: it sends the lamp as an inline command over the live-view session
+    itself, and so does this when the proxy holds that session. A session that
+    cannot carry it, RTSP or one already closed, is reported here and the
+    caller falls back to the route.
+    """
+    try:
+        await liveview.set_flood_light(on)
+    except (NotImplementedError, RuntimeError) as err:
+        LOGGER.info(
+            "Could not send the flood light over the live view for %s (%s); "
+            "trying Blink's lights route",
+            row.get("slug"),
+            err,
+        )
+        return False
+    return True
+
+
 async def apply_changes(
-    blink: Any, row: dict[str, Any], changes: Any
+    blink: Any, row: dict[str, Any], changes: Any, liveview: Any | None = None
 ) -> dict[str, Any]:
-    """Send the requested changes to Blink and return what it holds now."""
+    """Send the requested changes to Blink and return what it holds now.
+
+    ``liveview`` is the proxy's open live view on this camera, or None. With
+    one, the lamp goes over it (see ``_lamp_in_band``) and the read back takes
+    the lamp state the camera reports over it.
+    """
     clean = validate_changes(row, changes)
     network = row["network_id"]
     camera_id = row["id"]
@@ -374,6 +426,8 @@ async def apply_changes(
     deadline = asyncio.get_running_loop().time() + COMMAND_WAIT_SECONDS
     for kind, payload, controls in write_plan(row, clean):
         if kind == "lights":
+            if liveview is not None and await _lamp_in_band(liveview, payload, row):
+                continue
             answer = await blink_api.request_floodlight(
                 blink, network, camera_id, payload
             )
@@ -423,11 +477,11 @@ async def apply_changes(
     # straight after the write is not enough: the owl config route keeps serving
     # the old value for a few seconds after accepting a change, and that stale
     # number then overwrites the control the viewer just moved.
-    state = await fetch_state(blink, row)
+    state = await fetch_state(blink, row, liveview)
     waiting = [c for c in _unreflected(clean, state) if c not in rejected]
     while waiting and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(READ_BACK_INTERVAL)
-        state = await fetch_state(blink, row)
+        state = await fetch_state(blink, row, liveview)
         waiting = [c for c in _unreflected(clean, state) if c not in rejected]
     pending = waiting
     state["rejected"] = rejected

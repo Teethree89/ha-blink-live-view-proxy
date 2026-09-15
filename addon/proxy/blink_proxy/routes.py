@@ -305,6 +305,26 @@ def _camera_row(request: web.Request, slug: str) -> dict[str, Any]:
         raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n")
     return row
 
+def _active_liveview(request: web.Request, slug: str) -> LiveViewHandle | None:
+    """Find a live view this proxy holds open on the camera, if there is one.
+
+    The player names its own session in ``session`` and that one is preferred.
+    Failing that, any open session on the same camera does: the lamp is the
+    camera's, and every session to it carries the same commands and hears the
+    same reports.
+    """
+    liveviews: dict[str, LiveViewHandle] = request.app["active_liveviews"]
+    session = request.query.get("session", "")
+    if session:
+        liveview = liveviews.get(liveview_session_key(slug, session))
+        if liveview is not None:
+            return liveview
+    prefix = liveview_session_key(slug, "")
+    for key, liveview in liveviews.items():
+        if key.startswith(prefix):
+            return liveview
+    return None
+
 async def camera_controls_handler(request: web.Request) -> web.Response:
     """Read the lamp, night vision, volume and temperature state of one camera."""
     check_authorized(request)
@@ -313,7 +333,7 @@ async def camera_controls_handler(request: web.Request) -> web.Response:
     blink = _require_client(request)._require_blink()  # noqa: SLF001
     try:
         async with asyncio.timeout(20):
-            state = await fetch_state(blink, row)
+            state = await fetch_state(blink, row, _active_liveview(request, slug))
     except (TimeoutError, OSError) as err:
         raise web.HTTPBadGateway(text=f"Blink did not answer: {err}\n") from err
     return web.json_response(state, headers={"Cache-Control": "no-store"})
@@ -332,7 +352,9 @@ async def camera_controls_update_handler(request: web.Request) -> web.Response:
     blink = _require_client(request)._require_blink()  # noqa: SLF001
     try:
         async with asyncio.timeout(30):
-            state = await apply_changes(blink, row, body)
+            state = await apply_changes(
+                blink, row, body, _active_liveview(request, slug)
+            )
     except ControlError as err:
         raise web.HTTPBadRequest(text=f"{err}\n") from err
     except (TimeoutError, OSError) as err:

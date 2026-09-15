@@ -296,12 +296,26 @@ on the models that have a speaker to set.
 
 | Control | Where it is written | blinkpy |
 |---|---|---|
-| Flood light on/off | the floodlight's own lights route | `request_floodlight`, written for this camera |
+| Flood light on/off | the live-view session itself while one is open; the floodlight's own lights route otherwise | `request_floodlight` for the route; the in-session command is this proxy's, see below |
 | Night vision, Outdoor | the classic camera update route | `request_update_config`, directly |
 | Night vision, other families | the same classic route | `request_update_config`, route named by hand |
 | Lamp brightness, light settings, floodlight volume | the floodlight's config route | `request_update_config`, route named by hand |
 | Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | not covered, see below |
 | Temperature | read only | `request_camera_info` |
+
+The flood light is the one control that does not go through Blink's HTTP API
+while you are watching. Blink answers the lights route with 307 "system is
+busy" for as long as any live view is open on the camera, and this sheet only
+exists inside one, so from here that route can never succeed. The Blink app
+never contends with that: while it is watching, it sends the lamp as an inline
+command over the live-view session, the same socket the video arrives on, and
+the camera reports the lamp's state back on that socket: a Wired Floodlight
+was seen doing so as the app's session opened. This does the same when it
+holds a live view on the camera. The command is nine bytes, msgtype
+`0x14` with `1` for on or `2` for off in the sequence field and no payload, and
+the camera's report is msgtype `0x15` with `0` or `1`; both were read from the
+app's own live-view classes and its session with a Wired Floodlight. A write
+that arrives with nothing streaming still uses `request_floodlight`.
 
 "Route named by hand" is worth explaining, because it is most of the table.
 `request_update_config` chooses its route from the product type it is handed,

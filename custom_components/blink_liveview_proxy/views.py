@@ -2004,7 +2004,9 @@ let openSheet = null;
 let closeRight = 0;
 
 function controlsUrl() {{
-  return `/api/blink_liveview_proxy/cameras/${{slug}}/controls?token=${{encodeURIComponent(accessToken)}}`;
+  // The session names this player's own live view to the proxy, so a lamp
+  // change can ride that session instead of a route Blink refuses mid-stream.
+  return `/api/blink_liveview_proxy/cameras/${{slug}}/controls?token=${{encodeURIComponent(accessToken)}}&session=${{encodeURIComponent(sessionId)}}`;
 }}
 
 function isPortrait() {{
@@ -2163,9 +2165,15 @@ async function sendControls(changes, card, note) {{
     }} else if (volumeChanged || pending.length) {{
       // The camera reads volume at session setup, and anything Blink is still
       // carrying out lands the same way: not on the stream that is playing.
+      // The lamp is the exception: it goes over this very session and the
+      // camera answers on it, so pending there only means the answer has not
+      // arrived yet.
+      const lampPending = pending.length === 1 && pending[0] === "flood_light";
       note.textContent = volumeChanged
         ? "Volume applies to the next live view, not this one."
-        : `${{namesFor(pending)}} applies to the next live view, not this one.`;
+        : lampPending
+          ? "The camera has not confirmed the flood light yet."
+          : `${{namesFor(pending)}} applies to the next live view, not this one.`;
     }}
   }} catch (err) {{
     note.textContent = `Could not change ${{namesFor(changedControls(changes))}}: ${{err.message}}`;
@@ -2628,7 +2636,7 @@ class BlinkLiveviewProxyControlsView(HomeAssistantView):
         """Return the camera's current controls."""
         _camera(self.hass, slug)
         _authorize_browser_request(self.hass, request, slug)
-        return await self._forward(slug, None)
+        return await self._forward(slug, None, request.query.get("session"))
 
     async def post(self, request: web.Request, slug: str) -> web.Response:
         """Change one or more controls and return the new state."""
@@ -2639,16 +2647,22 @@ class BlinkLiveviewProxyControlsView(HomeAssistantView):
                 max_size=4096, actual_size=request.content_length
             )
         body = await request.read()
-        return await self._forward(slug, body)
+        return await self._forward(slug, body, request.query.get("session"))
 
-    async def _forward(self, slug: str, body: bytes | None) -> web.Response:
+    async def _forward(
+        self, slug: str, body: bytes | None, session: str | None = None
+    ) -> web.Response:
+        # The session is the player's own live view. The proxy sends the lamp
+        # over it, because Blink refuses the lights route while any live view
+        # is open on the camera.
         client = _client(self.hass)
         headers = {**client.auth_headers(), "Content-Type": "application/json"}
+        query = {"session": session} if session else None
         try:
             async with asyncio.timeout(40):
                 async with client._session.request(  # noqa: SLF001
                     "POST" if body is not None else "GET",
-                    client.proxy_url(f"/cameras/{slug}/controls"),
+                    client.proxy_url(f"/cameras/{slug}/controls", query),
                     headers=headers,
                     data=body,
                 ) as response:

@@ -195,10 +195,16 @@ counts as taken only if the answer carries a `command` or reports `state`
 `new`. A `307` means busy.
 
 Writes go through blinkpy's own functions (`request_floodlight`,
-`request_update_config`) except speaker volume on the Outdoor 4 and XT2, which
-uses a v2 camera config route blinkpy does not carry. See [Camera
-Controls](../README.md#camera-controls) for what that one does and does not
-promise.
+`request_update_config`) with two exceptions. Speaker volume on the Outdoor 4
+and XT2 uses a v2 camera config route blinkpy does not carry. The flood light,
+when the proxy holds a live view on the camera, is sent over that session as
+an inline command rather than through the lights route, because Blink refuses
+that route while any live view is open; `session` in the query names the
+player's own session, and any open session on the camera serves without it.
+The `flood_light` in the answer is then what the camera reports over the
+session, not what the config document says. See [Camera
+Controls](../README.md#camera-controls) for what each of those does and does
+not promise.
 
 ## Last Watched Live View
 
