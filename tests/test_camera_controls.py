@@ -177,6 +177,10 @@ class FakeBlink:
 
 def test_apply(monkey_calls: list) -> None:
     print("apply_changes")
+    # Blink is faked here and never settles, so every write would otherwise
+    # read back until the real deadline. Keep the loop, shrink the clock.
+    cc.COMMAND_WAIT_SECONDS = 0.2
+    cc.READ_BACK_INTERVAL = 0.01
     answers = {"owl_config": {"command": "config_set", "state": "new"}, "camera_update": {"state": "done"},
                "camera_config_v2": {"id": 1, "command": "config_set", "state": "new"}}
 
@@ -213,7 +217,10 @@ def test_apply(monkey_calls: list) -> None:
     check("/accounts/77/networks/1/owls/318367/config" in monkey_calls[1][1], "owl config URL carries account, network, camera")
     check(state["rejected"] == ["flood_light"], "a busy lamp is reported as rejected")
     check(state["busy"] == ["flood_light"], "and is separately marked worth retrying")
-    check(state["volume"] == 8, "the answer is the re-read state")
+    # The fixture config never changes, so the write is never reflected: the
+    # answer must keep what was asked for rather than the config's stale 8.
+    check(state["volume"] == 3 and state["pending"] == ["volume"],
+          "a value the config has not caught up with is kept, and flagged pending")
 
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
@@ -228,18 +235,30 @@ def test_apply(monkey_calls: list) -> None:
     waits = [call for call in monkey_calls if call[0] == "wait"]
     check(waits and waits[0][1] == {"network_id": GRILL_ROW["network_id"], "id": 1},
           "an accepted write is followed through its command before the re-read")
-    check(state["pending"] == [], "a command that finished is not left pending")
+    check(state["volume"] == 5 and state["pending"] == ["volume"],
+          "the v2 write is kept too while the config still reports the old level")
 
-    # A command Blink never finishes must not snap the control back.
-    async def slow_wait(blink, json_data):
-        return False
-
-    cc.blink_api.wait_for_command = slow_wait
+    # The floodlight case: Blink accepts the write and keeps serving the old
+    # value for a while. The answer must not carry that stale number back.
     monkey_calls.clear()
-    state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
-    check(state["pending"] == ["volume"], "an unfinished command is reported pending")
-    check(state["volume"] == 5, "and the control keeps the value that was asked for")
-    cc.blink_api.wait_for_command = fake_wait
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"volume": 2}))
+    check(state["volume"] == 2,
+          "a config still reporting the old volume does not snap the control back")
+    check(state["pending"] == ["volume"],
+          "and the control is reported pending rather than silently wrong")
+
+    # Once the camera does report it, nothing is left pending.
+    settled = dict(OWL_CONFIG, volume_control=2)
+    original_get = cc.blink_api.request_get_config
+
+    async def settled_get(blink, network, camera_id, product_type="owl"):
+        return settled
+
+    cc.blink_api.request_get_config = settled_get
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"volume": 2}))
+    check(state["volume"] == 2 and state["pending"] == [],
+          "a value the camera confirms is not reported pending")
+    cc.blink_api.request_get_config = original_get
 
     try:
         asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"volume": 3}))

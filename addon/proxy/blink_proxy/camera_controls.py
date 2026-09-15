@@ -52,6 +52,7 @@ VOLUME_RANGE = (1, 8)
 # The app's own writes finished in about six seconds; blinkpy would wait two
 # minutes, which is far longer than the sheet can hold a request open.
 COMMAND_WAIT_SECONDS = 12
+READ_BACK_INTERVAL = 1.5
 
 
 def _product_type(row: dict[str, Any]) -> str:
@@ -293,6 +294,20 @@ async def fetch_state(blink: Any, row: dict[str, Any]) -> dict[str, Any]:
     return read_state(row, config, owl_config)
 
 
+def _unreflected(clean: dict[str, Any], state: dict[str, Any]) -> list[str]:
+    """Name the requested controls the camera is not yet reporting back."""
+    missing: list[str] = []
+    for key, value in clean.items():
+        if key == "light_settings":
+            settings = state.get("light_settings")
+            for name, wanted in value.items():
+                if not isinstance(settings, dict) or settings.get(name) != wanted:
+                    missing.append(name)
+        elif state.get(key) != value:
+            missing.append(key)
+    return missing
+
+
 async def _command_finished(
     blink: Any, network: Any, answer: Any, deadline: float
 ) -> bool:
@@ -404,13 +419,22 @@ async def apply_changes(
                 busy.extend(controls)
         elif not await _command_finished(blink, network, answer, deadline):
             pending.extend(controls)
+    # Read back until the camera actually reports what was asked for. One read
+    # straight after the write is not enough: the owl config route keeps serving
+    # the old value for a few seconds after accepting a change, and that stale
+    # number then overwrites the control the viewer just moved.
     state = await fetch_state(blink, row)
+    waiting = [c for c in _unreflected(clean, state) if c not in rejected]
+    while waiting and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(READ_BACK_INTERVAL)
+        state = await fetch_state(blink, row)
+        waiting = [c for c in _unreflected(clean, state) if c not in rejected]
+    pending = waiting
     state["rejected"] = rejected
     state["busy"] = busy
     state["pending"] = pending
-    # A change Blink has taken but not finished carrying out is still absent
-    # from the config, so show what was asked for rather than snapping the
-    # control back to the old value.
+    # Whatever never showed up keeps the value that was asked for, so a control
+    # does not snap back to the old one while Blink is still catching up.
     for name in pending:
         if name in clean:
             state[name] = clean[name]

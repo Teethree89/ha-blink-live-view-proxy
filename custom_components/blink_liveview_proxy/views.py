@@ -2266,7 +2266,10 @@ function goBack() {{
 back.addEventListener("click", goBack);
 // Inside the dashboard dialog its own close button sits in the same corner.
 back.hidden = !!(window.parent && window.parent !== window);
-controlsHint.addEventListener("click", () => showSheet(sheet));
+// Re-read on open. The state is otherwise only fetched once when the live
+// chrome appears, so anything the camera reported late stayed wrong for the
+// rest of the session however many times the sheet was opened.
+controlsHint.addEventListener("click", () => {{ showSheet(sheet); loadControls(); }});
 sheetClose.addEventListener("click", () => hideSheet(sheet));
 fullscreenButton.addEventListener("click", toggleFullscreen);
 floodSwitch.addEventListener("change", () => sendControls({{ flood_light: floodSwitch.checked }}, cardFlood, sheetNote));
