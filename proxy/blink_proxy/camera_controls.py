@@ -1,11 +1,16 @@
 """Per-camera controls for the live-view player: lamp, night vision, volume.
 
-Blink keeps these behind two different config endpoints. The Wired Floodlight
+Blink keeps these behind three different config endpoints. The Wired Floodlight
 (product type ``superior``) is an "owl" and answers the owl config route,
 with the lamp settings nested under a ``superior`` block. Every other camera
 answers the classic ``/network/{n}/camera/{id}/config`` route, where the same
-knobs use integer codes. This module hides that split behind one flat state
-document so the player never has to know which kind of camera it is looking at.
+knobs use integer codes. Speaker volume is the exception: the app saves it to a
+v2 camera config route that blinkpy does not carry, as ``lfr_sync_interval``.
+This module hides that split behind one flat state document so the player never
+has to know which kind of camera it is looking at.
+
+Every write goes through a blinkpy function except the v2 speaker volume route,
+which has none.
 """
 
 from __future__ import annotations
@@ -19,8 +24,12 @@ from blinkpy import api as blink_api
 LOGGER = logging.getLogger(__name__)
 
 FLOODLIGHT_TYPES = {"superior"}
-# Cameras whose speaker volume the app keeps in the classic config as
-# lfr_sync_interval (found by watching the app save its Speaker Volume slider).
+# Cameras whose speaker volume the app saves to the v2 config as
+# lfr_sync_interval. Confirmed both ways: a level written here shows up on the
+# app's own Volume slider, and the speaker is audibly louder or quieter for it.
+# The name still reads like a radio setting and sits among radio telemetry, so
+# whether it does anything besides volume is unknown. It applies to the next
+# stream, not the one playing.
 SPEAKER_TYPES = {"catalina", "xt2"}
 NIGHT_VISION_CODES = {0: "off", 1: "on", 2: "auto"}
 NIGHT_VISION_WORDS = {"off", "on", "auto"}
@@ -277,23 +286,28 @@ async def apply_changes(
             if isinstance(answer, dict) and answer.get("code") == 307:
                 rejected.append("flood_light")
             continue
-        if kind == "owl_config":
-            url = (
-                f"{blink.urls.base_url}/api/v1/accounts/{blink.account_id}"
-                f"/networks/{network}/owls/{camera_id}/config"
-            )
-        elif kind == "camera_config_v2":
+        # blinkpy documents the body as a JSON string. A dict is sent
+        # form-encoded and Blink answers 200 while ignoring it.
+        body = json.dumps(payload)
+        if kind == "camera_config_v2":
+            # The only route blinkpy does not carry; see the module docstring.
             url = (
                 f"{blink.urls.base_url}/api/v2/accounts/{blink.account_id}"
                 f"/networks/{network}/cameras/{camera_id}/config"
             )
+            response = await blink_api.http_post(blink, url, json=False, data=body)
         else:
-            url = f"{blink.urls.base_url}/network/{network}/camera/{camera_id}/update"
-        # blinkpy documents the body as a JSON string. A dict is sent
-        # form-encoded and Blink answers 200 while ignoring it.
-        response = await blink_api.http_post(
-            blink, url, json=False, data=json.dumps(payload)
-        )
+            # blinkpy picks the route from product_type. It whitelists "owl" and
+            # "catalina" only, but the route "catalina" selects is the classic
+            # camera update every non-owl family answers, xt and xt2 and white
+            # included, so they go through under that word.
+            response = await blink_api.request_update_config(
+                blink,
+                network,
+                camera_id,
+                product_type="owl" if kind == "owl_config" else "catalina",
+                data=body,
+            )
         answer: Any = None
         try:
             answer = await response.json(content_type=None)

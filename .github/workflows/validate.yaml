@@ -177,3 +177,6 @@ jobs:
 
       - name: device tree tests
         run: python tests/test_via_device_id.py
+
+      - name: Camera controls tests
+        run: python tests/test_camera_controls.py

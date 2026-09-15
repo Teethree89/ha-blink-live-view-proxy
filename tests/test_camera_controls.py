@@ -221,11 +221,54 @@ def test_apply(monkey_calls: list) -> None:
         check(True, "apply refuses an unsupported control before calling Blink")
 
 
+def test_blinkpy_routes() -> None:
+    """Config writes go through blinkpy's own function, not a hand-built URL."""
+    print("blinkpy routes")
+    calls: list = []
+    posts: list = []
+
+    async def fake_update_config(blink, network, camera_id, product_type="owl", data=None):
+        calls.append((product_type, camera_id, data))
+        return FakeResponse({"command": "config_set", "state": "new"})
+
+    async def fake_post(blink, url, is_retry=False, data=None, json=True, timeout=10):
+        posts.append(url)
+        return FakeResponse({"command": "config_set", "state": "new"})
+
+    async def fake_get_config(blink, network, camera_id, product_type="owl"):
+        return OWL_CONFIG
+
+    async def fake_camera_info(blink, network, camera_id):
+        return CLASSIC_CONFIG
+
+    cc.blink_api.request_update_config = fake_update_config
+    cc.blink_api.http_post = fake_post
+    cc.blink_api.request_get_config = fake_get_config
+    cc.blink_api.request_camera_info = fake_camera_info
+
+    asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"brightness": 5}))
+    check(calls and calls[0][0] == "owl", "the floodlight's config goes through blinkpy as an owl")
+    check(not posts, "no hand-built URL is used for an owl config write")
+
+    calls.clear()
+    asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
+    check(calls and calls[0][0] == "catalina",
+          "a white camera reaches the classic route through blinkpy, under catalina")
+    check(not posts, "no hand-built URL is used for a classic config write")
+
+    calls.clear()
+    asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
+    check(not calls, "speaker volume does not pretend to be a blinkpy config write")
+    check(len(posts) == 1 and "/api/v2/" in posts[0],
+          "the v2 speaker volume route is the only write blinkpy has no function for")
+
+
 def main() -> int:
     test_read_state()
     test_validate()
     test_write_plan()
     test_apply([])
+    test_blinkpy_routes()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")
