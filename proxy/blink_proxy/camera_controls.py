@@ -208,41 +208,56 @@ LIGHT_SETTING_FIELDS = {
 }
 
 
-def write_plan(row: dict[str, Any], clean: dict[str, Any]) -> list[tuple[str, Any]]:
+def write_plan(
+    row: dict[str, Any], clean: dict[str, Any]
+) -> list[tuple[str, Any, list[str]]]:
     """Turn validated changes into the Blink calls that carry them.
 
-    Returns ``(kind, payload)`` pairs: ``lights`` flips the floodlight lamp
-    through its own on/off route, ``owl_config`` posts a JSON document to the
-    owl config route, ``camera_update`` posts one to the classic camera
-    update route, and ``camera_config_v2`` posts one to the v2 camera config
-    route the app uses for its Speaker Volume slider.
+    Returns ``(kind, payload, controls)`` triples: ``lights`` flips the
+    floodlight lamp through its own on/off route, ``owl_config`` posts a JSON
+    document to the owl config route, ``camera_update`` posts one to the classic
+    camera update route, and ``camera_config_v2`` posts one to the v2 camera
+    config route the app uses for its Speaker Volume slider.
+
+    ``controls`` names the player's controls riding on that one call, so a
+    refusal can be reported against the thing the viewer actually touched rather
+    than the Blink field it happens to be stored in.
     """
     floodlight = _product_type(row) in FLOODLIGHT_TYPES
-    plan: list[tuple[str, Any]] = []
+    plan: list[tuple[str, Any, list[str]]] = []
     owl: dict[str, Any] = {}
+    owl_controls: list[str] = []
     classic: dict[str, Any] = {}
+    classic_controls: list[str] = []
     if "flood_light" in clean:
-        plan.append(("lights", clean["flood_light"]))
+        plan.append(("lights", clean["flood_light"], ["flood_light"]))
     if "night_vision" in clean:
         word = clean["night_vision"]
         if floodlight:
             owl["illuminator_enable"] = word
+            owl_controls.append("night_vision")
         else:
             classic["illuminator_enable"] = {"off": 0, "on": 1, "auto": 2}[word]
+            classic_controls.append("night_vision")
     if "brightness" in clean:
         owl.setdefault("superior", {})["illuminator_intensity"] = clean["brightness"]
         owl["light_brightness"] = clean["brightness"]
+        owl_controls.append("brightness")
     if "volume" in clean:
         if floodlight:
             owl["volume_control"] = clean["volume"]
+            owl_controls.append("volume")
         else:
-            plan.append(("camera_config_v2", {"lfr_sync_interval": clean["volume"]}))
+            plan.append(
+                ("camera_config_v2", {"lfr_sync_interval": clean["volume"]}, ["volume"])
+            )
     for key, value in clean.get("light_settings", {}).items():
         owl.setdefault("superior", {})[LIGHT_SETTING_FIELDS[key]] = value
+        owl_controls.append(key)
     if owl:
-        plan.append(("owl_config", owl))
+        plan.append(("owl_config", owl, owl_controls))
     if classic:
-        plan.append(("camera_update", classic))
+        plan.append(("camera_update", classic, classic_controls))
     return plan
 
 
@@ -261,11 +276,19 @@ async def fetch_state(blink: Any, row: dict[str, Any]) -> dict[str, Any]:
     return read_state(row, config, owl_config)
 
 
+def _answer_busy(answer: Any) -> bool:
+    """Blink returns 307 when the camera is mid-command and cannot take another.
+
+    Worth separating from a flat refusal: this one is worth trying again.
+    """
+    return isinstance(answer, dict) and answer.get("code") == 307
+
+
 def _answer_accepted(answer: Any) -> bool:
     """Blink answers 200 to everything; only the body says whether it took."""
     if not isinstance(answer, dict):
         return False
-    if answer.get("code") == 307:
+    if _answer_busy(answer):
         return False
     return answer.get("command") is not None or answer.get("state") == "new"
 
@@ -278,13 +301,15 @@ async def apply_changes(
     network = row["network_id"]
     camera_id = row["id"]
     rejected: list[str] = []
-    for kind, payload in write_plan(row, clean):
+    busy: list[str] = []
+    for kind, payload, controls in write_plan(row, clean):
         if kind == "lights":
             answer = await blink_api.request_floodlight(
                 blink, network, camera_id, payload
             )
-            if isinstance(answer, dict) and answer.get("code") == 307:
-                rejected.append("flood_light")
+            if _answer_busy(answer):
+                busy.extend(controls)
+                rejected.extend(controls)
             continue
         # blinkpy documents the body as a JSON string. A dict is sent
         # form-encoded and Blink answers 200 while ignoring it.
@@ -317,7 +342,10 @@ async def apply_changes(
             LOGGER.warning(
                 "Blink did not accept %s for %s: %s", kind, row.get("slug"), answer
             )
-            rejected.extend(sorted(payload))
+            rejected.extend(controls)
+            if _answer_busy(answer):
+                busy.extend(controls)
     state = await fetch_state(blink, row)
     state["rejected"] = rejected
+    state["busy"] = busy
     return state

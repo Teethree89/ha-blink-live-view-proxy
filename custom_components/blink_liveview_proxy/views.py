@@ -2101,8 +2101,37 @@ async function loadControls() {{
   return controlsLoad;
 }}
 
+const CONTROL_LABELS = {{
+  flood_light: "the flood light",
+  night_vision: "night vision",
+  brightness: "brightness",
+  volume: "volume",
+  dusk_to_dawn: "dusk to dawn",
+  motion_activation: "motion activation",
+  motion_duration: "the motion timeout",
+  manual_duration: "the manual timeout"
+}};
+
+function namesFor(controls) {{
+  const labels = controls.map((name) => CONTROL_LABELS[name] || name);
+  if (labels.length <= 1) return labels[0] || "that";
+  return labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1];
+}}
+
+// light_settings arrives as a nested object; name what is inside it.
+function changedControls(changes) {{
+  return Object.keys(changes).flatMap((key) =>
+    key === "light_settings" ? Object.keys(changes[key] || {{}}) : [key]);
+}}
+
 async function sendControls(changes, card, note) {{
+  // pointer-events alone still lets a focused slider move under the arrow keys,
+  // so the inputs are disabled for real while the write is in flight.
+  const inputs = Array.from(card.querySelectorAll("input, select, button"));
+  const locked = inputs.filter((el) => !el.disabled);
+  locked.forEach((el) => {{ el.disabled = true; }});
   card.classList.add("busy");
+  card.setAttribute("aria-busy", "true");
   note.textContent = "";
   try {{
     const response = await fetch(controlsUrl(), {{
@@ -2113,11 +2142,23 @@ async function sendControls(changes, card, note) {{
     if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${{response.status}}`);
     controlsState = await response.json();
     const rejected = controlsState.rejected || [];
-    if (rejected.length) note.textContent = "The camera is busy. Try again in a moment.";
+    const busy = controlsState.busy || [];
+    if (busy.length) {{
+      note.textContent = `The camera was busy and did not change ${{namesFor(busy)}}. Try again in a moment.`;
+    }} else if (rejected.length) {{
+      note.textContent = `The camera refused to change ${{namesFor(rejected)}}.`;
+    }} else if (Object.prototype.hasOwnProperty.call(changes, "volume")
+               && !(controlsState.capabilities || {{}}).flood_light) {{
+      // Observed on an xt2: the camera reads this at session setup, so the
+      // level that is playing does not change under you.
+      note.textContent = "Volume applies to the next live view, not this one.";
+    }}
   }} catch (err) {{
-    note.textContent = `Could not change that: ${{err.message}}`;
+    note.textContent = `Could not change ${{namesFor(changedControls(changes))}}: ${{err.message}}`;
   }} finally {{
     card.classList.remove("busy");
+    card.removeAttribute("aria-busy");
+    locked.forEach((el) => {{ el.disabled = false; }});
     renderControls();
   }}
 }}

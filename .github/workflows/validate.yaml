@@ -180,3 +180,6 @@ jobs:
 
       - name: Camera controls tests
         run: python tests/test_camera_controls.py
+
+      - name: Player layout tests
+        run: python tests/test_player_layout.py

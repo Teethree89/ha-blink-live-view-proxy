@@ -138,19 +138,24 @@ def test_write_plan() -> None:
     print("write_plan")
     plan = cc.write_plan(FLOOD_ROW, {"flood_light": True, "night_vision": "off", "brightness": 6, "volume": 2,
                                      "light_settings": {"dusk_to_dawn": True, "manual_duration": 65535}})
-    kinds = [kind for kind, _ in plan]
+    kinds = [kind for kind, _, _ in plan]
+    payloads = {kind: payload for kind, payload, _ in plan}
+    controls = {kind: names for kind, _, names in plan}
     check(kinds == ["lights", "owl_config"], "lamp goes through its own route, the rest in one owl post")
-    owl = dict(plan)["owl_config"]
+    check(controls["lights"] == ["flood_light"], "the lamp call carries its own control name")
+    check(sorted(controls["owl_config"]) == ["brightness", "dusk_to_dawn", "manual_duration", "night_vision", "volume"],
+          "the owl call names every control riding on it")
+    owl = payloads["owl_config"]
     check(owl["illuminator_enable"] == "off", "owl night vision is a word")
     check(owl["superior"]["illuminator_intensity"] == 6 and owl["light_brightness"] == 6, "brightness lands in both places")
     check(owl["volume_control"] == 2, "volume_control carries the volume")
     check(owl["superior"]["auto_on_off_enabled"] is True and owl["superior"]["manual_illuminator_duration"] == 65535, "light settings nest under superior")
-    check(dict(plan)["lights"] is True, "lamp payload is the boolean")
+    check(payloads["lights"] is True, "lamp payload is the boolean")
 
     plan = cc.write_plan(INDOOR_ROW, {"night_vision": "auto"})
-    check(plan == [("camera_update", {"illuminator_enable": 2})], "indoor night vision is a code on the update route")
+    check(plan == [("camera_update", {"illuminator_enable": 2}, ["night_vision"])], "indoor night vision is a code on the update route")
     plan = cc.write_plan(GRILL_ROW, {"volume": 3})
-    check(plan == [("camera_config_v2", {"lfr_sync_interval": 3})], "speaker volume goes to the v2 config route as lfr_sync_interval")
+    check(plan == [("camera_config_v2", {"lfr_sync_interval": 3}, ["volume"])], "speaker volume goes to the v2 config route as lfr_sync_interval")
 
 
 class FakeResponse:
@@ -202,12 +207,14 @@ def test_apply(monkey_calls: list) -> None:
     check(isinstance(body, str) and json.loads(body) == {"volume_control": 3}, "the owl body is a JSON string, not a dict")
     check("/accounts/77/networks/1/owls/318367/config" in monkey_calls[1][1], "owl config URL carries account, network, camera")
     check(state["rejected"] == ["flood_light"], "a busy lamp is reported as rejected")
+    check(state["busy"] == ["flood_light"], "and is separately marked worth retrying")
     check(state["volume"] == 8, "the answer is the re-read state")
 
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
     check(monkey_calls[0][1].endswith("/network/1/camera/2/update"), "indoor writes go to the classic update route")
-    check(state["rejected"] == ["illuminator_enable"], "a done-without-command answer counts as rejected")
+    check(state["rejected"] == ["night_vision"], "a refusal names the control, not the Blink field")
+    check(state["busy"] == [], "a done-without-command answer is a refusal, not a busy camera")
 
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
