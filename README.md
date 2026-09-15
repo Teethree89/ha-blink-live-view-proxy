@@ -47,6 +47,10 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Fresh snapshot button using the official HA Blink camera entity.
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.
+- A Camera Controls sheet inside the live-view player: the flood light, night
+  vision, brightness, volume, light settings and a temperature reading, each
+  shown only on the cameras that have it. See [Camera
+  Controls](#camera-controls) for what each one writes.
 - Clip viewer over both inventories — a Sync Module's local storage and Blink's
   cloud — with first-frame thumbnails, a player that seeks, downloads that
   never fetch the same clip from Blink twice, and a source selector. Cloud
@@ -70,7 +74,11 @@ and being listed in HACS by default.
 - Cloud clips need a Blink subscription — that is Blink's rule, not this
   project's. Without one, motion clips only exist on a Sync Module's local
   storage.
-- Motion zones and deeper camera settings are out of scope for now.
+- Motion zones are out of scope for now. The camera settings that are covered
+  are listed under [Camera Controls](#camera-controls); anything not in that
+  table still belongs in the Blink app.
+- The controls are player-only. They are not Home Assistant entities, so
+  automations cannot read or set them.
 - Push-to-talk is experimental and model-sensitive, and needs an HTTPS address
   to work at all. On plain HTTP the browser refuses the microphone, and the
   button currently accepts the press before failing where the message cannot
@@ -272,6 +280,57 @@ The local proxy routes are documented in the
 Route handlers live in `proxy/blink_proxy/routes.py`; Blink IMMI and live-view
 behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 `proxy/blink_proxy/ptt.py`.
+
+## Camera Controls
+
+While a live view is open, the **Controls** pill opens a sheet with the settings
+for that camera. It is the first part of this project that writes to your Blink
+account rather than only reading from it, so it is worth knowing exactly what it
+sends.
+
+The sheet shows only what the camera in front of you actually has. A Wired
+Floodlight gets the lamp, its brightness, its volume and its light settings; the
+battery cameras get night vision and a temperature reading; speaker volume
+appears on the models that have one. Nothing appears for a camera that cannot do
+it.
+
+| Control | Where it is written | Behind a blinkpy function |
+|---|---|---|
+| Flood light on/off | the wired floodlight's own lights route | yes, `request_floodlight` |
+| Night vision | the camera's config, as `illuminator_enable` | yes, `request_update_config` |
+| Lamp brightness | the floodlight's config | yes, `request_update_config` |
+| Light settings (dusk to dawn, motion activation, both timeouts) | the floodlight's config | yes, `request_update_config` |
+| Volume, wired floodlight | the floodlight's config, as `volume_control` | yes, `request_update_config` |
+| Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | **no, see below** |
+| Temperature | read only | reads only |
+
+These are settings, not automations. They live in the player sheet and are not
+exposed as Home Assistant entities, so a script or automation cannot reach them.
+
+### What to know about speaker volume
+
+On the Outdoor 4 and XT2 the app saves Speaker Volume to a route blinkpy does
+not carry, in a field called `lfr_sync_interval`, 1 to 8. Writing it does move
+the Blink app's own Volume slider to match, and the speaker is audibly louder or
+quieter for it, so it is doing the job the sheet says it is.
+
+What is not known is whether volume is *all* it does. The name reads like a
+radio setting and it sits among the camera's radio telemetry, so a second effect
+cannot be ruled out. If that bothers you, leave the slider alone; nothing else
+in the sheet touches that route.
+
+**A new level applies to the next live view, not the one playing.** The camera
+reads it when a session starts, so change it, end the stream, and start it again
+to hear the difference. The sheet says so when you move the slider.
+
+### When a change does not take
+
+Blink answers a request while a camera is still busy with the last one by
+refusing it. The sheet tells you which control did not change and whether it is
+worth trying again in a moment, and each control is disabled while its own
+change is in flight so a second one cannot be sent by accident. After every
+write, successful or not, the sheet re-reads the camera and shows what Blink
+actually holds rather than what you asked for.
 
 ## Dashboards
 

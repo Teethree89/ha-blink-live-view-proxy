@@ -25,17 +25,47 @@ fixes that change nothing about how it is used.
   One flat document per camera, whichever of Blink's two config shapes it
   answers. The Wired Floodlight is an "owl" with its lamp settings nested under
   a `superior` block; every other camera answers the classic camera config with
-  integer codes. Writes go back through the routes the Blink app itself uses,
-  including two blinkpy has no call for: the floodlight lamp's on/off route,
-  and the v2 camera config route that carries the speaker volume of the
-  Outdoor 4 and XT2 as `lfr_sync_interval`, 1 to 8 — found by watching the app
-  save its own Speaker Volume slider. Blink answers 200 to everything, so a
-  write counts as taken only when the answer carries a command; "System is
-  busy" is reported back to the sheet instead of being swallowed.
+  integer codes. Every write goes through a blinkpy function —
+  `request_floodlight` for the lamp, `request_update_config` for the rest —
+  except one: the v2 camera config route carrying the speaker volume of the
+  Outdoor 4 and XT2 as `lfr_sync_interval`, 1 to 8, which blinkpy does not
+  cover. That one was found by watching the Blink app save its own Speaker
+  Volume slider, and confirmed both ways: a level written here moves the app's
+  slider to match, and the speaker is audibly louder or quieter for it. Whether
+  volume is all it does is still unknown, and the README says so. Blink answers
+  200 to everything, so a write counts as taken only when the answer carries a
+  command; "System is busy" is reported back to the sheet instead of being
+  swallowed.
 - **The integration view `/api/blink_liveview_proxy/cameras/{slug}/controls`**
   fronts those routes for the player with the same browser token the player
   already holds, and expresses the temperature in the unit Home Assistant is
   set to.
+- **A `Camera Controls` section in the README, and the route in the proxy API
+  guide**, covering what each control writes, which ones blinkpy backs, the
+  speaker-volume caveat, and that these are player settings rather than Home
+  Assistant entities.
+- **`tests/test_player_layout.py`**, which renders the player page and checks
+  the things that break on a phone: that its JavaScript parses at all, that the
+  side sheet widens by the notch inset instead of squeezing its cards, that the
+  frame is never inset so the picture still paints behind the notch, and that a
+  control is released and re-read however a write ends. CI now runs this and
+  the camera controls tests.
+
+### Changed
+
+- **A refused change says which control it was.** Failures used to surface the
+  Blink field name they happened to be stored in, so the sheet could only offer
+  one message for everything, including when the camera had refused outright
+  rather than being busy. The write plan now carries the controls riding on
+  each call, and a busy camera reads differently from a refusal because only
+  one of them is worth retrying.
+- **A control is disabled while its own change is in flight.** The cards were
+  dimmed with `pointer-events`, which does nothing to a slider that already has
+  keyboard focus — the arrow keys still moved it and sent a second write. The
+  inputs are disabled for real now, and marked `aria-busy`.
+- **Speaker volume says when it takes effect.** The camera reads the level when
+  a session starts, so a change mid-stream does nothing audible until the next
+  live view. The sheet now says so instead of looking broken.
 
 ### Fixed
 

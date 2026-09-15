@@ -172,6 +172,34 @@ This is a WebSocket endpoint. The browser sends start/stop JSON messages and
 binary signed 16-bit PCM chunks. The proxy encodes AAC with `ffmpeg` and sends
 Blink IMMI audio frames over the active live-view session.
 
+## Camera Controls
+
+- `GET /cameras/{slug}/controls`
+- `POST /cameras/{slug}/controls`
+
+`GET` returns one flat document for the camera whatever family it belongs to:
+`flood_light`, `night_vision` (`auto`/`on`/`off`), `brightness`, `volume`,
+`temperature_f`, a `light_settings` object, and a `capabilities` map saying
+which of those this camera actually has. The player uses `capabilities` to
+decide what to draw.
+
+`POST` takes any subset of those keys and returns the same document, re-read
+from Blink after the write, plus two lists:
+
+- `rejected`: controls Blink did not accept, named as the player names them
+- `busy`: the subset of those that failed because the camera was mid-command,
+  which is the case worth retrying
+
+Blink answers `200` to writes it ignores, so the body is what decides: a change
+counts as taken only if the answer carries a `command` or reports `state`
+`new`. A `307` means busy.
+
+Writes go through blinkpy's own functions (`request_floodlight`,
+`request_update_config`) except speaker volume on the Outdoor 4 and XT2, which
+uses a v2 camera config route blinkpy does not carry. See [Camera
+Controls](../README.md#camera-controls) for what that one does and does not
+promise.
+
 ## Last Watched Live View
 
 - `GET /cameras/{slug}/last-liveview`
