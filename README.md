@@ -294,15 +294,22 @@ light settings, and is the one camera with no thermometer, so it shows no
 temperature. Everything else reports a temperature, and speaker volume appears
 on the models that have a speaker to set.
 
-| Control | Where it is written | Behind a blinkpy function |
+| Control | Where it is written | blinkpy |
 |---|---|---|
-| Flood light on/off | the wired floodlight's own lights route | yes, `request_floodlight` |
-| Night vision | the camera's config, as `illuminator_enable` | yes, `request_update_config` |
-| Lamp brightness | the floodlight's config | yes, `request_update_config` |
-| Light settings (dusk to dawn, motion activation, both timeouts) | the floodlight's config | yes, `request_update_config` |
-| Volume, wired floodlight | the floodlight's config, as `volume_control` | yes, `request_update_config` |
-| Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | **no, the only one, see below** |
-| Temperature | read only | reads only |
+| Flood light on/off | the floodlight's own lights route | `request_floodlight`, written for this camera |
+| Night vision, Outdoor | the classic camera update route | `request_update_config`, directly |
+| Night vision, other families | the same classic route | `request_update_config`, route named by hand |
+| Lamp brightness, light settings, floodlight volume | the floodlight's config route | `request_update_config`, route named by hand |
+| Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | not covered, see below |
+| Temperature | read only | `request_camera_info` |
+
+"Route named by hand" is worth explaining, because it is most of the table.
+`request_update_config` chooses its route from the product type it is handed,
+and it only recognises two words, so it refuses to write anything at all for a
+Wired Floodlight, an XT, an XT2 or a doorbell. The route each of those cameras
+actually answers is one of the two it does know, so this passes the name of the
+route rather than the name of the camera. The request is blinkpy's; the choice
+of which one is ours.
 
 These are settings, not automations. They live in the player sheet and are not
 exposed as Home Assistant entities, so a script or automation cannot reach them.

@@ -10,15 +10,21 @@ the app saves it to a v2 camera config route that blinkpy does not carry, as
 ``lfr_sync_interval``. This module hides that split behind one flat state
 document so the player never has to know which kind of camera it is looking at.
 
-``request_update_config`` picks its route from ``product_type``, so the word
-passed to it is a route selector rather than a description of the camera:
-``owl`` for the ``/owls/`` config route the floodlight answers, ``catalina``
-for the classic update route that catalina, xt, xt2 and white all answer.
-blinkpy passes each camera's literal product type, which is why its own
-night-vision call does nothing on a floodlight or an xt2.
+``request_update_config`` chooses its route from ``product_type`` and only
+recognises ``owl`` and ``catalina``; handed anything else it logs "config update
+not implemented" and returns None without making a request. That covers exactly
+one of the cameras here, the catalina. A superior, xt, xt2, white or lotus gets
+nothing, which is why blinkpy's own ``async_set_night_vision`` is a no-op on
+them and why these routes were originally built by hand.
 
-Every write goes through a blinkpy function except the v2 speaker volume route,
-which has none.
+So the word handed to it below is the name of a route, not a description of the
+camera: ``owl`` for the ``/owls/`` config route the floodlight answers, and
+``catalina`` for the classic update route that catalina, xt, xt2 and white all
+answer. The request is blinkpy's, the choice of which one is this module's, and
+that distinction is worth keeping visible rather than reading as though blinkpy
+supports these cameras.
+
+Only the v2 speaker volume route has no blinkpy function at all.
 """
 
 from __future__ import annotations
