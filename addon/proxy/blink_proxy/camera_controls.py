@@ -34,11 +34,10 @@ LOGGER = logging.getLogger(__name__)
 
 FLOODLIGHT_TYPES = {"superior"}
 # Cameras whose speaker volume the app saves to the v2 config as
-# lfr_sync_interval. Confirmed both ways: a level written here shows up on the
-# app's own Volume slider, and the speaker is audibly louder or quieter for it.
-# The name still reads like a radio setting and sits among radio telemetry, so
-# whether it does anything besides volume is unknown. It applies to the next
-# stream, not the one playing.
+# lfr_sync_interval: their Audio screen has one Volume slider, saving it writes
+# this field, a level written here moves that slider to match, and the speaker
+# is audibly louder or quieter for it. The camera reads it at session setup, so
+# a change lands on the next stream rather than the one playing.
 SPEAKER_TYPES = {"catalina", "xt2"}
 NIGHT_VISION_CODES = {0: "off", 1: "on", 2: "auto"}
 NIGHT_VISION_WORDS = {"off", "on", "auto"}
@@ -288,7 +287,9 @@ async def fetch_state(blink: Any, row: dict[str, Any]) -> dict[str, Any]:
     return read_state(row, config, owl_config)
 
 
-async def _command_finished(blink: Any, network: Any, answer: Any) -> bool:
+async def _command_finished(
+    blink: Any, network: Any, answer: Any, deadline: float
+) -> bool:
     """Wait, briefly, for Blink to actually carry out a queued change.
 
     Blink answers a write immediately and queues the work as a command; the
@@ -297,18 +298,23 @@ async def _command_finished(blink: Any, network: Any, answer: Any) -> bool:
     polling the command first.
 
     blinkpy's own wait gives up after MAX_RETRY seconds, far too long to hold a
-    request from the sheet open, so it is bounded here. A change that has not
-    landed by then is reported as pending rather than waited on.
+    request open. ``deadline`` is one budget for the whole call rather than per
+    write, because the route above allows thirty seconds for everything and a
+    body naming several controls plans several writes. A change still in flight
+    when the budget runs out is reported as pending instead of waited on.
     """
     command_id = answer.get("id") if isinstance(answer, dict) else None
     if not command_id:
         return True
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        return False
     try:
         return await asyncio.wait_for(
             blink_api.wait_for_command(
                 blink, {"network_id": network, "id": command_id}
             ),
-            timeout=COMMAND_WAIT_SECONDS,
+            timeout=remaining,
         )
     except (TimeoutError, asyncio.TimeoutError):
         return False
@@ -344,6 +350,7 @@ async def apply_changes(
     rejected: list[str] = []
     busy: list[str] = []
     pending: list[str] = []
+    deadline = asyncio.get_running_loop().time() + COMMAND_WAIT_SECONDS
     for kind, payload, controls in write_plan(row, clean):
         if kind == "lights":
             answer = await blink_api.request_floodlight(
@@ -352,7 +359,7 @@ async def apply_changes(
             if _answer_busy(answer):
                 busy.extend(controls)
                 rejected.extend(controls)
-            elif not await _command_finished(blink, network, answer):
+            elif not await _command_finished(blink, network, answer, deadline):
                 pending.extend(controls)
             continue
         # blinkpy documents the body as a JSON string. A dict is sent
@@ -389,7 +396,7 @@ async def apply_changes(
             rejected.extend(controls)
             if _answer_busy(answer):
                 busy.extend(controls)
-        elif not await _command_finished(blink, network, answer):
+        elif not await _command_finished(blink, network, answer, deadline):
             pending.extend(controls)
     state = await fetch_state(blink, row)
     state["rejected"] = rejected

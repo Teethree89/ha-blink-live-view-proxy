@@ -288,11 +288,11 @@ for that camera. It is the first part of this project that writes to your Blink
 account rather than only reading from it, so it is worth knowing exactly what it
 sends.
 
-The sheet shows only what the camera in front of you actually has. A Wired
-Floodlight gets the lamp, its brightness, its volume and its light settings; the
-battery cameras get night vision and a temperature reading; speaker volume
-appears on the models that have one. Nothing appears for a camera that cannot do
-it.
+The sheet shows only what the camera in front of you actually has. Night vision
+is on every camera. The Wired Floodlight adds the lamp, its brightness and its
+light settings, and is the one camera with no thermometer, so it shows no
+temperature. Everything else reports a temperature, and speaker volume appears
+on the models that have a speaker to set.
 
 | Control | Where it is written | Behind a blinkpy function |
 |---|---|---|

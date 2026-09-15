@@ -248,6 +248,23 @@ def test_apply(monkey_calls: list) -> None:
         check(True, "apply refuses an unsupported control before calling Blink")
 
 
+def test_capability_map() -> None:
+    """Pin who gets what, because the README describes this table."""
+    print("capabilities")
+    flood = cc.capabilities("superior")
+    xt2 = cc.capabilities("xt2")
+    white = cc.capabilities("white")
+    check(flood["night_vision"] and xt2["night_vision"] and white["night_vision"],
+          "night vision is on every camera, the floodlight included")
+    check(not flood["temperature"] and xt2["temperature"] and white["temperature"],
+          "the floodlight is the one camera with no thermometer")
+    check(flood["volume"] and xt2["volume"] and not white["volume"],
+          "volume is the floodlight and the speaker models, not white")
+    check(flood["brightness"] and flood["light_settings"]
+          and not xt2["brightness"] and not xt2["light_settings"],
+          "the lamp and its settings are the floodlight's alone")
+
+
 def test_blinkpy_routes() -> None:
     """Config writes go through blinkpy's own function, not a hand-built URL."""
     print("blinkpy routes")
@@ -295,6 +312,7 @@ def main() -> int:
     test_validate()
     test_write_plan()
     test_apply([])
+    test_capability_map()
     test_blinkpy_routes()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
