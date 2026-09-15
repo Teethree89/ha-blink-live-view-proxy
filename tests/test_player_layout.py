@@ -106,6 +106,12 @@ def test_saving_state() -> None:
           "a busy camera and a refusal read differently")
     check("Volume applies to the next live view" in page,
           "the volume slider says when it takes effect")
+    load = page.split("async function loadControls", 1)[1].split("\nconst ", 1)[0]
+    check("const startedAt = controlsEpoch;" in load and "if (startedAt !== controlsEpoch) return;" in load,
+          "a read that started before a write cannot land after it")
+    check("controlsEpoch += 1;" in page.split("async function sendControls", 1)[1][:400],
+          "and every write marks reads already in flight as stale")
+
     send = page.split("async function sendControls", 1)[1].split("\nfunction ", 1)[0]
     check("finally" in send and "renderControls();" in send.split("finally", 1)[1],
           "the sheet re-reads its state after every write, success or failure")

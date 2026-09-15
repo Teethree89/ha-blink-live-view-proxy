@@ -1998,6 +1998,8 @@ const motionDuration = document.getElementById("motionDuration");
 const manualDuration = document.getElementById("manualDuration");
 let controlsState = null;
 let controlsLoad = null;
+// Bumped by every write, so a read that started earlier knows it is stale.
+let controlsEpoch = 0;
 let openSheet = null;
 let closeRight = 0;
 
@@ -2085,17 +2087,23 @@ function renderControls() {{
 async function loadControls() {{
   if (controlsLoad) return controlsLoad;
   sheetNote.textContent = controlsState ? "" : "Reading camera settings";
+  // A read started before a write cannot be allowed to land after it. It was
+  // fetched from a camera that had not been changed yet, so applying it would
+  // put the control back where the viewer had just moved it from.
+  const startedAt = controlsEpoch;
   controlsLoad = (async () => {{
     try {{
       const response = await fetch(controlsUrl(), {{ cache: "no-store" }});
       if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${{response.status}}`);
-      controlsState = await response.json();
+      const fresh = await response.json();
+      if (startedAt !== controlsEpoch) return;
+      controlsState = fresh;
       sheetNote.textContent = "";
     }} catch (err) {{
       sheetNote.textContent = `Camera settings unavailable: ${{err.message}}`;
     }} finally {{
       controlsLoad = null;
-      renderControls();
+      if (startedAt === controlsEpoch) renderControls();
     }}
   }})();
   return controlsLoad;
@@ -2125,6 +2133,8 @@ function changedControls(changes) {{
 }}
 
 async function sendControls(changes, card, note) {{
+  // Any read already in flight is now out of date: it left before this change.
+  controlsEpoch += 1;
   // pointer-events alone still lets a focused slider move under the arrow keys,
   // so the inputs are disabled for real while the write is in flight.
   const inputs = Array.from(card.querySelectorAll("input, select, button"));
