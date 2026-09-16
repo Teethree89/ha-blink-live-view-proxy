@@ -328,9 +328,9 @@ light settings, have no in-session command, so while a live view is open they
 cannot be written at all: Blink answers their config route with the same 307
 until the last live view on the camera has closed. Those are held instead.
 Move the slider and the sheet says that brightness will be set when this live
-view ends, the line stays at the top of the picture after the sheet is closed,
-and the proxy writes it about two seconds after the last session on the camera
-closes, which is a second longer than Blink needed when measured. If the Blink
+view ends, says it again if you reopen the sheet, and the proxy writes it about
+two seconds after the last session on the camera closes, which is a second
+longer than Blink needed when measured. If the Blink
 app is still streaming from the camera the route stays busy, so the proxy
 retries for two minutes and then gives up. Either way the next time the sheet
 opens it says what was set and what was not. The queue is in the proxy's

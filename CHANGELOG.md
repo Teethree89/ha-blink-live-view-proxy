@@ -23,9 +23,9 @@ fixes that change nothing about how it is used.
   Designed and tested on an iPhone by @bbolinger.
 - **Proxy routes for those controls: `GET` and `POST /cameras/{slug}/controls`.**
   One flat document per camera, whichever of Blink's two config shapes it
-  answers. The Wired Floodlight is an "owl" with its lamp settings nested under
-  a `superior` block; every other camera answers the classic camera config with
-  integer codes. Every write goes through a blinkpy function —
+  answers. The Wired Floodlight is an "owl" with its lamp settings nested
+  under a `superior` block; every other camera answers the classic camera
+  config with integer codes. Every write goes through a blinkpy function —
   `request_floodlight` for the lamp, `request_update_config` for the rest —
   with two exceptions. One is the v2 camera config route carrying the speaker
   volume of the Outdoor 4 and XT2 as `lfr_sync_interval`, 1 to 8, which
@@ -33,24 +33,22 @@ fixes that change nothing about how it is used.
   its own Speaker Volume slider, and confirmed both ways: a level written here
   moves the app's slider to match, and the speaker is audibly louder or
   quieter for it. Whether volume is all it does is still unknown, and the
-  README says so. The other is the flood light while a live view is open.
-  The lamp goes over the live-view session itself, the way the Blink app
-  sends it, and the camera reports the lamp's state on that session as it
-  opens and within a fraction of a second of a change, so the switch shows
-  the real state from the first frame and a change is confirmed by the
-  camera. Blink refuses the lights route with 307 "system is busy" for as
-  long as any live view is open on the camera, which is why the route is
-  used only when nothing is streaming. A lamp lit this way lasts for that
-  live view and is off again by the time the next one opens. The
-  floodlight's other settings have no in-session command and are refused the
-  same way while any live view is open, so they land the moment the live
-  view ends instead: the sheet says so, the line stays at the top of the
-  picture, the proxy writes them once the last session on the camera has
-  closed and retries while Blink is still busy, and the next time the sheet
-  opens it says what was set and what was not. Blink answers 200 to
-  everything, so a write counts as taken only when the answer carries a
-  command; "System is busy" is reported back to the sheet instead of being
-  swallowed.
+  README says so. The other is the flood light while a live view is open. The
+  lamp goes over the live-view session itself, the way the Blink app sends it,
+  and the camera reports the lamp's state on that session as it opens and
+  within a fraction of a second of a change, so the switch shows the real
+  state from the first frame and a change is confirmed by the camera. Blink
+  refuses the lights route with 307 "system is busy" for as long as any live
+  view is open on the camera, which is why the route is used only when nothing
+  is streaming. A lamp lit this way lasts for that live view and is off again
+  by the time the next one opens. The floodlight's other settings have no
+  in-session command and are refused the same way while any live view is open,
+  so they land the moment the live view ends instead: the sheet says so, the
+  proxy writes them once the last session on the camera has closed and retries
+  while Blink is still busy, and the next time the sheet opens it says what
+  was set and what was not. Blink answers 200 to everything, so a write counts
+  as taken only when the answer carries a command; "System is busy" is
+  reported back to the sheet instead of being swallowed.
 - **The integration view `/api/blink_liveview_proxy/cameras/{slug}/controls`**
   fronts those routes for the player with the same browser token the player
   already holds, and expresses the temperature in the unit Home Assistant is
