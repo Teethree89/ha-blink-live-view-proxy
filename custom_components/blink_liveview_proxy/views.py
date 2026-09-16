@@ -989,6 +989,21 @@ body:not(.portrait) .live-actions button {{
   color:var(--ink-dim);
   margin-top:2px;
 }}
+.card .hint:empty {{
+  display:none;
+}}
+/* The line under a card's label carries the message about the last change
+   made there, so it is read where the finger is, however long the sheet. */
+.card .hint.says {{
+  color:var(--ink);
+}}
+.card .hint.warn {{
+  color:#fca5a5;
+}}
+.card.slider .hint {{
+  grid-column:1 / -1;
+  margin-top:0;
+}}
 .card .value {{
   font-size:14px;
   color:var(--ink-dim);
@@ -1110,12 +1125,20 @@ input[type=range]::-moz-range-thumb {{
   background:#fff;
   border:0;
 }}
+/* The sheet's own line, at the top where the eye lands on opening: reading,
+   unavailable, and what became of a change written after the last live view.
+   Messages about one control live in that control's card instead. */
 .sheet .note {{
-  min-height:18px;
-  margin-top:8px;
+  margin:0 2px 2px;
   font-size:13px;
-  color:#fca5a5;
+  color:var(--ink-dim);
   text-align:center;
+}}
+.sheet .note:empty {{
+  display:none;
+}}
+.sheet .note.warn {{
+  color:#fca5a5;
 }}
 .sheet select {{
   appearance:none;
@@ -1203,6 +1226,7 @@ body.sheet-open video {{
       </button>
     </div>
     <div class="body">
+      <div id="sheetNote" class="note"></div>
       <label id="cardFlood" class="card" hidden>
         <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 3z"/><path d="M3 12h1M20 12h1M5.5 5.5l.7.7M17.8 5.5l-.7.7"/></svg>
         <div class="text">
@@ -1225,6 +1249,7 @@ body.sheet-open video {{
           <div class="label">Brightness</div>
           <div id="brightValue" class="value"></div>
           <input id="brightRange" type="range" min="1" max="10" step="1" aria-label="Brightness">
+          <div class="hint"></div>
         </div>
       </div>
       <div class="pair">
@@ -1243,6 +1268,7 @@ body.sheet-open video {{
             <div id="volumeValue" class="value"></div>
           </div>
           <input id="volumeRange" type="range" min="1" max="8" step="1" aria-label="Volume">
+          <div class="hint"></div>
         </div>
       </div>
       <div id="lightSection" class="section" hidden>
@@ -1280,7 +1306,6 @@ body.sheet-open video {{
           <select id="manualDuration" aria-label="Manual timeout"></select>
         </div>
       </div>
-      <div id="sheetNote" class="note"></div>
     </div>
   </section>
 </main>
@@ -1566,14 +1591,6 @@ function talkMessage(message) {{
 function clearTalkMessage() {{
   liveNotice.textContent = "";
   liveNotice.hidden = true;
-}}
-
-// Blink would not take these while the live view holds the camera. The proxy
-// has them and writes them the moment this live view ends. The line lives in
-// the sheet, under the cards, beside the volume line that says the same kind
-// of thing; the notice at the top of the picture stays the microphone's.
-function deferredLine(names) {{
-  return capitalize(`${{namesFor(names)}} will be set when this live view ends.`);
 }}
 
 function setTalkButton(state, label) {{
@@ -1988,7 +2005,6 @@ const sheetClose = document.getElementById("sheetClose");
 const sheetNote = document.getElementById("sheetNote");
 const cardFlood = document.getElementById("cardFlood");
 const floodSwitch = document.getElementById("floodSwitch");
-const floodHint = document.getElementById("floodHint");
 const cardNight = document.getElementById("cardNight");
 const nightSwitch = document.getElementById("nightSwitch");
 const cardBright = document.getElementById("cardBright");
@@ -2058,13 +2074,50 @@ function floodHintText(state) {{
   return "On";
 }}
 
+// What each card says under its label: the message about the last change
+// made there, the held-back line while a change waits for the end of this
+// live view, or its usual hint. It is read where the finger is, however
+// long the sheet; the notice at the top of the picture stays the
+// microphone's.
+const CARD_FOR = {{
+  flood_light: cardFlood,
+  night_vision: cardNight,
+  brightness: cardBright,
+  volume: cardVolume,
+  dusk_to_dawn: duskSwitch.closest(".card"),
+  motion_activation: motionSwitch.closest(".card"),
+  motion_duration: motionDuration.closest(".card"),
+  manual_duration: manualDuration.closest(".card")
+}};
+const HELD_LINE = "Will be set when this live view ends.";
+const cardLines = new Map();
+
+function defaultHint(card, hint) {{
+  if (card === cardFlood) return floodHintText(controlsState || {{}});
+  if (!("hint" in hint.dataset)) hint.dataset.hint = hint.textContent.trim();
+  return hint.dataset.hint;
+}}
+
+function renderCardLines() {{
+  const held = (controlsState && controlsState.deferred) || [];
+  Object.keys(CARD_FOR).forEach((name) => {{
+    const card = CARD_FOR[name];
+    const hint = card.querySelector(".hint");
+    if (!hint) return;
+    const line = cardLines.get(card);
+    const isHeld = held.includes(name);
+    hint.textContent = line ? line.text : isHeld ? HELD_LINE : defaultHint(card, hint);
+    hint.classList.toggle("says", !!line || isHeld);
+    hint.classList.toggle("warn", !!(line && line.warn));
+  }});
+}}
+
 function renderControls() {{
   const state = controlsState;
   if (!state) return;
   const caps = state.capabilities || {{}};
   cardFlood.hidden = !caps.flood_light;
   floodSwitch.checked = !!state.flood_light;
-  floodHint.textContent = floodHintText(state);
   cardNight.hidden = !caps.night_vision || state.night_vision == null;
   nightSwitch.checked = state.night_vision !== "off";
   cardBright.hidden = !caps.brightness || state.brightness == null;
@@ -2091,11 +2144,13 @@ function renderControls() {{
     fillOptions(motionDuration, light.motion_duration_options || [], light.motion_duration);
     fillOptions(manualDuration, light.manual_duration_options || [], light.manual_duration);
   }}
+  renderCardLines();
   layoutSheets();
 }}
 
 async function loadControls() {{
   if (controlsLoad) return controlsLoad;
+  sheetNote.classList.remove("warn");
   sheetNote.textContent = controlsState ? "" : "Reading camera settings";
   // A read started before a write cannot be allowed to land after it. It was
   // fetched from a camera that had not been changed yet, so applying it would
@@ -2108,10 +2163,12 @@ async function loadControls() {{
       const fresh = await response.json();
       if (startedAt !== controlsEpoch) return;
       controlsState = fresh;
-      const held = fresh.deferred || [];
-      sheetNote.textContent = deferredResultText(fresh.deferred_result)
-        || (held.length ? deferredLine(held) : "");
+      // A fresh read is a clean slate for the cards: what a change came to is
+      // in the state now, and a held one renders its own line from it.
+      cardLines.clear();
+      sheetNote.textContent = deferredResultText(fresh.deferred_result);
     }} catch (err) {{
+      sheetNote.classList.add("warn");
       sheetNote.textContent = `Camera settings unavailable: ${{err.message}}`;
     }} finally {{
       controlsLoad = null;
@@ -2160,13 +2217,7 @@ function deferredResultText(result) {{
   return parts.join(" ");
 }}
 
-// light_settings arrives as a nested object; name what is inside it.
-function changedControls(changes) {{
-  return Object.keys(changes).flatMap((key) =>
-    key === "light_settings" ? Object.keys(changes[key] || {{}}) : [key]);
-}}
-
-async function sendControls(changes, card, note) {{
+async function sendControls(changes, card) {{
   // Any read already in flight is now out of date: it left before this change.
   controlsEpoch += 1;
   // pointer-events alone still lets a focused slider move under the arrow keys,
@@ -2176,7 +2227,7 @@ async function sendControls(changes, card, note) {{
   locked.forEach((el) => {{ el.disabled = true; }});
   card.classList.add("busy");
   card.setAttribute("aria-busy", "true");
-  note.textContent = "";
+  cardLines.delete(card);
   try {{
     const response = await fetch(controlsUrl(), {{
       method: "POST",
@@ -2191,29 +2242,28 @@ async function sendControls(changes, card, note) {{
     const held = controlsState.deferred || [];
     const volumeChanged = Object.prototype.hasOwnProperty.call(changes, "volume")
       && !(controlsState.capabilities || {{}}).flood_light;
+    // The message goes under this card's label; see renderCardLines. A held
+    // change needs no line here, its card renders the held line from the
+    // state until the live view ends.
     if (busy.length) {{
-      note.textContent = `The camera was busy and did not change ${{namesFor(busy)}}. Try again in a moment.`;
+      cardLines.set(card, {{ text: "The camera was busy. Try again in a moment.", warn: true }});
     }} else if (rejected.length) {{
-      note.textContent = `The camera refused to change ${{namesFor(rejected)}}.`;
-    }} else if (held.length) {{
-      // Blink would not take these while the live view holds the camera, so
-      // the proxy is holding them and writes them when this live view ends.
-      note.textContent = deferredLine(held);
-    }} else if (volumeChanged || pending.length) {{
+      cardLines.set(card, {{ text: "The camera refused this change.", warn: true }});
+    }} else if (!held.length && (volumeChanged || pending.length)) {{
       // The camera reads volume at session setup, and anything Blink is still
       // carrying out lands the same way: not on the stream that is playing.
       // The lamp is the exception: it goes over this very session and the
       // camera answers on it, so pending there only means the answer has not
       // arrived yet.
       const lampPending = pending.length === 1 && pending[0] === "flood_light";
-      note.textContent = volumeChanged
-        ? "Volume applies to the next live view, not this one."
-        : lampPending
-          ? "The camera has not confirmed the flood light yet."
-          : `${{namesFor(pending)}} applies to the next live view, not this one.`;
+      cardLines.set(card, {{
+        text: lampPending
+          ? "Not confirmed by the camera yet."
+          : "Applies to the next live view, not this one."
+      }});
     }}
   }} catch (err) {{
-    note.textContent = `Could not change ${{namesFor(changedControls(changes))}}: ${{err.message}}`;
+    cardLines.set(card, {{ text: `Could not change this: ${{err.message}}`, warn: true }});
   }} finally {{
     card.classList.remove("busy");
     card.removeAttribute("aria-busy");
@@ -2327,22 +2377,22 @@ back.hidden = !!(window.parent && window.parent !== window);
 controlsHint.addEventListener("click", () => {{ showSheet(sheet); loadControls(); }});
 sheetClose.addEventListener("click", () => hideSheet(sheet));
 fullscreenButton.addEventListener("click", toggleFullscreen);
-floodSwitch.addEventListener("change", () => sendControls({{ flood_light: floodSwitch.checked }}, cardFlood, sheetNote));
-nightSwitch.addEventListener("change", () => sendControls({{ night_vision: nightSwitch.checked ? "auto" : "off" }}, cardNight, sheetNote));
+floodSwitch.addEventListener("change", () => sendControls({{ flood_light: floodSwitch.checked }}, cardFlood));
+nightSwitch.addEventListener("change", () => sendControls({{ night_vision: nightSwitch.checked ? "auto" : "off" }}, cardNight));
 brightRange.addEventListener("input", () => {{
   setRangeFill(brightRange);
   brightValue.textContent = percentOf(brightRange.value, 10);
 }});
-brightRange.addEventListener("change", () => sendControls({{ brightness: Number(brightRange.value) }}, cardBright, sheetNote));
+brightRange.addEventListener("change", () => sendControls({{ brightness: Number(brightRange.value) }}, cardBright));
 volumeRange.addEventListener("input", () => {{
   setRangeFill(volumeRange);
   volumeValue.textContent = percentOf(volumeRange.value, 8);
 }});
-volumeRange.addEventListener("change", () => sendControls({{ volume: Number(volumeRange.value) }}, cardVolume, sheetNote));
-duskSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ dusk_to_dawn: duskSwitch.checked }} }}, duskSwitch.closest(".card"), sheetNote));
-motionSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ motion_activation: motionSwitch.checked }} }}, motionSwitch.closest(".card"), sheetNote));
-motionDuration.addEventListener("change", () => sendControls({{ light_settings: {{ motion_duration: Number(motionDuration.value) }} }}, motionDuration.closest(".card"), sheetNote));
-manualDuration.addEventListener("change", () => sendControls({{ light_settings: {{ manual_duration: Number(manualDuration.value) }} }}, manualDuration.closest(".card"), sheetNote));
+volumeRange.addEventListener("change", () => sendControls({{ volume: Number(volumeRange.value) }}, cardVolume));
+duskSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ dusk_to_dawn: duskSwitch.checked }} }}, duskSwitch.closest(".card")));
+motionSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ motion_activation: motionSwitch.checked }} }}, motionSwitch.closest(".card")));
+motionDuration.addEventListener("change", () => sendControls({{ light_settings: {{ motion_duration: Number(motionDuration.value) }} }}, motionDuration.closest(".card")));
+manualDuration.addEventListener("change", () => sendControls({{ light_settings: {{ manual_duration: Number(manualDuration.value) }} }}, manualDuration.closest(".card")));
 overlay.addEventListener("click", () => {{
   if (statusText.textContent.startsWith("Tap play")) video.play().catch(() => {{}});
 }});

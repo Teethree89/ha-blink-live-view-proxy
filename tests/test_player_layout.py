@@ -104,18 +104,24 @@ def test_saving_state() -> None:
           "a control is really disabled while its change is in flight")
     check("The camera was busy" in page and "The camera refused" in page,
           "a busy camera and a refusal read differently")
-    check("Volume applies to the next live view" in page,
+    check("Applies to the next live view, not this one." in page,
           "the volume slider says when it takes effect")
     check("/controls?token=" in page and "&session=${encodeURIComponent(sessionId)}" in page,
           "the controls route is told which live view is this player's, so the lamp can ride it")
-    check("The camera has not confirmed the flood light yet." in page,
+    check("Not confirmed by the camera yet." in page,
           "a lamp the camera has not yet reported reads as unconfirmed, not as next-session")
-    check("will be set when this live view ends." in page and "after your last live view" in page,
+    check("Will be set when this live view ends." in page and "after your last live view" in page,
           "a setting Blink would not take mid-stream says when it lands, and the next open says what happened")
+    check(page.index('id="sheetNote"') < page.index('id="cardFlood"'),
+          "the sheet's own line sits at the top, where it is seen however long the sheet")
+    bright = page.split('id="cardBright"', 1)[1].split('id="cardTemp"', 1)[0]
+    volume = page.split('id="cardVolume"', 1)[1].split('id="lightSection"', 1)[0]
+    check('class="hint"' in bright and 'class="hint"' in volume,
+          "the slider cards have a line of their own for the message")
     talk = page.split("function talkMessage", 1)[1].split("\nfunction ", 1)[0]
     check("liveNotice.textContent = message;" in talk and "liveNotice.hidden = !message;" in talk,
           "the notice at the top of the picture is the microphone's, exactly as before")
-    check("setDeferredNotice" not in page and "will be set when this live view ends" not in talk,
+    check("setDeferredNotice" not in page and "Will be set when this live view ends" not in talk,
           "the held-back line stays in the sheet and never reaches the notice")
     load = page.split("async function loadControls", 1)[1].split("\nconst ", 1)[0]
     check("const startedAt = controlsEpoch;" in load and "if (startedAt !== controlsEpoch) return;" in load,
@@ -128,6 +134,8 @@ def test_saving_state() -> None:
           "the sheet re-reads its state after every write, success or failure")
     check("locked.forEach((el) => { el.disabled = false; });" in send.split("finally", 1)[1],
           "and hands the control back even when the write threw")
+    check("cardLines.set(card, " in send and "sheetNote" not in send,
+          "a write's message goes to the card that was touched, not to a line elsewhere")
 
 
 def main() -> int:
