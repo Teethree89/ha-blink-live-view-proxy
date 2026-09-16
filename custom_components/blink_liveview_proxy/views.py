@@ -1554,18 +1554,42 @@ function pcm16Buffer(floatData) {{
   return pcm.buffer;
 }}
 
+// One notice box at the top of the picture, two things that write to it: talk
+// messages, and the line naming settings the proxy will write when this live
+// view ends. Each keeps its own text so neither erases the other.
+let talkText = "";
+let deferredText = "";
+
+function renderLiveNotice() {{
+  const lines = [talkText, deferredText].filter(Boolean);
+  liveNotice.textContent = lines.join(" ");
+  liveNotice.hidden = lines.length === 0;
+}}
+
 function talkMessage(message) {{
   // #status lives inside #overlay, and the same onplaying handler that enables
   // Hold Talk hides the overlay. Anything written there once playback starts is
   // invisible, so talk messages go to a notice that outlives the overlay.
   statusText.textContent = message;
-  liveNotice.textContent = message;
-  liveNotice.hidden = !message;
+  talkText = message || "";
+  renderLiveNotice();
 }}
 
 function clearTalkMessage() {{
-  liveNotice.textContent = "";
-  liveNotice.hidden = true;
+  talkText = "";
+  renderLiveNotice();
+}}
+
+function deferredLine(names) {{
+  return capitalize(`${{namesFor(names)}} will be set when this live view ends.`);
+}}
+
+function setDeferredNotice(names) {{
+  // Blink would not take these while the live view holds the camera. The proxy
+  // has them and writes them the moment this live view ends, so the line
+  // stays up after the sheet is closed.
+  deferredText = names && names.length ? deferredLine(names) : "";
+  renderLiveNotice();
 }}
 
 function setTalkButton(state, label) {{
@@ -1811,6 +1835,7 @@ function setLoading(message) {{
 
 function setEnded(message) {{
   clearTalkMessage();
+  setDeferredNotice([]);
   overlay.classList.remove("hidden");
   spinner.hidden = true;
   actions.hidden = false;
@@ -2100,7 +2125,10 @@ async function loadControls() {{
       const fresh = await response.json();
       if (startedAt !== controlsEpoch) return;
       controlsState = fresh;
-      sheetNote.textContent = "";
+      const held = fresh.deferred || [];
+      sheetNote.textContent = deferredResultText(fresh.deferred_result)
+        || (held.length ? deferredLine(held) : "");
+      setDeferredNotice(held);
     }} catch (err) {{
       sheetNote.textContent = `Camera settings unavailable: ${{err.message}}`;
     }} finally {{
@@ -2126,6 +2154,28 @@ function namesFor(controls) {{
   const labels = controls.map((name) => CONTROL_LABELS[name] || name);
   if (labels.length <= 1) return labels[0] || "that";
   return labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1];
+}}
+
+function capitalize(text) {{
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}}
+
+// What became of the settings written after the previous live view. The proxy
+// reports it once, on the first read after the write, so this is the sheet's
+// opening line that one time and nothing after.
+function deferredResultText(result) {{
+  if (!result) return "";
+  const applied = result.applied || [];
+  const failed = result.failed || [];
+  const parts = [];
+  if (applied.length) {{
+    parts.push(capitalize(`${{namesFor(applied)}} ${{applied.length > 1 ? "were" : "was"}} set after your last live view.`));
+  }}
+  if (failed.length) {{
+    const why = (result.busy || []).length ? ": the camera stayed busy" : "";
+    parts.push(`Could not set ${{namesFor(failed)}} after your last live view${{why}}.`);
+  }}
+  return parts.join(" ");
 }}
 
 // light_settings arrives as a nested object; name what is inside it.
@@ -2156,12 +2206,18 @@ async function sendControls(changes, card, note) {{
     const rejected = controlsState.rejected || [];
     const busy = controlsState.busy || [];
     const pending = controlsState.pending || [];
+    const held = controlsState.deferred || [];
     const volumeChanged = Object.prototype.hasOwnProperty.call(changes, "volume")
       && !(controlsState.capabilities || {{}}).flood_light;
+    setDeferredNotice(held);
     if (busy.length) {{
       note.textContent = `The camera was busy and did not change ${{namesFor(busy)}}. Try again in a moment.`;
     }} else if (rejected.length) {{
       note.textContent = `The camera refused to change ${{namesFor(rejected)}}.`;
+    }} else if (held.length) {{
+      // Blink would not take these while the live view holds the camera, so
+      // the proxy is holding them and writes them when this live view ends.
+      note.textContent = deferredLine(held);
     }} else if (volumeChanged || pending.length) {{
       // The camera reads volume at session setup, and anything Blink is still
       // carrying out lands the same way: not on the stream that is playing.

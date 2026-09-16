@@ -38,6 +38,7 @@ that session; the route is kept for a write that arrives with nothing streaming.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 from typing import Any
@@ -61,10 +62,103 @@ VOLUME_RANGE = (1, 8)
 # minutes, which is far longer than the sheet can hold a request open.
 COMMAND_WAIT_SECONDS = 12
 READ_BACK_INTERVAL = 1.5
+# A held-back write goes out once the last live view on the camera has closed.
+# Blink released the camera within a second of the proxy's session ending
+# when measured; the settle time is margin on that. While the Blink app is
+# still streaming the route stays busy, so the flush retries for a while and
+# then gives up and says so.
+DEFERRED_SETTLE_SECONDS = 2.0
+DEFERRED_RETRY_SECONDS = 5.0
+DEFERRED_GIVE_UP_SECONDS = 120.0
 
 
 def _product_type(row: dict[str, Any]) -> str:
     return str(row.get("product_type") or "").casefold()
+
+
+def control_names(changes: dict[str, Any]) -> list[str]:
+    """Name the controls in a changes document, light settings by their own names."""
+    names: list[str] = []
+    for key, value in changes.items():
+        if key == "light_settings" and isinstance(value, dict):
+            names.extend(value.keys())
+        else:
+            names.append(key)
+    return names
+
+
+def _subset(changes: dict[str, Any], names: list[str]) -> dict[str, Any]:
+    """The part of a changes document that carries the named controls."""
+    wanted = set(names)
+    out: dict[str, Any] = {}
+    for key, value in changes.items():
+        if key == "light_settings" and isinstance(value, dict):
+            kept = {name: item for name, item in value.items() if name in wanted}
+            if kept:
+                out["light_settings"] = kept
+        elif key in wanted:
+            out[key] = value
+    return out
+
+
+def _overlay(state: dict[str, Any], changes: dict[str, Any]) -> None:
+    """Show a changes document on top of a state document."""
+    for key, value in changes.items():
+        if key == "light_settings" and isinstance(value, dict):
+            if isinstance(state.get("light_settings"), dict):
+                state["light_settings"].update(value)
+        else:
+            state[key] = value
+
+
+def now_stamp() -> str:
+    """The moment a held-back write was carried out, for the sheet to show."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+class DeferredControls:
+    """Settings held back while a live view keeps Blink busy, written when it ends.
+
+    Blink answers the floodlight's config route 307 for as long as any live
+    view is open on the camera, and the Controls sheet only exists inside one,
+    so a change made there can never land while it is made. It lands a second
+    after the session closes, measured, which is what this is for: one queue
+    per camera of the changes still to write, and the outcome of the last
+    flush, kept until the sheet has read it once. It lives in memory and does
+    not survive the proxy restarting.
+    """
+
+    def __init__(self) -> None:
+        self._queued: dict[str, dict[str, Any]] = {}
+        self._results: dict[str, dict[str, Any]] = {}
+
+    def queue(self, slug: str, changes: dict[str, Any]) -> None:
+        """Hold validated changes; the latest value of a control wins."""
+        entry = self._queued.setdefault(slug, {})
+        for key, value in changes.items():
+            if key == "light_settings" and isinstance(value, dict):
+                entry.setdefault("light_settings", {}).update(value)
+            else:
+                entry[key] = value
+
+    def queued(self, slug: str) -> dict[str, Any]:
+        """A copy of what is waiting for the camera."""
+        entry = self._queued.get(slug, {})
+        return {k: (dict(v) if isinstance(v, dict) else v) for k, v in entry.items()}
+
+    def names(self, slug: str) -> list[str]:
+        return control_names(self._queued.get(slug, {}))
+
+    def take(self, slug: str) -> dict[str, Any]:
+        """Remove and return the camera's queue, for the flush."""
+        return self._queued.pop(slug, {})
+
+    def record(self, slug: str, result: dict[str, Any]) -> None:
+        self._results[slug] = result
+
+    def take_result(self, slug: str) -> dict[str, Any] | None:
+        """Hand over the last flush's outcome once, to whoever reads next."""
+        return self._results.pop(slug, None)
 
 
 def capabilities(product_type: str) -> dict[str, bool]:
@@ -288,9 +382,17 @@ def write_plan(
 
 
 async def fetch_state(
-    blink: Any, row: dict[str, Any], liveview: Any | None = None
+    blink: Any,
+    row: dict[str, Any],
+    liveview: Any | None = None,
+    deferred: DeferredControls | None = None,
 ) -> dict[str, Any]:
     """Read the camera's current settings from Blink.
+
+    ``deferred`` is the registry of changes held back for after the live view,
+    if the caller keeps one. What is waiting there is shown over the camera's
+    own values and named in ``deferred``, so the sheet keeps showing what was
+    asked for rather than snapping back to what the camera still reports.
 
     ``liveview`` is the proxy's open live view on this camera, if it has one:
     anything with a ``flood_light`` attribute holding what the camera has
@@ -316,6 +418,10 @@ async def fetch_state(
     reported = getattr(liveview, "flood_light", None)
     if reported is not None and state["capabilities"]["flood_light"]:
         state["flood_light"] = reported
+    if deferred is not None:
+        held = deferred.queued(str(row.get("slug")))
+        _overlay(state, held)
+        state["deferred"] = control_names(held)
     return state
 
 
@@ -411,13 +517,22 @@ async def _lamp_in_band(liveview: Any, on: bool, row: dict[str, Any]) -> bool:
 
 
 async def apply_changes(
-    blink: Any, row: dict[str, Any], changes: Any, liveview: Any | None = None
+    blink: Any,
+    row: dict[str, Any],
+    changes: Any,
+    liveview: Any | None = None,
+    deferred: DeferredControls | None = None,
 ) -> dict[str, Any]:
     """Send the requested changes to Blink and return what it holds now.
 
     ``liveview`` is the proxy's open live view on this camera, or None. With
     one, the lamp goes over it (see ``_lamp_in_band``) and the read back takes
     the lamp state the camera reports over it.
+
+    ``deferred`` is where a change Blink calls busy during that live view is
+    held for writing once the live view ends. Given both, such a change is
+    reported in ``deferred`` rather than ``busy``, and the answer shows the
+    value that was asked for.
     """
     clean = validate_changes(row, changes)
     network = row["network_id"]
@@ -475,16 +590,27 @@ async def apply_changes(
                 busy.extend(controls)
         elif not await _command_finished(blink, network, answer, deadline):
             pending.extend(controls)
+    held_names: list[str] = []
+    if busy and liveview is not None and deferred is not None:
+        # The live view holds the camera, and the sheet only exists inside one,
+        # so a retry from there can never succeed. What Blink called busy is
+        # held and written once the last session on the camera has closed.
+        held = _subset(clean, busy)
+        deferred.queue(str(row.get("slug")), held)
+        held_names = control_names(held)
+        rejected = [c for c in rejected if c not in held_names]
+        busy = [c for c in busy if c not in held_names]
     # Read back until the camera actually reports what was asked for. One read
     # straight after the write is not enough: the owl config route keeps serving
     # the old value for a few seconds after accepting a change, and that stale
     # number then overwrites the control the viewer just moved.
-    state = await fetch_state(blink, row, liveview)
-    waiting = [c for c in _unreflected(clean, state) if c not in rejected]
+    settled = rejected + held_names
+    state = await fetch_state(blink, row, liveview, deferred)
+    waiting = [c for c in _unreflected(clean, state) if c not in settled]
     while waiting and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(READ_BACK_INTERVAL)
-        state = await fetch_state(blink, row, liveview)
-        waiting = [c for c in _unreflected(clean, state) if c not in rejected]
+        state = await fetch_state(blink, row, liveview, deferred)
+        waiting = [c for c in _unreflected(clean, state) if c not in settled]
     pending = waiting
     state["rejected"] = rejected
     state["busy"] = busy
@@ -499,3 +625,45 @@ async def apply_changes(
         ):
             state["light_settings"][name] = clean["light_settings"][name]
     return state
+
+
+async def flush_deferred(
+    blink: Any,
+    row: dict[str, Any],
+    changes: dict[str, Any],
+    *,
+    retry_interval: float = DEFERRED_RETRY_SECONDS,
+    give_up_after: float = DEFERRED_GIVE_UP_SECONDS,
+) -> dict[str, Any]:
+    """Write held-back changes now that the live view has closed.
+
+    Values the camera already reports are dropped first: Blink answers a
+    same-value write with ``state: done`` and no command, which reads as a
+    refusal. Whatever Blink still calls busy, because another client is
+    streaming from the camera, is retried until ``give_up_after`` and then
+    reported as such. The answer names what was set and what was not.
+    """
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    state = await fetch_state(blink, row)
+    wanted = _subset(changes, _unreflected(changes, state))
+    wanted_names = control_names(wanted)
+    result: dict[str, Any] = {
+        "applied": [c for c in control_names(changes) if c not in wanted_names],
+        "failed": [],
+        "busy": [],
+        "at": now_stamp(),
+    }
+    if not wanted:
+        return result
+    while True:
+        state = await apply_changes(blink, row, wanted)
+        busy = list(state.get("busy") or [])
+        if not busy or loop.time() - started >= give_up_after:
+            break
+        await asyncio.sleep(retry_interval)
+    rejected = list(state.get("rejected") or [])
+    result["failed"] = rejected
+    result["busy"] = busy
+    result["applied"].extend(c for c in wanted_names if c not in rejected)
+    return result

@@ -41,9 +41,15 @@ fixes that change nothing about how it is used.
   opens and within a fraction of a second of a change, so the proxy now does
   the same whenever it holds that session, and falls back to the route when
   nothing is streaming. A lamp lit this way lasts for that live view and is
-  off again by the time the next one opens. Blink answers 200 to everything, so a write
-  counts as taken only when the answer carries a command; "System is busy" is
-  reported back to the sheet instead of being swallowed.
+  off again by the time the next one opens. The floodlight's other settings
+  have no in-session command and are refused the same way while any live
+  view is open, so they are held instead: the sheet says they will be set
+  when the live view ends, the line stays at the top of the picture, the
+  proxy writes them once the last session on the camera has closed and
+  retries while Blink is still busy, and the next time the sheet opens it
+  says what was set and what was not. Blink answers 200 to everything, so a
+  write counts as taken only when the answer carries a command; "System is
+  busy" is reported back to the sheet instead of being swallowed.
 - **The integration view `/api/blink_liveview_proxy/cameras/{slug}/controls`**
   fronts those routes for the player with the same browser token the player
   already holds, and expresses the temperature in the unit Home Assistant is

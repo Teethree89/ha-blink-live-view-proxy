@@ -206,6 +206,14 @@ session, not what the config document says. See [Camera
 Controls](../README.md#camera-controls) for what each of those does and does
 not promise.
 
+Any other control Blink calls busy while the proxy holds a live view on the
+camera is held rather than refused: the answer lists it in `deferred`, shows
+the value that was asked for, and leaves it out of `busy`. The proxy writes
+held controls once the last live view on the camera has closed, retrying
+while Blink stays busy, and the first `GET` after that carries
+`deferred_result` with `applied`, `failed`, `busy` and `at`. A `GET` while
+controls are held shows their asked-for values and names them in `deferred`.
+
 ## Last Watched Live View
 
 - `GET /cameras/{slug}/last-liveview`

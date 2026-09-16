@@ -331,6 +331,145 @@ def test_lamp_over_live_view() -> None:
     check(route_calls == [True], "with nothing streaming the lamp goes through blinkpy's lights route")
 
 
+def test_held_back() -> None:
+    """Settings Blink refuses during a stream are held and written after it."""
+    print("held-back settings")
+    cc.COMMAND_WAIT_SECONDS = 0.2
+    cc.READ_BACK_INTERVAL = 0.01
+
+    store = cc.DeferredControls()
+    store.queue("flood_light", {"brightness": 5, "light_settings": {"dusk_to_dawn": True}})
+    store.queue("flood_light", {"brightness": 6, "light_settings": {"manual_duration": 60}})
+    check(store.queued("flood_light") == {"brightness": 6, "light_settings": {"dusk_to_dawn": True, "manual_duration": 60}},
+          "a later value replaces an earlier one, and light settings merge by name")
+    check(store.names("flood_light") == ["brightness", "dusk_to_dawn", "manual_duration"],
+          "the queue names controls the way the sheet does")
+    taken = store.take("flood_light")
+    check(taken["brightness"] == 6 and store.queued("flood_light") == {} and store.names("flood_light") == [],
+          "taking the queue empties it")
+    check(store.take_result("flood_light") is None, "no outcome until something has been written")
+
+    posts: list = []
+    busy = {"on": True}
+
+    async def fake_update_config(blink, network, camera_id, product_type="owl", data=None):
+        posts.append(json.loads(data))
+        if busy["on"]:
+            return FakeResponse({"message": "System is busy, please wait", "code": 307})
+        return FakeResponse({"command": "config_set", "state": "new"})
+
+    async def fake_get_config(blink, network, camera_id, product_type="owl"):
+        return OWL_CONFIG
+
+    cc.blink_api.request_update_config = fake_update_config
+    cc.blink_api.request_get_config = fake_get_config
+
+    store = cc.DeferredControls()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"brightness": 5}, FakeLiveView(), store))
+    check(state["deferred"] == ["brightness"] and state["busy"] == [] and state["rejected"] == [],
+          "a busy answer during a live view is held, not reported as busy")
+    check(state["brightness"] == 5 and state["pending"] == [],
+          "the sheet is shown the value that was asked for, and it is not pending")
+    check(store.queued("flood_light") == {"brightness": 5}, "the change waits in the camera's queue")
+    state = asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, FakeLiveView(), store))
+    check(state["brightness"] == 5 and state["deferred"] == ["brightness"],
+          "a read during the stream shows the held value and names it")
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"light_settings": {"dusk_to_dawn": True}},
+                                         FakeLiveView(), store))
+    check(state["deferred"] == ["brightness", "dusk_to_dawn"] and state["light_settings"]["dusk_to_dawn"] is True,
+          "a light setting is held under its own name and shown as asked")
+    fresh = cc.DeferredControls()
+    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"brightness": 5}, None, fresh))
+    check(state["busy"] == ["brightness"] and fresh.queued("flood_light") == {},
+          "with no live view of ours a busy camera is busy, and nothing is held")
+
+    calls = {"n": 0}
+
+    async def flaky_update_config(blink, network, camera_id, product_type="owl", data=None):
+        calls["n"] += 1
+        posts.append(json.loads(data))
+        if calls["n"] <= 2:
+            return FakeResponse({"message": "System is busy, please wait", "code": 307})
+        return FakeResponse({"command": "config_set", "state": "new"})
+
+    cc.blink_api.request_update_config = flaky_update_config
+    posts.clear()
+    result = asyncio.run(cc.flush_deferred(FakeBlink(), FLOOD_ROW,
+                                           {"brightness": 5, "light_settings": {"dusk_to_dawn": True}},
+                                           retry_interval=0.01, give_up_after=5))
+    check(calls["n"] == 3 and result["applied"] == ["brightness", "dusk_to_dawn"] and result["failed"] == [],
+          "a flush retries while Blink is busy and reports what it set")
+    check(posts[-1] == {"superior": {"illuminator_intensity": 5, "auto_on_off_enabled": True}, "light_brightness": 5},
+          "held changes go out as one config write")
+
+    async def always_busy(blink, network, camera_id, product_type="owl", data=None):
+        return FakeResponse({"message": "System is busy, please wait", "code": 307})
+
+    cc.blink_api.request_update_config = always_busy
+    result = asyncio.run(cc.flush_deferred(FakeBlink(), FLOOD_ROW, {"brightness": 5},
+                                           retry_interval=0.01, give_up_after=0.05))
+    check(result["applied"] == [] and result["failed"] == ["brightness"] and result["busy"] == ["brightness"],
+          "a camera that stays busy is given up on, and reported as busy")
+
+    calls["n"] = 0
+    cc.blink_api.request_update_config = flaky_update_config
+    result = asyncio.run(cc.flush_deferred(FakeBlink(), FLOOD_ROW, {"brightness": 3},
+                                           retry_interval=0.01, give_up_after=1))
+    check(calls["n"] == 0 and result["applied"] == ["brightness"],
+          "a value the camera already reports is not written again")
+
+
+def test_flush_scheduling() -> None:
+    """The write waits for the camera to be free, then records what happened."""
+    print("flush scheduling")
+    from blink_proxy import routes
+
+    cc.COMMAND_WAIT_SECONDS = 0.2
+    cc.READ_BACK_INTERVAL = 0.01
+    cc.DEFERRED_SETTLE_SECONDS = 0.01
+
+    async def fake_update_config(blink, network, camera_id, product_type="owl", data=None):
+        return FakeResponse({"command": "config_set", "state": "new"})
+
+    async def fake_get_config(blink, network, camera_id, product_type="owl"):
+        return OWL_CONFIG
+
+    cc.blink_api.request_update_config = fake_update_config
+    cc.blink_api.request_get_config = fake_get_config
+
+    class FakeClient:
+        def list_cameras(self):
+            return [FLOOD_ROW]
+
+        def _require_blink(self):
+            return FakeBlink()
+
+    store = cc.DeferredControls()
+    store.queue("flood_light", {"brightness": 5})
+    app = {"deferred_controls": store, "deferred_tasks": {},
+           "active_liveviews": {"flood_light:other": object()}, "client": FakeClient()}
+
+    async def scenario():
+        task = routes.schedule_deferred_flush(app, "flood_light")
+        await asyncio.sleep(0.05)
+        still_held = store.queued("flood_light")
+        app["active_liveviews"].clear()
+        await asyncio.wait_for(task, 5)
+        return still_held
+
+    still_held = asyncio.run(scenario())
+    check(still_held == {"brightness": 5}, "the write waits while another session on the camera is open")
+    outcome = store.take_result("flood_light")
+    check(store.queued("flood_light") == {} and outcome is not None and outcome["applied"] == ["brightness"],
+          "and goes out once the camera is free, with the outcome kept for the next read")
+    check(store.take_result("flood_light") is None, "the outcome is handed over once")
+
+    async def nothing():
+        return routes.schedule_deferred_flush(app, "flood_light")
+
+    check(asyncio.run(nothing()) is None, "nothing held, nothing scheduled")
+
+
 def test_capability_map() -> None:
     """Pin who gets what, because the README describes this table."""
     print("capabilities")
@@ -396,6 +535,8 @@ def main() -> int:
     test_write_plan()
     test_apply([])
     test_lamp_over_live_view()
+    test_held_back()
+    test_flush_scheduling()
     test_capability_map()
     test_blinkpy_routes()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")

@@ -309,17 +309,32 @@ busy" for as long as any live view is open on the camera, and this sheet only
 exists inside one, so from here that route can never succeed. The Blink app
 never contends with that: while it is watching, it sends the lamp as an inline
 command over the live-view session, the same socket the video arrives on, and
-the camera reports the lamp's state back on that socket, as the session
-opens and again within a fraction of a second of a change. This does the
-same when it holds a live view on the camera. Two things to know about a lamp
-worked this way, both measured on a Wired Floodlight: it stays on for the rest
-of that live view and is off again by the time the next one opens, and
-Blink's config document does not record it, so the sheet takes the camera's
-word over the document while the session is open. The command is nine bytes, msgtype
-`0x14` with `1` for on or `2` for off in the sequence field and no payload, and
-the camera's report is msgtype `0x15` with `0` or `1`; both were read from the
+the camera reports the lamp's state back on that socket, as the session opens
+and again within a fraction of a second of a change. This does the same when
+it holds a live view on the camera. The command is nine bytes, msgtype `0x14`
+with `1` for on or `2` for off in the sequence field and no payload, and the
+camera's report is msgtype `0x15` with `0` or `1`; both were read from the
 app's own live-view classes and its session with a Wired Floodlight. A write
 that arrives with nothing streaming still uses `request_floodlight`.
+
+Two things to know about a lamp worked this way, both measured on a Wired
+Floodlight: it stays on for the rest of that live view and is off again by the
+time the next one opens, and Blink's config document does not record it, so
+the sheet takes the camera's word over the document while the session is
+open.
+
+The floodlight's other settings, brightness, night vision, volume and the
+light settings, have no in-session command, so while a live view is open they
+cannot be written at all: Blink answers their config route with the same 307
+until the last live view on the camera has closed. Those are held instead.
+Move the slider and the sheet says that brightness will be set when this live
+view ends, the line stays at the top of the picture after the sheet is closed,
+and the proxy writes it about two seconds after the last session on the camera
+closes, which is a second longer than Blink needed when measured. If the Blink
+app is still streaming from the camera the route stays busy, so the proxy
+retries for two minutes and then gives up. Either way the next time the sheet
+opens it says what was set and what was not. The queue is in the proxy's
+memory and does not survive a restart.
 
 "Route named by hand" is worth explaining, because it is most of the table.
 `request_update_config` chooses its route from the product type it is handed,

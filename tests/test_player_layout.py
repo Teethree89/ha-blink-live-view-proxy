@@ -110,6 +110,13 @@ def test_saving_state() -> None:
           "the controls route is told which live view is this player's, so the lamp can ride it")
     check("The camera has not confirmed the flood light yet." in page,
           "a lamp the camera has not yet reported reads as unconfirmed, not as next-session")
+    check("will be set when this live view ends." in page and "after your last live view" in page,
+          "a setting Blink would not take mid-stream says when it lands, and the next open says what happened")
+    ended = page.split("function setEnded", 1)[1].split("\nfunction ", 1)[0]
+    check("setDeferredNotice([])" in ended, "the held-back line leaves the notice when the live view ends")
+    notice = page.split("function renderLiveNotice", 1)[1].split("\nfunction ", 1)[0]
+    check("talkText" in notice and "deferredText" in notice,
+          "talk messages and the held-back line share the notice without erasing each other")
     load = page.split("async function loadControls", 1)[1].split("\nconst ", 1)[0]
     check("const startedAt = controlsEpoch;" in load and "if (startedAt !== controlsEpoch) return;" in load,
           "a read that started before a write cannot land after it")
