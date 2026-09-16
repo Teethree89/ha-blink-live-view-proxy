@@ -598,6 +598,9 @@ async def apply_changes(
         held = _subset(clean, busy)
         deferred.queue(str(row.get("slug")), held)
         held_names = control_names(held)
+        LOGGER.info(
+            "Holding %s for %s until its live view ends", held_names, row.get("slug")
+        )
         rejected = [c for c in rejected if c not in held_names]
         busy = [c for c in busy if c not in held_names]
     # Read back until the camera actually reports what was asked for. One read
