@@ -303,19 +303,19 @@ on the models that have a speaker to set.
 | Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | not covered, see below |
 | Temperature | read only | `request_camera_info` |
 
-The flood light is the one control that does not go through Blink's HTTP API
-while you are watching. Blink answers the lights route with 307 "system is
-busy" for as long as any live view is open on the camera, and this sheet only
-exists inside one, so from here that route can never succeed. The Blink app
-never contends with that: while it is watching, it sends the lamp as an inline
-command over the live-view session, the same socket the video arrives on, and
-the camera reports the lamp's state back on that socket, as the session opens
-and again within a fraction of a second of a change. This does the same when
-it holds a live view on the camera. The command is nine bytes, msgtype `0x14`
-with `1` for on or `2` for off in the sequence field and no payload, and the
-camera's report is msgtype `0x15` with `0` or `1`; both were read from the
+The flood light works from the sheet the whole time a live view is open, and
+the switch shows the lamp's real state from the moment the picture starts.
+While you are watching, the lamp goes over the live-view session itself, the
+same socket the video arrives on, which is how the Blink app does it: the
+command is nine bytes, msgtype `0x14` with `1` for on or `2` for off in the
+sequence field and no payload, and the camera reports the lamp's state back
+on the same socket as msgtype `0x15` with `0` or `1`, as the session opens
+and again within a fraction of a second of a change. Both were read from the
 app's own live-view classes and its session with a Wired Floodlight. A write
-that arrives with nothing streaming still uses `request_floodlight`.
+that arrives with nothing streaming uses `request_floodlight` instead. The
+reason for two routes is that Blink answers the lights route with 307 "system
+is busy" for as long as any live view is open on the camera, and this sheet
+only exists inside one, so from here that route could never succeed.
 
 Two things to know about a lamp worked this way, both measured on a Wired
 Floodlight: it stays on for the rest of that live view and is off again by the
@@ -374,7 +374,9 @@ and says the value applies to the next live view.
 A camera that is still busy with a previous command refuses the next one. The
 sheet names the control that did not change and says whether it is worth trying
 again in a moment, and each control is disabled while its own change is in
-flight so a second one cannot be sent by accident.
+flight so a second one cannot be sent by accident. The one exception is a
+floodlight setting during a live view, which is held for the end of the live
+view instead, as described above.
 
 ## Dashboards
 
