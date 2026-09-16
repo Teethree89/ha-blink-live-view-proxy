@@ -323,18 +323,18 @@ time the next one opens, and Blink's config document does not record it, so
 the sheet takes the camera's word over the document while the session is
 open.
 
-The floodlight's other settings, brightness, night vision, volume and the
-light settings, have no in-session command, so while a live view is open they
-cannot be written at all: Blink answers their config route with the same 307
-until the last live view on the camera has closed. Those are held instead.
-Move the slider and its card says the change will be set when this live view
-ends, and says so again if you reopen the sheet, and the proxy writes it about
-two seconds after the last session on the camera closes, which is a second
-longer than Blink needed when measured. If the Blink
-app is still streaming from the camera the route stays busy, so the proxy
-retries for two minutes and then gives up. Either way the next time the sheet
-opens, a line at its top says what was set and what was not. The queue is in the proxy's
-memory and does not survive a restart.
+The floodlight's other settings, brightness, night vision, volume and the light
+settings, have no in-session command, so while a live view is open they cannot
+be written at all: Blink answers their config route with the same 307 until the
+last live view on the camera has closed. Those are held instead. Move the
+slider and its card says the change will be set when this live view ends, and
+says so again if you reopen the sheet, and the proxy writes it about two
+seconds after the last session on the camera closes, which is a second longer
+than Blink needed when measured. If the Blink app is still streaming from the
+camera the route stays busy, so the proxy retries for two minutes and then
+gives up. Either way the next time the sheet opens, a line at its top says what
+was set and what was not. The queue is in the proxy's memory and does not
+survive a restart.
 
 "Route named by hand" is worth explaining, because it is most of the table.
 `request_update_config` chooses its route from the product type it is handed,
@@ -374,9 +374,9 @@ and says the value applies to the next live view.
 A camera that is still busy with a previous command refuses the next one. The
 message appears in the card of the control that did not change and says whether
 it is worth trying again in a moment, and each control is disabled while its
-own change is in flight so a second one cannot be sent by accident. The one exception is a
-floodlight setting during a live view, which is held for the end of the live
-view instead, as described above.
+own change is in flight so a second one cannot be sent by accident. The one
+exception is a floodlight setting during a live view, which is held for the end
+of the live view instead, as described above.
 
 ## Dashboards
 
