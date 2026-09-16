@@ -98,6 +98,9 @@ def test_read_state() -> None:
     listed = cc.read_state(INDOOR_ROW, {"camera": [{"illuminator_enable": 0}]}, None)
     check(listed["night_vision"] == "off", "a list-shaped camera block still reads")
     check(cc.read_state(FLOOD_ROW, None, None)["night_vision"] is None, "no config means unknown, not a crash")
+    two_fields = dict(OWL_CONFIG, illuminator_enable="auto", illuminator_enable_v2="off")
+    check(cc.read_state(FLOOD_ROW, None, two_fields)["night_vision"] == "off",
+          "the floodlight's night vision is read from illuminator_enable_v2, the field that follows a write")
 
 
 def test_validate() -> None:
@@ -227,6 +230,11 @@ def test_apply(monkey_calls: list) -> None:
     check(monkey_calls[0][1].endswith("/network/1/camera/2/update"), "indoor writes go to the classic update route")
     check(state["rejected"] == ["night_vision"], "a refusal names the control, not the Blink field")
     check(state["busy"] == [], "a done-without-command answer is a refusal, not a busy camera")
+    # The same answer for a value the camera already has is not a refusal:
+    # Blink says "done" because there was nothing to do.
+    state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "auto"}))
+    check(state["rejected"] == [] and state["night_vision"] == "auto",
+          "a done answer for a value already in place is not reported as refused")
 
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))

@@ -223,7 +223,14 @@ def read_state(
         lamp = owl_config.get("superior")
         lamp = lamp if isinstance(lamp, dict) else {}
         state["flood_light"] = str(owl_config.get("light_status") or "").casefold() == "on"
-        state["night_vision"] = _night_vision_word(owl_config.get("illuminator_enable"))
+        # The document carries night vision twice. A write goes out as
+        # illuminator_enable and the camera acts on it, but only
+        # illuminator_enable_v2 follows: measured on a Wired Floodlight, the
+        # old field read "auto" throughout while v2 went "off" with the write
+        # and back to "auto" with the next. Read v2 when it is there.
+        state["night_vision"] = _night_vision_word(
+            owl_config.get("illuminator_enable_v2", owl_config.get("illuminator_enable"))
+        )
         state["brightness"] = _clamp(
             lamp.get("illuminator_intensity", owl_config.get("light_brightness")),
             *LAMP_BRIGHTNESS_RANGE,
@@ -607,8 +614,14 @@ async def apply_changes(
     # straight after the write is not enough: the owl config route keeps serving
     # the old value for a few seconds after accepting a change, and that stale
     # number then overwrites the control the viewer just moved.
-    settled = rejected + held_names
     state = await fetch_state(blink, row, liveview, deferred)
+    # Blink answers a write of the value already in place with "done" and no
+    # command, which reads as a refusal above. It is not one: the camera has
+    # what was asked for, and the first read back says so. A busy answer is
+    # different, the camera never saw that write, so it stays as it is.
+    in_place = set(control_names(clean)) - set(_unreflected(clean, state))
+    rejected = [c for c in rejected if c in busy or c not in in_place]
+    settled = rejected + held_names
     waiting = [c for c in _unreflected(clean, state) if c not in settled]
     while waiting and asyncio.get_running_loop().time() < deadline:
         await asyncio.sleep(READ_BACK_INTERVAL)
