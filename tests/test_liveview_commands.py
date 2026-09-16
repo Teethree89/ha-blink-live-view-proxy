@@ -69,7 +69,9 @@ RESPONSE = {
 
 
 def frame(msgtype: int, sequence: int, payload: bytes = b"") -> bytes:
-    return bytes([msgtype]) + sequence.to_bytes(4, "big") + len(payload).to_bytes(4, "big") + payload
+    return (
+        bytes([msgtype]) + sequence.to_bytes(4, "big") + len(payload).to_bytes(4, "big") + payload
+    )
 
 
 def new_stream() -> blink_mod.TokenAwareBlinkLiveStream:
@@ -79,14 +81,18 @@ def new_stream() -> blink_mod.TokenAwareBlinkLiveStream:
 def test_inline_command_bytes() -> None:
     print("inline command framing")
     check(IMMI_DATA_FLAG_INLINE_LV_CMD == 0x14, "inline commands are msgtype 0x14")
-    check(LIVEVIEW_INLINE_COMMAND_LIGHTS_ON == 1 and LIVEVIEW_INLINE_COMMAND_LIGHTS_OFF == 2,
-          "lights on is command 1, lights off is command 2")
+    check(
+        LIVEVIEW_INLINE_COMMAND_LIGHTS_ON == 1 and LIVEVIEW_INLINE_COMMAND_LIGHTS_OFF == 2,
+        "lights on is command 1, lights off is command 2",
+    )
     stream = new_stream()
     writer = FakeWriter()
     stream.target_writer = writer
     asyncio.run(stream.send_inline_command(LIVEVIEW_INLINE_COMMAND_LIGHTS_ON))
-    check(bytes(writer.buffer) == b"\x14\x00\x00\x00\x01\x00\x00\x00\x00",
-          "lights on is a nine-byte header: 0x14, sequence 1, length 0")
+    check(
+        bytes(writer.buffer) == b"\x14\x00\x00\x00\x01\x00\x00\x00\x00",
+        "lights on is a nine-byte header: 0x14, sequence 1, length 0",
+    )
 
     async def through_handle() -> bytes:
         handle_stream = new_stream()
@@ -100,7 +106,10 @@ def test_inline_command_bytes() -> None:
         return bytes(handle_writer.buffer)
 
     sent = asyncio.run(through_handle())
-    check(sent == frame(0x14, 1) + frame(0x14, 2), "the handle sends on as 1 and off as 2, nothing else")
+    check(
+        sent == frame(0x14, 1) + frame(0x14, 2),
+        "the handle sends on as 1 and off as 2, nothing else",
+    )
 
 
 def test_accessory_report() -> None:
@@ -123,12 +132,19 @@ def test_accessory_report() -> None:
     ts_packet = b"\x47" + bytes(187)
     stream, client = asyncio.run(run([frame(0x15, 6), frame(0x15, 1), frame(0x00, 5, ts_packet)]))
     check(stream.flood_light is True, "an accessory message with sequence 1 means the lamp is on")
-    check(bytes(client.buffer) == ts_packet, "and the media frames around it still reach the client")
+    check(
+        bytes(client.buffer) == ts_packet, "and the media frames around it still reach the client"
+    )
     stream, _ = asyncio.run(run([frame(0x15, 0)]))
     check(stream.flood_light is False, "sequence 0 means the lamp is off")
     stream, _ = asyncio.run(run([frame(0x15, 6), frame(0x18, 4)]))
-    check(stream.flood_light is None, "a siren report or a session message says nothing about the lamp")
-    check(new_stream().flood_light is None, "before the camera has spoken the lamp state is unknown")
+    check(
+        stream.flood_light is None,
+        "a siren report or a session message says nothing about the lamp",
+    )
+    check(
+        new_stream().flood_light is None, "before the camera has spoken the lamp state is unknown"
+    )
 
     async def handle_state() -> tuple[bool | None, bool | None]:
         lit = new_stream()

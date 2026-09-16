@@ -364,7 +364,8 @@ async def _flush_when_idle(app: web.Application, slug: str) -> None:
             names = deferred.names(slug)
             deferred.take(slug)
             deferred.record(
-                slug, {"applied": [], "failed": names, "busy": names, "at": camera_controls.now_stamp()}
+                slug,
+                {"applied": [], "failed": names, "busy": names, "at": camera_controls.now_stamp()},
             )
             LOGGER.warning(
                 "Settings held back for %s were not written: a live view stayed open", slug

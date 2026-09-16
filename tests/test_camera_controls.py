@@ -55,7 +55,12 @@ OWL_CONFIG = {
     },
 }
 CLASSIC_CONFIG = {
-    "camera": {"illuminator_enable": 2, "illuminator_intensity": 7, "temperature": 71, "lfr_sync_interval": 8},
+    "camera": {
+        "illuminator_enable": 2,
+        "illuminator_intensity": 7,
+        "temperature": 71,
+        "lfr_sync_interval": 8,
+    },
     "signals": {"temp": 71},
 }
 GRILL_ROW = {
@@ -85,28 +90,47 @@ def test_read_state() -> None:
     check(flood["temperature_f"] is None, "floodlight has no temperature")
     check(flood["light_settings"]["dusk_to_dawn"] is False, "dusk to dawn maps auto_on_off_enabled")
     check(flood["light_settings"]["manual_duration"] == 180, "manual timeout comes from superior")
-    check(flood["capabilities"]["volume"] and not flood["capabilities"]["temperature"], "floodlight capabilities")
+    check(
+        flood["capabilities"]["volume"] and not flood["capabilities"]["temperature"],
+        "floodlight capabilities",
+    )
 
     indoor = cc.read_state(INDOOR_ROW, CLASSIC_CONFIG, None)
     check(indoor["night_vision"] == "auto", "classic code 2 is auto")
     check(indoor["temperature_f"] == 71, "temperature comes from signals")
-    check(indoor["brightness"] is None and indoor["volume"] is None, "no lamp or volume on an indoor camera")
+    check(
+        indoor["brightness"] is None and indoor["volume"] is None,
+        "no lamp or volume on an indoor camera",
+    )
     check(not indoor["capabilities"]["flood_light"], "indoor camera offers no flood light")
 
     grill = cc.read_state(GRILL_ROW, CLASSIC_CONFIG, None)
-    check(grill["volume"] == 8 and grill["capabilities"]["volume"], "a speaker camera reads lfr_sync_interval as its volume")
+    check(
+        grill["volume"] == 8 and grill["capabilities"]["volume"],
+        "a speaker camera reads lfr_sync_interval as its volume",
+    )
     listed = cc.read_state(INDOOR_ROW, {"camera": [{"illuminator_enable": 0}]}, None)
     check(listed["night_vision"] == "off", "a list-shaped camera block still reads")
-    check(cc.read_state(FLOOD_ROW, None, None)["night_vision"] is None, "no config means unknown, not a crash")
+    check(
+        cc.read_state(FLOOD_ROW, None, None)["night_vision"] is None,
+        "no config means unknown, not a crash",
+    )
     two_fields = dict(OWL_CONFIG, illuminator_enable="auto", illuminator_enable_v2="off")
-    check(cc.read_state(FLOOD_ROW, None, two_fields)["night_vision"] == "off",
-          "the floodlight's night vision is read from illuminator_enable_v2, the field that follows a write")
+    check(
+        cc.read_state(FLOOD_ROW, None, two_fields)["night_vision"] == "off",
+        "the floodlight's night vision is read from illuminator_enable_v2, which follows a write",
+    )
 
 
 def test_validate() -> None:
     print("validate_changes")
-    clean = cc.validate_changes(FLOOD_ROW, {"flood_light": True, "brightness": 7, "volume": 5, "night_vision": "off"})
-    check(clean == {"flood_light": True, "brightness": 7, "volume": 5, "night_vision": "off"}, "floodlight accepts all four")
+    clean = cc.validate_changes(
+        FLOOD_ROW, {"flood_light": True, "brightness": 7, "volume": 5, "night_vision": "off"}
+    )
+    check(
+        clean == {"flood_light": True, "brightness": 7, "volume": 5, "night_vision": "off"},
+        "floodlight accepts all four",
+    )
     for body, label in [
         ({}, "an empty body"),
         ({"volume": 0}, "volume 0"),
@@ -134,31 +158,61 @@ def test_validate() -> None:
             check(False, f"{label} is refused")
         except cc.ControlError:
             check(True, f"{label} is refused")
-    check(cc.validate_changes(INDOOR_ROW, {"night_vision": 1}) == {"night_vision": "on"}, "indoor accepts a night vision code")
+    check(
+        cc.validate_changes(INDOOR_ROW, {"night_vision": 1}) == {"night_vision": "on"},
+        "indoor accepts a night vision code",
+    )
 
 
 def test_write_plan() -> None:
     print("write_plan")
-    plan = cc.write_plan(FLOOD_ROW, {"flood_light": True, "night_vision": "off", "brightness": 6, "volume": 2,
-                                     "light_settings": {"dusk_to_dawn": True, "manual_duration": 65535}})
+    plan = cc.write_plan(
+        FLOOD_ROW,
+        {
+            "flood_light": True,
+            "night_vision": "off",
+            "brightness": 6,
+            "volume": 2,
+            "light_settings": {"dusk_to_dawn": True, "manual_duration": 65535},
+        },
+    )
     kinds = [kind for kind, _, _ in plan]
     payloads = {kind: payload for kind, payload, _ in plan}
     controls = {kind: names for kind, _, names in plan}
-    check(kinds == ["lights", "owl_config"], "lamp goes through its own route, the rest in one owl post")
+    check(
+        kinds == ["lights", "owl_config"],
+        "lamp goes through its own route, the rest in one owl post",
+    )
     check(controls["lights"] == ["flood_light"], "the lamp call carries its own control name")
-    check(sorted(controls["owl_config"]) == ["brightness", "dusk_to_dawn", "manual_duration", "night_vision", "volume"],
-          "the owl call names every control riding on it")
+    check(
+        sorted(controls["owl_config"])
+        == ["brightness", "dusk_to_dawn", "manual_duration", "night_vision", "volume"],
+        "the owl call names every control riding on it",
+    )
     owl = payloads["owl_config"]
     check(owl["illuminator_enable"] == "off", "owl night vision is a word")
-    check(owl["superior"]["illuminator_intensity"] == 6 and owl["light_brightness"] == 6, "brightness lands in both places")
+    check(
+        owl["superior"]["illuminator_intensity"] == 6 and owl["light_brightness"] == 6,
+        "brightness lands in both places",
+    )
     check(owl["volume_control"] == 2, "volume_control carries the volume")
-    check(owl["superior"]["auto_on_off_enabled"] is True and owl["superior"]["manual_illuminator_duration"] == 65535, "light settings nest under superior")
+    check(
+        owl["superior"]["auto_on_off_enabled"] is True
+        and owl["superior"]["manual_illuminator_duration"] == 65535,
+        "light settings nest under superior",
+    )
     check(payloads["lights"] is True, "lamp payload is the boolean")
 
     plan = cc.write_plan(INDOOR_ROW, {"night_vision": "auto"})
-    check(plan == [("camera_update", {"illuminator_enable": 2}, ["night_vision"])], "indoor night vision is a code on the update route")
+    check(
+        plan == [("camera_update", {"illuminator_enable": 2}, ["night_vision"])],
+        "indoor night vision is a code on the update route",
+    )
     plan = cc.write_plan(GRILL_ROW, {"volume": 3})
-    check(plan == [("camera_config_v2", {"lfr_sync_interval": 3}, ["volume"])], "speaker volume goes to the v2 config route as lfr_sync_interval")
+    check(
+        plan == [("camera_config_v2", {"lfr_sync_interval": 3}, ["volume"])],
+        "speaker volume goes to the v2 config route as lfr_sync_interval",
+    )
 
 
 class FakeResponse:
@@ -184,11 +238,20 @@ def test_apply(monkey_calls: list) -> None:
     # read back until the real deadline. Keep the loop, shrink the clock.
     cc.COMMAND_WAIT_SECONDS = 0.2
     cc.READ_BACK_INTERVAL = 0.01
-    answers = {"owl_config": {"command": "config_set", "state": "new"}, "camera_update": {"state": "done"},
-               "camera_config_v2": {"id": 1, "command": "config_set", "state": "new"}}
+    answers = {
+        "owl_config": {"command": "config_set", "state": "new"},
+        "camera_update": {"state": "done"},
+        "camera_config_v2": {"id": 1, "command": "config_set", "state": "new"},
+    }
 
     async def fake_post(blink, url, is_retry=False, data=None, json=True, timeout=10):
-        kind = "owl_config" if "/owls/" in url else "camera_config_v2" if "/api/v2/" in url else "camera_update"
+        kind = (
+            "owl_config"
+            if "/owls/" in url
+            else "camera_config_v2"
+            if "/api/v2/" in url
+            else "camera_update"
+        )
         monkey_calls.append((kind, url, data))
         return FakeResponse(answers[kind])
 
@@ -212,48 +275,77 @@ def test_apply(monkey_calls: list) -> None:
     cc.blink_api.request_camera_info = fake_camera_info
     cc.blink_api.wait_for_command = fake_wait
 
-    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True, "volume": 3}))
+    state = asyncio.run(
+        cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True, "volume": 3})
+    )
     kinds = [call[0] for call in monkey_calls]
     check(kinds == ["lights", "owl_config"], "both calls were made in order")
     body = monkey_calls[1][2]
-    check(isinstance(body, str) and json.loads(body) == {"volume_control": 3}, "the owl body is a JSON string, not a dict")
-    check("/accounts/77/networks/1/owls/318367/config" in monkey_calls[1][1], "owl config URL carries account, network, camera")
+    check(
+        isinstance(body, str) and json.loads(body) == {"volume_control": 3},
+        "the owl body is a JSON string, not a dict",
+    )
+    check(
+        "/accounts/77/networks/1/owls/318367/config" in monkey_calls[1][1],
+        "owl config URL carries account, network, camera",
+    )
     check(state["rejected"] == ["flood_light"], "a busy lamp is reported as rejected")
     check(state["busy"] == ["flood_light"], "and is separately marked worth retrying")
     # The fixture config never changes, so the write is never reflected: the
     # answer must keep what was asked for rather than the config's stale 8.
-    check(state["volume"] == 3 and state["pending"] == ["volume"],
-          "a value the config has not caught up with is kept, and flagged pending")
+    check(
+        state["volume"] == 3 and state["pending"] == ["volume"],
+        "a value the config has not caught up with is kept, and flagged pending",
+    )
 
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
-    check(monkey_calls[0][1].endswith("/network/1/camera/2/update"), "indoor writes go to the classic update route")
+    check(
+        monkey_calls[0][1].endswith("/network/1/camera/2/update"),
+        "indoor writes go to the classic update route",
+    )
     check(state["rejected"] == ["night_vision"], "a refusal names the control, not the Blink field")
     check(state["busy"] == [], "a done-without-command answer is a refusal, not a busy camera")
     # The same answer for a value the camera already has is not a refusal:
     # Blink says "done" because there was nothing to do.
     state = asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "auto"}))
-    check(state["rejected"] == [] and state["night_vision"] == "auto",
-          "a done answer for a value already in place is not reported as refused")
+    check(
+        state["rejected"] == [] and state["night_vision"] == "auto",
+        "a done answer for a value already in place is not reported as refused",
+    )
 
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
-    check("/api/v2/accounts/77/networks/1/cameras/3/config" in monkey_calls[0][1], "speaker volume posts to the v2 camera config route")
-    check(json.loads(monkey_calls[0][2]) == {"lfr_sync_interval": 5} and state["rejected"] == [], "the v2 body is the one field and a command answer is accepted")
+    check(
+        "/api/v2/accounts/77/networks/1/cameras/3/config" in monkey_calls[0][1],
+        "speaker volume posts to the v2 camera config route",
+    )
+    check(
+        json.loads(monkey_calls[0][2]) == {"lfr_sync_interval": 5} and state["rejected"] == [],
+        "the v2 body is the one field and a command answer is accepted",
+    )
     waits = [call for call in monkey_calls if call[0] == "wait"]
-    check(waits and waits[0][1] == {"network_id": GRILL_ROW["network_id"], "id": 1},
-          "an accepted write is followed through its command before the re-read")
-    check(state["volume"] == 5 and state["pending"] == ["volume"],
-          "the v2 write is kept too while the config still reports the old level")
+    check(
+        waits and waits[0][1] == {"network_id": GRILL_ROW["network_id"], "id": 1},
+        "an accepted write is followed through its command before the re-read",
+    )
+    check(
+        state["volume"] == 5 and state["pending"] == ["volume"],
+        "the v2 write is kept too while the config still reports the old level",
+    )
 
     # The floodlight case: Blink accepts the write and keeps serving the old
     # value for a while. The answer must not carry that stale number back.
     monkey_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"volume": 2}))
-    check(state["volume"] == 2,
-          "a config still reporting the old volume does not snap the control back")
-    check(state["pending"] == ["volume"],
-          "and the control is reported pending rather than silently wrong")
+    check(
+        state["volume"] == 2,
+        "a config still reporting the old volume does not snap the control back",
+    )
+    check(
+        state["pending"] == ["volume"],
+        "and the control is reported pending rather than silently wrong",
+    )
 
     # Once the camera does report it, nothing is left pending.
     settled = dict(OWL_CONFIG, volume_control=2)
@@ -264,8 +356,10 @@ def test_apply(monkey_calls: list) -> None:
 
     cc.blink_api.request_get_config = settled_get
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"volume": 2}))
-    check(state["volume"] == 2 and state["pending"] == [],
-          "a value the camera confirms is not reported pending")
+    check(
+        state["volume"] == 2 and state["pending"] == [],
+        "a value the camera confirms is not reported pending",
+    )
     cc.blink_api.request_get_config = original_get
 
     try:
@@ -310,33 +404,54 @@ def test_lamp_over_live_view() -> None:
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True}, liveview))
     check(liveview.sent == [True], "the lamp command goes over the live view")
     check(route_calls == [], "and the lights route, which Blink refuses mid-stream, is not tried")
-    check(state["flood_light"] is True, "the camera's own report is the lamp state, not the config's stale off")
-    check(state["rejected"] == [] and state["busy"] == [] and state["pending"] == [],
-          "a lamp the camera confirms is neither refused nor pending")
+    check(
+        state["flood_light"] is True,
+        "the camera's own report is the lamp state, not the config's stale off",
+    )
+    check(
+        state["rejected"] == [] and state["busy"] == [] and state["pending"] == [],
+        "a lamp the camera confirms is neither refused nor pending",
+    )
 
     silent = FakeLiveView(reports=False)
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True}, silent))
-    check(silent.sent == [True] and state["flood_light"] is True and state["pending"] == ["flood_light"],
-          "a lamp the camera has not confirmed keeps the requested state and is reported pending")
+    check(
+        silent.sent == [True]
+        and state["flood_light"] is True
+        and state["pending"] == ["flood_light"],
+        "a lamp the camera has not confirmed keeps the requested state and is reported pending",
+    )
 
     class ClosedLiveView(FakeLiveView):
         async def set_flood_light(self, on: bool) -> None:
             raise RuntimeError("Blink IMMI target is not connected")
 
-    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": False}, ClosedLiveView()))
-    check(route_calls == [False], "a session that cannot carry it hands the lamp back to the lights route")
+    state = asyncio.run(
+        cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": False}, ClosedLiveView())
+    )
+    check(
+        route_calls == [False],
+        "a session that cannot carry it hands the lamp back to the lights route",
+    )
     check(state["busy"] == ["flood_light"], "and that route's refusal is reported as before")
 
     lit = FakeLiveView()
     lit.flood_light = True
     state = asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, lit))
-    check(state["flood_light"] is True, "a read during a live view reports the lamp the camera reports")
-    check(asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, None))["flood_light"] is False,
-          "and without one the config document still decides")
+    check(
+        state["flood_light"] is True,
+        "a read during a live view reports the lamp the camera reports",
+    )
+    check(
+        asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, None))["flood_light"] is False,
+        "and without one the config document still decides",
+    )
 
     route_calls.clear()
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"flood_light": True}))
-    check(route_calls == [True], "with nothing streaming the lamp goes through blinkpy's lights route")
+    check(
+        route_calls == [True], "with nothing streaming the lamp goes through blinkpy's lights route"
+    )
 
 
 def test_held_back() -> None:
@@ -348,13 +463,22 @@ def test_held_back() -> None:
     store = cc.DeferredControls()
     store.queue("flood_light", {"brightness": 5, "light_settings": {"dusk_to_dawn": True}})
     store.queue("flood_light", {"brightness": 6, "light_settings": {"manual_duration": 60}})
-    check(store.queued("flood_light") == {"brightness": 6, "light_settings": {"dusk_to_dawn": True, "manual_duration": 60}},
-          "a later value replaces an earlier one, and light settings merge by name")
-    check(store.names("flood_light") == ["brightness", "dusk_to_dawn", "manual_duration"],
-          "the queue names controls the way the sheet does")
+    check(
+        store.queued("flood_light")
+        == {"brightness": 6, "light_settings": {"dusk_to_dawn": True, "manual_duration": 60}},
+        "a later value replaces an earlier one, and light settings merge by name",
+    )
+    check(
+        store.names("flood_light") == ["brightness", "dusk_to_dawn", "manual_duration"],
+        "the queue names controls the way the sheet does",
+    )
     taken = store.take("flood_light")
-    check(taken["brightness"] == 6 and store.queued("flood_light") == {} and store.names("flood_light") == [],
-          "taking the queue empties it")
+    check(
+        taken["brightness"] == 6
+        and store.queued("flood_light") == {}
+        and store.names("flood_light") == [],
+        "taking the queue empties it",
+    )
     check(store.take_result("flood_light") is None, "no outcome until something has been written")
 
     posts: list = []
@@ -373,23 +497,45 @@ def test_held_back() -> None:
     cc.blink_api.request_get_config = fake_get_config
 
     store = cc.DeferredControls()
-    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"brightness": 5}, FakeLiveView(), store))
-    check(state["deferred"] == ["brightness"] and state["busy"] == [] and state["rejected"] == [],
-          "a busy answer during a live view is held, not reported as busy")
-    check(state["brightness"] == 5 and state["pending"] == [],
-          "the sheet is shown the value that was asked for, and it is not pending")
-    check(store.queued("flood_light") == {"brightness": 5}, "the change waits in the camera's queue")
+    state = asyncio.run(
+        cc.apply_changes(FakeBlink(), FLOOD_ROW, {"brightness": 5}, FakeLiveView(), store)
+    )
+    check(
+        state["deferred"] == ["brightness"] and state["busy"] == [] and state["rejected"] == [],
+        "a busy answer during a live view is held, not reported as busy",
+    )
+    check(
+        state["brightness"] == 5 and state["pending"] == [],
+        "the sheet is shown the value that was asked for, and it is not pending",
+    )
+    check(
+        store.queued("flood_light") == {"brightness": 5}, "the change waits in the camera's queue"
+    )
     state = asyncio.run(cc.fetch_state(FakeBlink(), FLOOD_ROW, FakeLiveView(), store))
-    check(state["brightness"] == 5 and state["deferred"] == ["brightness"],
-          "a read during the stream shows the held value and names it")
-    state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"light_settings": {"dusk_to_dawn": True}},
-                                         FakeLiveView(), store))
-    check(state["deferred"] == ["brightness", "dusk_to_dawn"] and state["light_settings"]["dusk_to_dawn"] is True,
-          "a light setting is held under its own name and shown as asked")
+    check(
+        state["brightness"] == 5 and state["deferred"] == ["brightness"],
+        "a read during the stream shows the held value and names it",
+    )
+    state = asyncio.run(
+        cc.apply_changes(
+            FakeBlink(),
+            FLOOD_ROW,
+            {"light_settings": {"dusk_to_dawn": True}},
+            FakeLiveView(),
+            store,
+        )
+    )
+    check(
+        state["deferred"] == ["brightness", "dusk_to_dawn"]
+        and state["light_settings"]["dusk_to_dawn"] is True,
+        "a light setting is held under its own name and shown as asked",
+    )
     fresh = cc.DeferredControls()
     state = asyncio.run(cc.apply_changes(FakeBlink(), FLOOD_ROW, {"brightness": 5}, None, fresh))
-    check(state["busy"] == ["brightness"] and fresh.queued("flood_light") == {},
-          "with no live view of ours a busy camera is busy, and nothing is held")
+    check(
+        state["busy"] == ["brightness"] and fresh.queued("flood_light") == {},
+        "with no live view of ours a busy camera is busy, and nothing is held",
+    )
 
     calls = {"n": 0}
 
@@ -402,29 +548,57 @@ def test_held_back() -> None:
 
     cc.blink_api.request_update_config = flaky_update_config
     posts.clear()
-    result = asyncio.run(cc.flush_deferred(FakeBlink(), FLOOD_ROW,
-                                           {"brightness": 5, "light_settings": {"dusk_to_dawn": True}},
-                                           retry_interval=0.01, give_up_after=5))
-    check(calls["n"] == 3 and result["applied"] == ["brightness", "dusk_to_dawn"] and result["failed"] == [],
-          "a flush retries while Blink is busy and reports what it set")
-    check(posts[-1] == {"superior": {"illuminator_intensity": 5, "auto_on_off_enabled": True}, "light_brightness": 5},
-          "held changes go out as one config write")
+    result = asyncio.run(
+        cc.flush_deferred(
+            FakeBlink(),
+            FLOOD_ROW,
+            {"brightness": 5, "light_settings": {"dusk_to_dawn": True}},
+            retry_interval=0.01,
+            give_up_after=5,
+        )
+    )
+    check(
+        calls["n"] == 3
+        and result["applied"] == ["brightness", "dusk_to_dawn"]
+        and result["failed"] == [],
+        "a flush retries while Blink is busy and reports what it set",
+    )
+    check(
+        posts[-1]
+        == {
+            "superior": {"illuminator_intensity": 5, "auto_on_off_enabled": True},
+            "light_brightness": 5,
+        },
+        "held changes go out as one config write",
+    )
 
     async def always_busy(blink, network, camera_id, product_type="owl", data=None):
         return FakeResponse({"message": "System is busy, please wait", "code": 307})
 
     cc.blink_api.request_update_config = always_busy
-    result = asyncio.run(cc.flush_deferred(FakeBlink(), FLOOD_ROW, {"brightness": 5},
-                                           retry_interval=0.01, give_up_after=0.05))
-    check(result["applied"] == [] and result["failed"] == ["brightness"] and result["busy"] == ["brightness"],
-          "a camera that stays busy is given up on, and reported as busy")
+    result = asyncio.run(
+        cc.flush_deferred(
+            FakeBlink(), FLOOD_ROW, {"brightness": 5}, retry_interval=0.01, give_up_after=0.05
+        )
+    )
+    check(
+        result["applied"] == []
+        and result["failed"] == ["brightness"]
+        and result["busy"] == ["brightness"],
+        "a camera that stays busy is given up on, and reported as busy",
+    )
 
     calls["n"] = 0
     cc.blink_api.request_update_config = flaky_update_config
-    result = asyncio.run(cc.flush_deferred(FakeBlink(), FLOOD_ROW, {"brightness": 3},
-                                           retry_interval=0.01, give_up_after=1))
-    check(calls["n"] == 0 and result["applied"] == ["brightness"],
-          "a value the camera already reports is not written again")
+    result = asyncio.run(
+        cc.flush_deferred(
+            FakeBlink(), FLOOD_ROW, {"brightness": 3}, retry_interval=0.01, give_up_after=1
+        )
+    )
+    check(
+        calls["n"] == 0 and result["applied"] == ["brightness"],
+        "a value the camera already reports is not written again",
+    )
 
 
 def test_flush_scheduling() -> None:
@@ -454,8 +628,12 @@ def test_flush_scheduling() -> None:
 
     store = cc.DeferredControls()
     store.queue("flood_light", {"brightness": 5})
-    app = {"deferred_controls": store, "deferred_tasks": {},
-           "active_liveviews": {"flood_light:other": object()}, "client": FakeClient()}
+    app = {
+        "deferred_controls": store,
+        "deferred_tasks": {},
+        "active_liveviews": {"flood_light:other": object()},
+        "client": FakeClient(),
+    }
 
     async def scenario():
         task = routes.schedule_deferred_flush(app, "flood_light")
@@ -466,10 +644,17 @@ def test_flush_scheduling() -> None:
         return still_held
 
     still_held = asyncio.run(scenario())
-    check(still_held == {"brightness": 5}, "the write waits while another session on the camera is open")
+    check(
+        still_held == {"brightness": 5},
+        "the write waits while another session on the camera is open",
+    )
     outcome = store.take_result("flood_light")
-    check(store.queued("flood_light") == {} and outcome is not None and outcome["applied"] == ["brightness"],
-          "and goes out once the camera is free, with the outcome kept for the next read")
+    check(
+        store.queued("flood_light") == {}
+        and outcome is not None
+        and outcome["applied"] == ["brightness"],
+        "and goes out once the camera is free, with the outcome kept for the next read",
+    )
     check(store.take_result("flood_light") is None, "the outcome is handed over once")
 
     async def nothing():
@@ -484,15 +669,25 @@ def test_capability_map() -> None:
     flood = cc.capabilities("superior")
     xt2 = cc.capabilities("xt2")
     white = cc.capabilities("white")
-    check(flood["night_vision"] and xt2["night_vision"] and white["night_vision"],
-          "night vision is on every camera, the floodlight included")
-    check(not flood["temperature"] and xt2["temperature"] and white["temperature"],
-          "the floodlight is the one camera with no thermometer")
-    check(flood["volume"] and xt2["volume"] and not white["volume"],
-          "volume is the floodlight and the speaker models, not white")
-    check(flood["brightness"] and flood["light_settings"]
-          and not xt2["brightness"] and not xt2["light_settings"],
-          "the lamp and its settings are the floodlight's alone")
+    check(
+        flood["night_vision"] and xt2["night_vision"] and white["night_vision"],
+        "night vision is on every camera, the floodlight included",
+    )
+    check(
+        not flood["temperature"] and xt2["temperature"] and white["temperature"],
+        "the floodlight is the one camera with no thermometer",
+    )
+    check(
+        flood["volume"] and xt2["volume"] and not white["volume"],
+        "volume is the floodlight and the speaker models, not white",
+    )
+    check(
+        flood["brightness"]
+        and flood["light_settings"]
+        and not xt2["brightness"]
+        and not xt2["light_settings"],
+        "the lamp and its settings are the floodlight's alone",
+    )
 
 
 def test_blinkpy_routes() -> None:
@@ -526,15 +721,19 @@ def test_blinkpy_routes() -> None:
 
     calls.clear()
     asyncio.run(cc.apply_changes(FakeBlink(), INDOOR_ROW, {"night_vision": "off"}))
-    check(calls and calls[0][0] == "catalina",
-          "a white camera reaches the classic route through blinkpy, under catalina")
+    check(
+        calls and calls[0][0] == "catalina",
+        "a white camera reaches the classic route through blinkpy, under catalina",
+    )
     check(not posts, "no hand-built URL is used for a classic config write")
 
     calls.clear()
     asyncio.run(cc.apply_changes(FakeBlink(), GRILL_ROW, {"volume": 5}))
     check(not calls, "speaker volume does not pretend to be a blinkpy config write")
-    check(len(posts) == 1 and "/api/v2/" in posts[0],
-          "the v2 speaker volume route is the only write blinkpy has no function for")
+    check(
+        len(posts) == 1 and "/api/v2/" in posts[0],
+        "the v2 speaker volume route is the only write blinkpy has no function for",
+    )
 
 
 def main() -> int:
