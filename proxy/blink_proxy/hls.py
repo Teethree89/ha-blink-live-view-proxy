@@ -10,7 +10,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .blink import BlinkStreamBroker, LiveViewHandle
 from .config import resolve_path
@@ -195,6 +195,8 @@ class HlsSession:
         if self.directory.exists():
             shutil.rmtree(self.directory)
         LOGGER.info("Stopped HLS session for %s", self.slug)
+        if self.manager.on_session_stopped is not None:
+            self.manager.on_session_stopped(self.slug)
 
     def _finalize_cache(self) -> None:
         """Publish the cached copy and make it the camera's last live view.
@@ -256,6 +258,9 @@ class HlsManager:
         self.active_liveviews = active_liveviews if active_liveviews is not None else {}
         self.sessions: dict[str, HlsSession] = {}
         self.lock = asyncio.Lock()
+        # Told the slug of every session that stops, so settings held back
+        # during it can be written; see routes.schedule_deferred_flush.
+        self.on_session_stopped: Callable[[str], Any] | None = None
 
     async def get_or_start(self, slug: str) -> HlsSession:
         async with self.lock:

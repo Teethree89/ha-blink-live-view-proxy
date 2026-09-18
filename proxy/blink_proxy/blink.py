@@ -25,10 +25,16 @@ from .config import create_client_session, load_json_file, resolve_path, save_js
 from .auth_flow import AuthFlowError
 from .constants import (
     IMMI_AUDIO_CONFIG_SEQUENCE,
+    IMMI_DATA_FLAG_ACCESSORY_MESSAGE,
     IMMI_DATA_FLAG_AUDIO,
     IMMI_DATA_FLAG_AUDIO_CONFIG,
+    IMMI_DATA_FLAG_INLINE_LV_CMD,
     IMMI_DATA_FLAG_SESSION_LV_CMD,
     IMMI_HEADER_BYTES,
+    LIVEVIEW_ACCESSORY_LIGHTS_OFF,
+    LIVEVIEW_ACCESSORY_LIGHTS_ON,
+    LIVEVIEW_INLINE_COMMAND_LIGHTS_OFF,
+    LIVEVIEW_INLINE_COMMAND_LIGHTS_ON,
     LIVEVIEW_SESSION_COMMAND_START_AUDIO,
     LIVEVIEW_SESSION_COMMAND_STOP_AUDIO,
     LOGGER_NAME,
@@ -136,6 +142,10 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
         super().__init__(camera, response)
         self.liveview_token = response.get("liveview_token", "") if send_token else ""
         self._write_lock = asyncio.Lock()
+        # What the camera last said about its lamp on the accessory channel,
+        # None until it has said anything. A Wired Floodlight reports as the
+        # session opens; a camera without a lamp never does.
+        self.flood_light: bool | None = None
 
     @staticmethod
     def _add_fixed_string(buffer: bytearray, value: str | None, length: int) -> None:
@@ -183,6 +193,10 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
     async def send_session_command(self, command: int) -> None:
         """Send a Walnut live-view session command."""
         await self.write_immi_frame(IMMI_DATA_FLAG_SESSION_LV_CMD, command)
+
+    async def send_inline_command(self, command: int) -> None:
+        """Send an inline live-view command, the kind that works the lamp."""
+        await self.write_immi_frame(IMMI_DATA_FLAG_INLINE_LV_CMD, command)
 
     async def send_audio_config(self) -> None:
         """Send the empty AAC-LC audio config marker seen in Blink sessions."""
@@ -243,6 +257,16 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
 
         return msgtype, sequence, payload
 
+    def _note_accessory_message(self, sequence: int) -> None:
+        """Keep what the camera reports about its lamp."""
+        if sequence in (LIVEVIEW_ACCESSORY_LIGHTS_OFF, LIVEVIEW_ACCESSORY_LIGHTS_ON):
+            self.flood_light = sequence == LIVEVIEW_ACCESSORY_LIGHTS_ON
+            LOGGER.info(
+                "Camera reports its flood light %s", "on" if self.flood_light else "off"
+            )
+            return
+        LOGGER.debug("Ignoring IMMI accessory message %d", sequence)
+
     async def recv(self) -> None:
         """Copy complete MPEG-TS payload frames from Blink to local clients."""
         if self.target_reader is None or self.target_writer is None:
@@ -255,7 +279,10 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
                 if frame is None:
                     break
 
-                msgtype, _sequence, payload = frame
+                msgtype, sequence, payload = frame
+                if msgtype == IMMI_DATA_FLAG_ACCESSORY_MESSAGE:
+                    self._note_accessory_message(sequence)
+                    continue
                 if not payload:
                     LOGGER.debug("Skipping empty IMMI payload for msgtype %d", msgtype)
                     continue
@@ -620,6 +647,17 @@ class LiveViewHandle:
 
     async def send_audio_frame(self, timestamp: int, payload: bytes) -> None:
         await self.stream.send_audio_frame(timestamp, payload)
+
+    @property
+    def flood_light(self) -> bool | None:
+        """The lamp state the camera has reported over this session, if any."""
+        return getattr(self.stream, "flood_light", None)
+
+    async def set_flood_light(self, on: bool) -> None:
+        """Work the lamp over this session, the way the Blink app does it."""
+        await self.stream.send_inline_command(
+            LIVEVIEW_INLINE_COMMAND_LIGHTS_ON if on else LIVEVIEW_INLINE_COMMAND_LIGHTS_OFF
+        )
 
 class BlinkStreamBroker:
     """Starts one Blink live-view session per consumer."""

@@ -34,6 +34,15 @@ from .auth_flow import (
     StaleChallengeError,
 )
 from .blink import BlinkStreamBroker, LiveViewHandle, _wait_for_pin
+from . import camera_controls
+from .camera_controls import (
+    ControlError,
+    DeferredControls,
+    apply_changes,
+    control_names,
+    fetch_state,
+    flush_deferred,
+)
 from .clip_cache import ClipCache
 from .clips import (
     ClipManager,
@@ -296,6 +305,146 @@ async def update_log_handler(request: web.Request) -> web.Response:
 async def cameras_handler(request: web.Request) -> web.Response:
     check_authorized(request)
     return web.json_response({"cameras": _require_client(request).list_cameras()})
+
+def _camera_row(request: web.Request, slug: str) -> dict[str, Any]:
+    client = _require_client(request)
+    row = next((c for c in client.list_cameras() if c.get("slug") == slug), None)
+    if row is None:
+        raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n")
+    return row
+
+def _find_liveview(
+    liveviews: dict[str, LiveViewHandle], slug: str, session: str = ""
+) -> LiveViewHandle | None:
+    """Find a live view this proxy holds open on the camera, if there is one.
+
+    A session named by the caller is preferred. Failing that, any open session
+    on the same camera does: the lamp is the camera's, and every session to it
+    carries the same commands and hears the same reports.
+    """
+    if session:
+        liveview = liveviews.get(liveview_session_key(slug, session))
+        if liveview is not None:
+            return liveview
+    prefix = liveview_session_key(slug, "")
+    for key, liveview in liveviews.items():
+        if key.startswith(prefix):
+            return liveview
+    return None
+
+def _active_liveview(request: web.Request, slug: str) -> LiveViewHandle | None:
+    """The live view behind a controls request: the player's own, or any on the camera."""
+    return _find_liveview(
+        request.app["active_liveviews"], slug, request.query.get("session", "")
+    )
+
+def schedule_deferred_flush(app: web.Application, slug: str) -> asyncio.Task[None] | None:
+    """After a live view closes, write what the sheet held back for the camera.
+
+    Runs once nothing else is streaming from the camera: another session on
+    it, an HLS viewer beside an MPEG-TS one, still holds Blink busy. A flush
+    already waiting for the same camera is replaced.
+    """
+    deferred: DeferredControls = app["deferred_controls"]
+    if not deferred.queued(slug):
+        return None
+    tasks: dict[str, asyncio.Task[None]] = app["deferred_tasks"]
+    previous = tasks.get(slug)
+    if previous is not None and not previous.done():
+        previous.cancel()
+    task = asyncio.create_task(_flush_when_idle(app, slug), name=f"blink-deferred-{slug}")
+    tasks[slug] = task
+    return task
+
+async def _flush_when_idle(app: web.Application, slug: str) -> None:
+    deferred: DeferredControls = app["deferred_controls"]
+    deadline = time.monotonic() + camera_controls.DEFERRED_GIVE_UP_SECONDS
+    while _find_liveview(app["active_liveviews"], slug) is not None:
+        if time.monotonic() >= deadline:
+            names = deferred.names(slug)
+            deferred.take(slug)
+            deferred.record(
+                slug,
+                {"applied": [], "failed": names, "busy": names, "at": camera_controls.now_stamp()},
+            )
+            LOGGER.warning(
+                "Settings held back for %s were not written: a live view stayed open", slug
+            )
+            return
+        await asyncio.sleep(1)
+    await asyncio.sleep(camera_controls.DEFERRED_SETTLE_SECONDS)
+    changes = deferred.take(slug)
+    if not changes:
+        return
+    names = control_names(changes)
+    client = app.get("client")
+    row = None
+    if client is not None:
+        row = next((c for c in client.list_cameras() if c.get("slug") == slug), None)
+    if row is None:
+        deferred.record(
+            slug, {"applied": [], "failed": names, "busy": [], "at": camera_controls.now_stamp()}
+        )
+        LOGGER.warning("Settings held back for %s were not written: no Blink client", slug)
+        return
+    try:
+        result = await flush_deferred(client._require_blink(), row, changes)  # noqa: SLF001
+    except Exception as err:  # noqa: BLE001
+        LOGGER.exception("Writing the settings held back for %s failed", slug)
+        result = {
+            "applied": [], "failed": names, "busy": [], "at": camera_controls.now_stamp(),
+            "error": str(err),
+        }
+    deferred.record(slug, result)
+    LOGGER.info(
+        "Settings held back for %s written after the live view: set %s, not set %s",
+        slug, result["applied"], result["failed"],
+    )
+
+async def camera_controls_handler(request: web.Request) -> web.Response:
+    """Read the lamp, night vision, volume and temperature state of one camera."""
+    check_authorized(request)
+    slug = request.match_info["slug"]
+    row = _camera_row(request, slug)
+    blink = _require_client(request)._require_blink()  # noqa: SLF001
+    deferred: DeferredControls = request.app["deferred_controls"]
+    try:
+        async with asyncio.timeout(20):
+            state = await fetch_state(blink, row, _active_liveview(request, slug), deferred)
+    except (TimeoutError, OSError) as err:
+        raise web.HTTPBadGateway(text=f"Blink did not answer: {err}\n") from err
+    # The outcome of anything written after the last live view, reported once.
+    result = deferred.take_result(slug)
+    if result is not None:
+        state["deferred_result"] = result
+    return web.json_response(state, headers={"Cache-Control": "no-store"})
+
+async def camera_controls_update_handler(request: web.Request) -> web.Response:
+    """Change one or more controls; the body names them, the answer is the new state."""
+    check_authorized(request)
+    slug = request.match_info["slug"]
+    row = _camera_row(request, slug)
+    if request.content_length is not None and request.content_length > 4096:
+        raise web.HTTPRequestEntityTooLarge(max_size=4096, actual_size=request.content_length)
+    try:
+        body = await request.json()
+    except ValueError as err:
+        raise web.HTTPBadRequest(text="Body must be JSON\n") from err
+    blink = _require_client(request)._require_blink()  # noqa: SLF001
+    try:
+        async with asyncio.timeout(30):
+            state = await apply_changes(
+                blink,
+                row,
+                body,
+                _active_liveview(request, slug),
+                request.app["deferred_controls"],
+            )
+    except ControlError as err:
+        raise web.HTTPBadRequest(text=f"{err}\n") from err
+    except (TimeoutError, OSError) as err:
+        raise web.HTTPBadGateway(text=f"Blink did not answer: {err}\n") from err
+    return web.json_response(state, headers={"Cache-Control": "no-store"})
 
 def _clamped_float(value: str | None, default: float, minimum: float, maximum: float) -> float:
     try:
@@ -609,6 +758,7 @@ async def mpegts_handler(request: web.Request) -> web.StreamResponse:
         if request.app["active_liveviews"].get(active_key) is liveview:
             request.app["active_liveviews"].pop(active_key, None)
         await liveview.close()
+        schedule_deferred_flush(request.app, slug)
         with contextlib.suppress(Exception):
             await response.write_eof()
     return response
@@ -761,6 +911,9 @@ async def make_app(
     app["last_liveviews"] = last_liveviews
     app["mpegts_cooldowns"] = {}
     app["active_liveviews"] = active_liveviews
+    app["deferred_controls"] = DeferredControls()
+    app["deferred_tasks"] = {}
+    hls_manager.on_session_stopped = lambda stopped: schedule_deferred_flush(app, stopped)
     app["mp4_locks"] = {}
     app["clip_cache"] = ClipCache(
         clip_cache_dir(config, config_base),
@@ -791,6 +944,8 @@ async def make_app(
     app.router.add_post("/update", update_handler)
     app.router.add_get("/update/log", update_log_handler)
     app.router.add_get("/cameras", cameras_handler)
+    app.router.add_get("/cameras/{slug}/controls", camera_controls_handler)
+    app.router.add_post("/cameras/{slug}/controls", camera_controls_update_handler)
     app.router.add_get("/clips", clips_handler)
     app.router.add_get("/clips/{clip_id}.mp4", clip_download_handler)
     app.router.add_get("/clips/{clip_id}.jpg", clip_thumbnail_handler)
@@ -819,6 +974,10 @@ async def make_app(
             with contextlib.suppress(asyncio.CancelledError):
                 await cleanup_task
             await hls_manager.stop_all()
+            for task in list(app["deferred_tasks"].values()):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             await auth_controller.close()
 
     app.cleanup_ctx.append(cleanup_context)

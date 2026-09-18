@@ -47,6 +47,10 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Fresh snapshot button using the official HA Blink camera entity.
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.
+- A Camera Controls sheet inside the live-view player: the flood light, night
+  vision, brightness, volume, light settings and a temperature reading, each
+  shown only on the cameras that have it. See [Camera
+  Controls](#camera-controls) for what each one writes.
 - Clip viewer over both inventories — a Sync Module's local storage and Blink's
   cloud — with first-frame thumbnails, a player that seeks, downloads that
   never fetch the same clip from Blink twice, and a source selector. Cloud
@@ -70,7 +74,11 @@ and being listed in HACS by default.
 - Cloud clips need a Blink subscription — that is Blink's rule, not this
   project's. Without one, motion clips only exist on a Sync Module's local
   storage.
-- Motion zones and deeper camera settings are out of scope for now.
+- Motion zones are out of scope for now. The camera settings that are covered
+  are listed under [Camera Controls](#camera-controls); anything not in that
+  table still belongs in the Blink app.
+- The controls are player-only. They are not Home Assistant entities, so
+  automations cannot read or set them.
 - Push-to-talk is experimental and model-sensitive, and needs an HTTPS address
   to work at all. On plain HTTP the browser refuses the microphone, and the
   button currently accepts the press before failing where the message cannot
@@ -272,6 +280,103 @@ The local proxy routes are documented in the
 Route handlers live in `proxy/blink_proxy/routes.py`; Blink IMMI and live-view
 behavior lives in `proxy/blink_proxy/blink.py`; push-to-talk lives in
 `proxy/blink_proxy/ptt.py`.
+
+## Camera Controls
+
+While a live view is open, the **Controls** pill opens a sheet with the settings
+for that camera. It is the first part of this project that writes to your Blink
+account rather than only reading from it, so it is worth knowing exactly what it
+sends.
+
+The sheet shows only what the camera in front of you actually has. Night vision
+is on every camera. The Wired Floodlight adds the lamp, its brightness and its
+light settings, and is the one camera with no thermometer, so it shows no
+temperature. Everything else reports a temperature, and speaker volume appears
+on the models that have a speaker to set.
+
+| Control | Where it is written | blinkpy |
+|---|---|---|
+| Flood light on/off | the live-view session itself while one is open; the floodlight's own lights route otherwise | `request_floodlight` for the route; the in-session command is this proxy's, see below |
+| Night vision, Outdoor | the classic camera update route | `request_update_config`, directly |
+| Night vision, other families | the same classic route | `request_update_config`, route named by hand |
+| Lamp brightness, light settings, floodlight volume | the floodlight's config route | `request_update_config`, route named by hand |
+| Volume, Outdoor 4 and XT2 | a v2 camera config route, as `lfr_sync_interval` | not covered, see below |
+| Temperature | read only | `request_camera_info` |
+
+The flood light works from the sheet the whole time a live view is open, and
+the switch shows the lamp's real state from the moment the picture starts.
+While you are watching, the lamp goes over the live-view session itself, the
+same socket the video arrives on, which is how the Blink app does it: the
+command is nine bytes, msgtype `0x14` with `1` for on or `2` for off in the
+sequence field and no payload, and the camera reports the lamp's state back
+on the same socket as msgtype `0x15` with `0` or `1`, as the session opens
+and again within a fraction of a second of a change. Both were read from the
+app's own live-view classes and its session with a Wired Floodlight. A write
+that arrives with nothing streaming uses `request_floodlight` instead. The
+reason for two routes is that Blink answers the lights route with 307 "system
+is busy" for as long as any live view is open on the camera, and this sheet
+only exists inside one, so from here that route could never succeed.
+
+Two things to know about a lamp worked this way, both measured on a Wired
+Floodlight: it stays on for the rest of that live view and is off again by the
+time the next one opens, and Blink's config document does not record it, so
+the sheet takes the camera's word over the document while the session is
+open.
+
+The floodlight's other settings, brightness, night vision, volume and the light
+settings, have no in-session command, so while a live view is open they cannot
+be written at all: Blink answers their config route with the same 307 until the
+last live view on the camera has closed. Those are held instead. Move the
+slider and its card says the change will be set when this live view ends, and
+says so again if you reopen the sheet, and the proxy writes it about two
+seconds after the last session on the camera closes, which is a second longer
+than Blink needed when measured. If the Blink app is still streaming from the
+camera the route stays busy, so the proxy retries for two minutes and then
+gives up. Either way the next time the sheet opens, a line at its top says what
+was set and what was not. The queue is in the proxy's memory and does not
+survive a restart.
+
+"Route named by hand" is worth explaining, because it is most of the table.
+`request_update_config` chooses its route from the product type it is handed,
+and it only recognises two words, so it refuses to write anything at all for a
+Wired Floodlight, an XT, an XT2 or a doorbell. The route each of those cameras
+actually answers is one of the two it does know, so this passes the name of the
+route rather than the name of the camera. The request is blinkpy's; the choice
+of which one is ours.
+
+These are settings, not automations. They live in the player sheet and are not
+exposed as Home Assistant entities, so a script or automation cannot reach them.
+
+### What to know about speaker volume
+
+On the Outdoor 4 and XT2, Speaker Volume is the one setting here that blinkpy
+has no call for. The Blink app saves it to a v2 camera config route, in a field
+named `lfr_sync_interval`, 1 to 8, which is what this sends.
+
+That mapping was established from the app rather than guessed at: the app's
+Audio screen has a single Volume slider, saving it writes that field, a level
+written from this sheet moves the app's own slider to match, and the speaker is
+audibly louder or quieter for it.
+
+**A new level applies to the next live view, not the one playing.** The camera
+reads it when a session starts, so change it, end the stream, and start it again
+to hear the difference. The sheet says so when you move the slider.
+
+### When a change does not take
+
+Blink answers every write immediately and then carries it out in the background,
+so the camera's settings keep the old values for a few seconds afterwards. The
+sheet follows the change through before it re-reads, which is why a control
+does not snap back to where it was while Blink catches up. If a change is still
+in flight when the sheet gives up waiting, it keeps showing what you asked for
+and says the value applies to the next live view.
+
+A camera that is still busy with a previous command refuses the next one. The
+message appears in the card of the control that did not change and says whether
+it is worth trying again in a moment, and each control is disabled while its
+own change is in flight so a second one cannot be sent by accident. The one
+exception is a floodlight setting during a live view, which is held for the end
+of the live view instead, as described above.
 
 ## Dashboards
 

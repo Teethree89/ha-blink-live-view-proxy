@@ -127,6 +127,14 @@
         border: 0;
         background: #05070a;
       }
+      #${DIALOG_ID} .blink-liveview-insets {
+        position: absolute;
+        visibility: hidden;
+        pointer-events: none;
+        /* Written as a shorthand so the shell itself stays unpadded: this
+           element only exists to be measured. */
+        padding: 0 env(safe-area-inset-right, 0px) 0 env(safe-area-inset-left, 0px);
+      }
       #${DIALOG_ID} .blink-liveview-error {
         display: grid;
         place-items: center;
@@ -317,6 +325,51 @@
     };
 
     iframe.addEventListener("load", connectVideo);
+    // The player cannot read the safe-area insets from inside a frame, so
+    // measure them here and hand them over; it keeps its side sheet clear of
+    // the notch with them while the picture still paints behind it.
+    const probe = document.createElement("div");
+    probe.className = "blink-liveview-insets";
+    root.appendChild(probe);
+    const sendInsets = () => {
+      const style = getComputedStyle(probe);
+      const frame = iframe.contentWindow;
+      if (!frame) return;
+      // iOS reports the same inset on both sides in landscape, so the
+      // angle says which side the notch is actually on: 90 puts it on the
+      // left, -90 on the right.
+      const type = screen.orientation && screen.orientation.type;
+      const angle = typeof window.orientation === "number"
+        ? window.orientation
+        : type === "landscape-primary" ? 90 : type === "landscape-secondary" ? -90 : 0;
+      // Where this dialog's own close button ends, so the player's title can
+      // start clear of it wherever the button has been positioned.
+      var closeRight = 0;
+      try {
+        var box = close.getBoundingClientRect();
+        var frameBox = iframe.getBoundingClientRect();
+        if (box.width) closeRight = Math.max(0, box.right - frameBox.left);
+      } catch (err) { closeRight = 0; }
+      frame.postMessage(
+        {
+          type: "blink-liveview-insets",
+          left: parseFloat(style.paddingLeft) || 0,
+          right: parseFloat(style.paddingRight) || 0,
+          angle,
+          closeRight,
+        },
+        window.location.origin
+      );
+    };
+    // The close button above moves once the video reports its shape, so send
+    // again as that settles rather than only on load.
+    const sendThroughSettling = () => {
+      sendInsets();
+      for (const delay of [120, 300, 600, 1000]) setTimeout(sendInsets, delay);
+    };
+    iframe.addEventListener("load", sendThroughSettling);
+    window.addEventListener("resize", sendInsets);
+    window.addEventListener("orientationchange", () => setTimeout(sendThroughSettling, 300));
     window.addEventListener("resize", apply);
     window.addEventListener("orientationchange", applyThroughRotation);
     connectVideo();
@@ -644,6 +697,14 @@
   );
 
   window.addEventListener("message", answerClipsTokens);
+  window.addEventListener("message", (event) => {
+    // The player's back arrow: it cannot reach this dialog directly.
+    const data = event.data || {};
+    if (event.origin !== window.location.origin || data.type !== "blink-liveview-close") return;
+    const root = document.getElementById(DIALOG_ID);
+    const iframe = root ? root.querySelector("iframe") : null;
+    if (iframe && event.source === iframe.contentWindow) closeDialog();
+  });
 
   window.addEventListener(
     "ll-custom",

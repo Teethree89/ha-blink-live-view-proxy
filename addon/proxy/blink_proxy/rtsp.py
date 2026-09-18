@@ -381,3 +381,9 @@ class BlinkRtspLiveStream:
 
     async def send_audio_frame(self, *_args: Any, **_kwargs: Any) -> None:
         raise NotImplementedError("push-to-talk is not available over RTSP")
+
+    # Nor do inline commands, the lamp's route from inside a session. No camera
+    # on the RTSP path has a lamp, so this is the interface kept whole rather
+    # than a feature withheld.
+    async def send_inline_command(self, *_args: Any, **_kwargs: Any) -> None:
+        raise NotImplementedError("inline commands are not available over RTSP")

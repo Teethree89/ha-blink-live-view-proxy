@@ -71,6 +71,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
     hass.http.register_view(BlinkLiveviewProxyStopView(hass))
+    hass.http.register_view(BlinkLiveviewProxyControlsView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewMp4DownloadView(hass))
@@ -490,7 +491,7 @@ html,body {{
   height:100%;
   background:#05070a;
   color:#f8fafc;
-  font-family:Arial,Helvetica,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
 }}
 body {{
   overflow:hidden;
@@ -511,7 +512,7 @@ video {{
   object-fit:contain;
   background:#05070a;
   opacity:0;
-  transition:opacity .18s ease;
+  transition:opacity .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
 }}
 video.ready {{
   opacity:1;
@@ -568,7 +569,10 @@ video.ready {{
 .live-actions {{
   position:absolute;
   top:calc(16px + env(safe-area-inset-top, 0px));
-  right:calc(16px + env(safe-area-inset-right, 0px));
+  /* Centred over the picture, which gives up the right edge to a side sheet. */
+  left:calc((100% - var(--sheet-w)) / 2);
+  right:auto;
+  transform:translateX(-50%);
   z-index:4;
   display:flex;
   gap:10px;
@@ -657,7 +661,7 @@ button.talk.active {{
   /* Centred, not tucked into the corner. On a phone the picture reaches the
      edges and these sat on top of the native mute and AirPlay controls. */
   .live-actions {{
-    left:50%;
+    left:calc((100% - var(--sheet-w)) / 2);
     right:auto;
     transform:translateX(-50%);
   }}
@@ -672,6 +676,503 @@ button.talk.active {{
     height:auto;
     max-width:100%;
     max-height:100%;
+  }}
+}}
+/* Camera Controls sheet: a header over the picture, a hint pill under the
+   buttons, and a sheet that slides up from the bottom in portrait or in from
+   the right in landscape. Colours follow the dark navy of the companion app. */
+:root {{
+  --ink:#f1f5f9;
+  --ink-dim:#94a3b8;
+  --navy:#0b1220;
+  --sheet:#111a2b;
+  --card:#1a2438;
+  --card-edge:rgba(255,255,255,.06);
+  --blue:#2f7cf6;
+  --grey-btn:#2a3446;
+  --topbar-h:64px;
+  --sheet-h:0px;
+  --sheet-w:0px;
+  --lift:0px;
+  /* Side safe areas as the dialog measures them; env() reads zero in a frame. */
+  --safe-left:env(safe-area-inset-left, 0px);
+  --safe-right:env(safe-area-inset-right, 0px);
+}}
+.stage {{
+  background-color:var(--navy);
+}}
+.topbar[hidden] {{
+  display:none;
+}}
+.topbar {{
+  position:absolute;
+  top:0;
+  left:0;
+  right:var(--sheet-w);
+  z-index:6;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  height:var(--topbar-h);
+  padding:env(safe-area-inset-top, 0px) calc(10px + var(--safe-right)) 0 calc(6px + var(--safe-left));
+  box-sizing:content-box;
+  background:linear-gradient(rgba(5,7,10,.72),rgba(5,7,10,0));
+}}
+.topbar .icon-btn {{
+  width:44px;
+  height:44px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  background:transparent;
+  border-radius:12px;
+}}
+.topbar .icon-btn[hidden] {{
+  display:none;
+}}
+.topbar .icon-btn svg {{
+  width:24px;
+  height:24px;
+}}
+.topbar .titles {{
+  flex:1;
+  min-width:0;
+}}
+.topbar .name {{
+  font-size:20px;
+  font-weight:700;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}}
+.topbar .sub {{
+  font-size:14px;
+  color:var(--ink-dim);
+  margin-top:1px;
+}}
+.topbar .live-pill {{
+  margin-right:2px;
+}}
+.live-pill {{
+  display:inline-flex;
+  align-items:center;
+  gap:7px;
+  height:32px;
+  padding:0 12px;
+  border-radius:999px;
+  background:rgba(15,23,42,.78);
+  border:1px solid rgba(255,255,255,.08);
+  font-size:14px;
+  font-weight:600;
+  -webkit-user-select:none;
+  user-select:none;
+}}
+.live-pill::before {{
+  content:"";
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:#22c55e;
+  box-shadow:0 0 6px #22c55e;
+}}
+.live-pill[hidden] {{
+  display:none;
+}}
+.video-corner {{
+  position:absolute;
+  z-index:5;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}}
+.video-corner[hidden] {{
+  display:none;
+}}
+button.icon-btn.corner {{
+  width:36px;
+  height:36px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  border-radius:10px;
+  background:rgba(15,23,42,.78);
+  border:1px solid rgba(255,255,255,.08);
+}}
+button.icon-btn.corner svg {{
+  width:18px;
+  height:18px;
+}}
+.live-actions {{
+  align-items:stretch;
+}}
+.live-actions button {{
+  min-height:52px;
+  padding:0 20px;
+  border-radius:12px;
+  font-size:17px;
+  font-weight:600;
+  white-space:nowrap;
+}}
+.live-actions button.secondary {{
+  background:var(--grey-btn);
+}}
+.controls-hint {{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:4;
+  display:inline-flex;
+  align-items:center;
+  gap:10px;
+  height:44px;
+  padding:0 22px 0 18px;
+  border-radius:999px;
+  background:rgba(20,28,44,.88);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--ink);
+  font-size:15px;
+  font-weight:500;
+}}
+.controls-hint svg {{
+  width:16px;
+  height:16px;
+}}
+.controls-hint[hidden] {{
+  display:none;
+}}
+/* In landscape the hint rides in the button row as a fourth chip. */
+.live-actions .controls-hint {{
+  position:static;
+  transform:none;
+  height:auto;
+  padding:0 16px;
+  font-size:16px;
+}}
+/* The sheet comes in from the side there, so the up chevron would lie. */
+.live-actions .controls-hint svg {{
+  display:none;
+}}
+body:not(.portrait) .live-actions button {{
+  min-height:44px;
+  padding:0 16px;
+  font-size:16px;
+}}
+.sheet {{
+  position:fixed;
+  z-index:8;
+  box-sizing:border-box;
+  display:flex;
+  flex-direction:column;
+  background:var(--sheet);
+  color:var(--ink);
+  box-shadow:0 -12px 40px rgba(0,0,0,.45);
+  transition:transform .28s cubic-bezier(.2,.8,.2,1);
+  -webkit-user-select:none;
+  user-select:none;
+}}
+.sheet[hidden] {{
+  display:none;
+}}
+.sheet.bottom {{
+  left:0;
+  right:0;
+  bottom:0;
+  max-height:calc(100% - var(--topbar-h));
+  border-radius:22px 22px 0 0;
+  padding:8px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  transform:translateY(100%);
+}}
+.sheet.side {{
+  top:0;
+  right:0;
+  bottom:0;
+  /* The notch inset is added outside the cards, so the sheet reads the same
+     in both rotations and the picture gives up the difference instead. */
+  width:calc(min(340px, 46vw) + var(--safe-right));
+  padding:calc(10px + env(safe-area-inset-top, 0px)) calc(12px + var(--safe-right)) calc(10px + env(safe-area-inset-bottom, 0px)) 12px;
+  transform:translateX(100%);
+}}
+.sheet.open {{
+  transform:none;
+}}
+.sheet .grabber {{
+  width:38px;
+  height:4px;
+  margin:0 auto 10px;
+  border-radius:999px;
+  background:rgba(148,163,184,.45);
+}}
+.sheet.side .grabber {{
+  display:none;
+}}
+.sheet .head {{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin:0 2px 12px;
+}}
+.sheet .head h2 {{
+  margin:0;
+  font-size:20px;
+  font-weight:700;
+}}
+.sheet .head .close {{
+  width:40px;
+  height:40px;
+  padding:0;
+  display:grid;
+  place-items:center;
+  border-radius:12px;
+  background:var(--grey-btn);
+}}
+.sheet .close svg {{
+  width:18px;
+  height:18px;
+}}
+.sheet .body {{
+  display:grid;
+  /* minmax(0, ...) or Safari sizes the column to the widest card's minimum
+     content and the whole stack runs off the right edge of the screen. */
+  grid-template-columns:minmax(0, 1fr);
+  gap:10px;
+  min-height:0;
+  min-width:0;
+  overflow-y:auto;
+  overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+}}
+.section {{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr);
+  gap:10px;
+}}
+.section[hidden] {{
+  display:none;
+}}
+.section-title {{
+  margin:6px 2px 0;
+  font-size:13px;
+  font-weight:600;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:var(--ink-dim);
+}}
+.card {{
+  display:flex;
+  align-items:center;
+  min-width:0;
+  gap:14px;
+  padding:14px 16px;
+  border-radius:14px;
+  background:var(--card);
+  border:1px solid var(--card-edge);
+}}
+.card[hidden] {{
+  display:none;
+}}
+.card svg.glyph {{
+  width:26px;
+  height:26px;
+  flex:none;
+  color:var(--ink);
+}}
+.card .text {{
+  flex:1;
+  min-width:0;
+}}
+.card .label {{
+  font-size:16px;
+  font-weight:600;
+}}
+.card .hint {{
+  font-size:13px;
+  color:var(--ink-dim);
+  margin-top:2px;
+}}
+.card .hint:empty {{
+  display:none;
+}}
+/* The line under a card's label carries the message about the last change
+   made there, so it is read where the finger is, however long the sheet. */
+.card .hint.says {{
+  color:var(--ink);
+}}
+.card .hint.warn {{
+  color:#fca5a5;
+}}
+.card.slider .hint {{
+  grid-column:1 / -1;
+  margin-top:0;
+}}
+.card .value {{
+  font-size:14px;
+  color:var(--ink-dim);
+  font-weight:500;
+}}
+.card.slider .text {{
+  display:grid;
+  grid-template-columns:1fr auto;
+  align-items:center;
+  row-gap:10px;
+}}
+.card.slider input {{
+  grid-column:1 / -1;
+}}
+.card.busy {{
+  opacity:.6;
+  pointer-events:none;
+}}
+.pair {{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) minmax(0, 1fr);
+  gap:10px;
+  min-width:0;
+}}
+.pair .card {{
+  flex-direction:column;
+  align-items:flex-start;
+  gap:6px;
+  padding:14px;
+}}
+.pair .card .top {{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:100%;
+}}
+.pair .card .top .label {{
+  flex:1;
+}}
+.pair .card .big {{
+  font-size:24px;
+  font-weight:700;
+}}
+.pair .card input {{
+  width:100%;
+}}
+.pair .card[hidden] {{
+  display:none;
+}}
+.pair:has(> .card[hidden]) {{
+  grid-template-columns:minmax(0, 1fr);
+}}
+.switch {{
+  position:relative;
+  width:52px;
+  height:30px;
+  flex:none;
+}}
+.switch input {{
+  position:absolute;
+  inset:0;
+  margin:0;
+  opacity:0;
+  cursor:pointer;
+}}
+.switch span {{
+  position:absolute;
+  inset:0;
+  border-radius:999px;
+  background:#3b4658;
+  transition:background .18s ease;
+}}
+.switch span::after {{
+  content:"";
+  position:absolute;
+  top:3px;
+  left:3px;
+  width:24px;
+  height:24px;
+  border-radius:999px;
+  background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.4);
+  transition:transform .18s ease;
+}}
+.switch input:checked + span {{
+  background:var(--blue);
+}}
+.switch input:checked + span::after {{
+  transform:translateX(22px);
+}}
+.switch input:disabled + span {{
+  opacity:.5;
+}}
+input[type=range] {{
+  -webkit-appearance:none;
+  appearance:none;
+  width:100%;
+  min-width:0;
+  height:6px;
+  margin:8px 0;
+  border-radius:999px;
+  background:linear-gradient(to right, var(--blue) 0 var(--fill, 0%), #3b4658 var(--fill, 0%) 100%);
+  outline:none;
+  touch-action:pan-y;
+}}
+input[type=range]::-webkit-slider-thumb {{
+  -webkit-appearance:none;
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  background:#fff;
+  border:0;
+  box-shadow:0 1px 4px rgba(0,0,0,.45);
+}}
+input[type=range]::-moz-range-thumb {{
+  width:22px;
+  height:22px;
+  border-radius:999px;
+  background:#fff;
+  border:0;
+}}
+/* The sheet's own line, at the top where the eye lands on opening: reading,
+   unavailable, and what became of a change written after the last live view.
+   Messages about one control live in that control's card instead. */
+.sheet .note {{
+  margin:0 2px 2px;
+  font-size:13px;
+  color:var(--ink-dim);
+  text-align:center;
+}}
+.sheet .note:empty {{
+  display:none;
+}}
+.sheet .note.warn {{
+  color:#fca5a5;
+}}
+.sheet select {{
+  appearance:none;
+  border:0;
+  border-radius:10px;
+  background:var(--grey-btn);
+  color:var(--ink);
+  font-size:14px;
+  font-weight:600;
+  padding:8px 12px;
+}}
+/* While a side sheet is open the picture gives up the width it takes. */
+body.sheet-open .stage {{
+  padding-right:var(--sheet-w);
+  box-sizing:border-box;
+}}
+body.sheet-open video {{
+  width:auto;
+  right:var(--sheet-w);
+}}
+@media (max-width: 720px), (max-height: 520px) {{
+  /* The picture stays centred until the sheet opens; then it, the buttons
+     and the Live pill glide up together to make room, shrinking only when
+     the header would otherwise be in the way. */
+  body.portrait video {{
+    transform:translateY(calc(-1 * var(--lift)));
+  }}
+  body.portrait .live-actions {{
+    transform:translate(-50%, calc(-1 * var(--lift)));
+    transition:transform .28s cubic-bezier(.2,.8,.2,1);
+  }}
+  body.portrait .video-corner {{
+    transform:translateY(calc(-1 * var(--lift)));
+    transition:transform .28s cubic-bezier(.2,.8,.2,1);
   }}
 }}
 </style>
@@ -696,6 +1197,117 @@ button.talk.active {{
     <button id="talk" class="talk" type="button" disabled>Hold Talk</button>
     <button id="end" class="danger" type="button">End</button>
   </div>
+  <header class="topbar" hidden>
+    <button id="back" class="icon-btn" type="button" aria-label="Back">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <div class="titles">
+      <div class="name">{name}</div>
+      <div class="sub">Live • Camera</div>
+    </div>
+    <span id="livePillTop" class="live-pill" hidden>Live</span>
+  </header>
+  <div id="videoCorner" class="video-corner" hidden>
+    <span class="live-pill">Live</span>
+    <button id="fullscreen" class="icon-btn corner" type="button" aria-label="Full screen">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+  </div>
+  <button id="controlsHint" class="controls-hint" type="button" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15l7-7 7 7"/></svg>
+    Controls
+  </button>
+  <section id="sheet" class="sheet" hidden aria-label="Camera Controls">
+    <div class="grabber"></div>
+    <div class="head">
+      <h2>Camera Controls</h2>
+      <button id="sheetClose" class="close" type="button" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="body">
+      <div id="sheetNote" class="note"></div>
+      <label id="cardFlood" class="card" hidden>
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.4 1 2.5h6c0-1.1.4-1.9 1-2.5A6 6 0 0 0 12 3z"/><path d="M3 12h1M20 12h1M5.5 5.5l.7.7M17.8 5.5l-.7.7"/></svg>
+        <div class="text">
+          <div class="label">Flood Light</div>
+          <div id="floodHint" class="hint">Illuminate your yard</div>
+        </div>
+        <span class="switch"><input id="floodSwitch" type="checkbox"><span></span></span>
+      </label>
+      <label id="cardNight" class="card" hidden>
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+        <div class="text">
+          <div class="label">Night Vision</div>
+          <div class="hint">Better visibility at night</div>
+        </div>
+        <span class="switch"><input id="nightSwitch" type="checkbox"><span></span></span>
+      </label>
+      <div id="cardBright" class="card slider" hidden>
+        <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <div class="text">
+          <div class="label">Brightness</div>
+          <div id="brightValue" class="value"></div>
+          <input id="brightRange" type="range" min="1" max="10" step="1" aria-label="Brightness">
+          <div class="hint"></div>
+        </div>
+      </div>
+      <div class="pair">
+        <div id="cardTemp" class="card" hidden>
+          <div class="top">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 14.8V5a2 2 0 1 0-4 0v9.8a4 4 0 1 0 4 0z"/><path d="M12 10v6"/></svg>
+            <div class="label">Temperature</div>
+          </div>
+          <div id="tempValue" class="big">--</div>
+          <div class="hint">At the camera</div>
+        </div>
+        <div id="cardVolume" class="card" hidden>
+          <div class="top">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>
+            <div class="label">Volume</div>
+            <div id="volumeValue" class="value"></div>
+          </div>
+          <input id="volumeRange" type="range" min="1" max="8" step="1" aria-label="Volume">
+          <div class="hint"></div>
+        </div>
+      </div>
+      <div id="lightSection" class="section" hidden>
+        <div class="section-title">Light Settings</div>
+      <label class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17h18M5 17a7 7 0 0 1 14 0M12 4v2M4.2 8.2l1.4 1.4M19.8 8.2l-1.4 1.4"/></svg>
+          <div class="text">
+            <div class="label">Dusk to Dawn</div>
+            <div class="hint">Light stays on overnight</div>
+          </div>
+          <span class="switch"><input id="duskSwitch" type="checkbox"><span></span></span>
+        </label>
+        <label class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3L4 14h6l-1 7 9-11h-6l1-7z"/></svg>
+          <div class="text">
+            <div class="label">Motion Activation</div>
+            <div class="hint">Light comes on with motion</div>
+          </div>
+          <span class="switch"><input id="motionSwitch" type="checkbox"><span></span></span>
+        </label>
+        <div class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>
+          <div class="text">
+            <div class="label">Motion Timeout</div>
+            <div class="hint">Stays on this long after motion</div>
+          </div>
+          <select id="motionDuration" aria-label="Motion light timeout"></select>
+        </div>
+        <div class="card">
+          <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3h8M12 3v3M6 21h12M12 8a5 5 0 0 0-5 5v8h10v-8a5 5 0 0 0-5-5z"/></svg>
+          <div class="text">
+            <div class="label">Manual Timeout</div>
+            <div class="hint">When switched on by hand</div>
+          </div>
+          <select id="manualDuration" aria-label="Manual timeout"></select>
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
 <script src="{PLAYER_LIBRARY_URL}"></script>
 <script>
@@ -723,6 +1335,7 @@ const statusText = document.getElementById("status");
 const actions = document.getElementById("actions");
 const liveActions = document.getElementById("liveActions");
 const liveNotice = document.getElementById("liveNotice");
+const topbar = document.querySelector(".topbar");
 const restart = document.getElementById("restart");
 const save = document.getElementById("save");
 const talk = document.getElementById("talk");
@@ -809,18 +1422,55 @@ async function startPlayback() {{
 
 function positionLiveActions() {{
   liveActions.classList.remove("bottom-gutter");
-  if (window.innerWidth >= window.innerHeight || liveActions.hidden) return;
-
-  const videoRect = video.getBoundingClientRect();
-  const roomBelow = window.innerHeight - videoRect.bottom;
-  // Safari does not expose whether its native media controls are currently
-  // showing. The rendered geometry tells us what matters: if a portrait
-  // letterbox leaves enough room below the video for both these buttons and
-  // the home indicator, use that gutter. Otherwise keep them at the top,
-  // clear of the native controls along the video's bottom edge.
-  if (roomBelow >= liveActions.offsetHeight + 80) {{
-    liveActions.classList.add("bottom-gutter");
+  const portrait = isPortrait();
+  const live = !liveActions.hidden;
+  // The Live pill sits on the picture in portrait and in the header in
+  // landscape, where the picture reaches the top edge anyway.
+  videoCorner.hidden = !live || !portrait;
+  livePillTop.hidden = !live || portrait;
+  controlsHint.hidden = !live || openSheet !== null;
+  if (!live) return;
+  // The dashboard dialog puts its close button over this header. It reports
+  // where that button ends, but the report can arrive late or not at all, so
+  // the title also keeps clear of where the button sits by default: its own
+  // 10px offset plus the safe area, plus room for the button itself.
+  if (window.parent && window.parent !== window) {{
+    const safeLeft = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--safe-left")
+    ) || 0;
+    topbar.style.paddingLeft = `${{Math.round(Math.max(closeRight + 12, safeLeft + 78))}}px`;
+  }} else {{
+    topbar.style.paddingLeft = "";
   }}
+  if (portrait && controlsHint.parentNode !== stage) stage.appendChild(controlsHint);
+  if (!portrait && controlsHint.parentNode !== liveActions) liveActions.appendChild(controlsHint);
+  liveActions.style.top = "";
+  liveActions.style.bottom = "";
+  for (const key of ["top", "bottom", "left", "right", "transform"]) controlsHint.style[key] = "";
+  if (portrait) {{
+    // Layout geometry, so the lift transform above does not feed back in.
+    const top = video.offsetTop;
+    const bottom = top + video.offsetHeight;
+    const right = video.offsetLeft + video.offsetWidth;
+    videoCorner.style.top = `${{Math.max(top, topbar.offsetHeight) + 10}}px`;
+    videoCorner.style.right = `${{Math.max(10, window.innerWidth - right + 10)}}px`;
+    // Under the picture when the letterbox leaves room for the buttons and
+    // the hint together, otherwise along the bottom edge over the picture.
+    const roomBelow = window.innerHeight - bottom;
+    const needed = liveActions.offsetHeight + controlsHint.offsetHeight + 44;
+    if (roomBelow >= needed) {{
+      liveActions.style.top = `${{bottom + 16}}px`;
+      controlsHint.style.top = `${{bottom + 16 + liveActions.offsetHeight + 14}}px`;
+    }} else {{
+      liveActions.classList.add("bottom-gutter");
+      liveActions.style.bottom = `calc(${{controlsHint.offsetHeight + 30}}px + env(safe-area-inset-bottom, 0px))`;
+      controlsHint.style.bottom = "calc(16px + env(safe-area-inset-bottom, 0px))";
+    }}
+    return;
+  }}
+  // One row along the bottom edge, the hint riding in it as a chip. The
+  // native control bar overlaps it while showing, and hides itself again.
+  liveActions.classList.add("bottom-gutter");
 }}
 
 function positionLiveActionsThroughRotation() {{
@@ -1179,6 +1829,7 @@ function setLoading(message) {{
   spinner.hidden = false;
   actions.hidden = true;
   liveActions.hidden = true;
+  hideLiveChrome();
   talk.disabled = true;
   statusText.textContent = message;
 }}
@@ -1189,6 +1840,7 @@ function setEnded(message) {{
   spinner.hidden = true;
   actions.hidden = false;
   liveActions.hidden = true;
+  hideLiveChrome();
   talk.disabled = true;
   statusText.textContent = message;
 }}
@@ -1201,6 +1853,7 @@ function stopPlayer() {{
   }}
   video.classList.remove("ready");
   liveActions.hidden = true;
+  hideLiveChrome();
   talk.disabled = true;
   video.onplaying = null;
   video.onended = null;
@@ -1235,6 +1888,7 @@ async function startPlayer() {{
       talk.hidden = !pttSupported;
       talk.disabled = !pttSupported;
       positionLiveActions();
+      showLiveChrome();
     }};
     video.onended = () => {{
       endSession("Live view ended.");
@@ -1284,6 +1938,7 @@ async function startPlayer() {{
     talk.hidden = !pttSupported;
     talk.disabled = !pttSupported;
     positionLiveActions();
+    showLiveChrome();
   }};
 
   video.onended = () => {{
@@ -1337,6 +1992,427 @@ syncSoundButton();
 // <video> fetching HLS segments from a detached document, so the proxy never
 // saw the stream go idle and kept the Blink live view open behind it. The
 // parent calls this first; pagehide covers a normal navigation away.
+
+// ---- Camera Controls sheet -------------------------------------------------
+const stage = document.querySelector(".stage");
+const back = document.getElementById("back");
+const livePillTop = document.getElementById("livePillTop");
+const videoCorner = document.getElementById("videoCorner");
+const fullscreenButton = document.getElementById("fullscreen");
+const controlsHint = document.getElementById("controlsHint");
+const sheet = document.getElementById("sheet");
+const sheetClose = document.getElementById("sheetClose");
+const sheetNote = document.getElementById("sheetNote");
+const cardFlood = document.getElementById("cardFlood");
+const floodSwitch = document.getElementById("floodSwitch");
+const cardNight = document.getElementById("cardNight");
+const nightSwitch = document.getElementById("nightSwitch");
+const cardBright = document.getElementById("cardBright");
+const brightRange = document.getElementById("brightRange");
+const brightValue = document.getElementById("brightValue");
+const cardTemp = document.getElementById("cardTemp");
+const tempValue = document.getElementById("tempValue");
+const cardVolume = document.getElementById("cardVolume");
+const volumeRange = document.getElementById("volumeRange");
+const volumeValue = document.getElementById("volumeValue");
+const lightSection = document.getElementById("lightSection");
+const duskSwitch = document.getElementById("duskSwitch");
+const motionSwitch = document.getElementById("motionSwitch");
+const motionDuration = document.getElementById("motionDuration");
+const manualDuration = document.getElementById("manualDuration");
+let controlsState = null;
+let controlsLoad = null;
+// Bumped by every write, so a read that started earlier knows it is stale.
+let controlsEpoch = 0;
+let openSheet = null;
+let closeRight = 0;
+
+function controlsUrl() {{
+  // The session names this player's own live view to the proxy, so a lamp
+  // change can ride that session instead of a route Blink refuses mid-stream.
+  return `/api/blink_liveview_proxy/cameras/${{slug}}/controls?token=${{encodeURIComponent(accessToken)}}&session=${{encodeURIComponent(sessionId)}}`;
+}}
+
+function isPortrait() {{
+  return window.innerHeight > window.innerWidth;
+}}
+
+function durationLabel(seconds) {{
+  if (seconds === 65535) return "Until turned off";
+  if (seconds >= 60) return `${{Math.round(seconds / 60)}} min`;
+  return `${{seconds}} sec`;
+}}
+
+function fillOptions(select, options, current) {{
+  select.replaceChildren();
+  const values = options.includes(current) || current == null ? options : [current, ...options];
+  for (const value of values) {{
+    const option = document.createElement("option");
+    option.value = String(value);
+    option.textContent = durationLabel(value);
+    option.selected = value === current;
+    select.appendChild(option);
+  }}
+}}
+
+function setRangeFill(input) {{
+  const min = Number(input.min) || 0;
+  const max = Number(input.max) || 100;
+  const pct = ((Number(input.value) - min) / (max - min)) * 100;
+  input.style.setProperty("--fill", `${{pct}}%`);
+}}
+
+function percentOf(value, max) {{
+  return `${{Math.round((Number(value) / max) * 100)}}%`;
+}}
+
+function floodHintText(state) {{
+  if (!state.flood_light) return "Illuminate your yard";
+  const timeout = state.light_settings && state.light_settings.manual_duration;
+  if (timeout === 65535) return "On until turned off";
+  if (timeout) return `On for ${{durationLabel(timeout)}}`;
+  return "On";
+}}
+
+// What each card says under its label: the message about the last change
+// made there, the held-back line while a change waits for the end of this
+// live view, or its usual hint. It is read where the finger is, however
+// long the sheet; the notice at the top of the picture stays the
+// microphone's.
+const CARD_FOR = {{
+  flood_light: cardFlood,
+  night_vision: cardNight,
+  brightness: cardBright,
+  volume: cardVolume,
+  dusk_to_dawn: duskSwitch.closest(".card"),
+  motion_activation: motionSwitch.closest(".card"),
+  motion_duration: motionDuration.closest(".card"),
+  manual_duration: manualDuration.closest(".card")
+}};
+const HELD_LINE = "Will be set when this live view ends.";
+const cardLines = new Map();
+
+function defaultHint(card, hint) {{
+  if (card === cardFlood) return floodHintText(controlsState || {{}});
+  if (!("hint" in hint.dataset)) hint.dataset.hint = hint.textContent.trim();
+  return hint.dataset.hint;
+}}
+
+function renderCardLines() {{
+  const held = (controlsState && controlsState.deferred) || [];
+  Object.keys(CARD_FOR).forEach((name) => {{
+    const card = CARD_FOR[name];
+    const hint = card.querySelector(".hint");
+    if (!hint) return;
+    const line = cardLines.get(card);
+    const isHeld = held.includes(name);
+    hint.textContent = line ? line.text : isHeld ? HELD_LINE : defaultHint(card, hint);
+    hint.classList.toggle("says", !!line || isHeld);
+    hint.classList.toggle("warn", !!(line && line.warn));
+  }});
+}}
+
+function renderControls() {{
+  const state = controlsState;
+  if (!state) return;
+  const caps = state.capabilities || {{}};
+  cardFlood.hidden = !caps.flood_light;
+  floodSwitch.checked = !!state.flood_light;
+  cardNight.hidden = !caps.night_vision || state.night_vision == null;
+  nightSwitch.checked = state.night_vision !== "off";
+  cardBright.hidden = !caps.brightness || state.brightness == null;
+  if (state.brightness != null) {{
+    brightRange.value = state.brightness;
+    setRangeFill(brightRange);
+    brightValue.textContent = percentOf(state.brightness, 10);
+  }}
+  cardTemp.hidden = !caps.temperature || state.temperature == null;
+  if (state.temperature != null) {{
+    tempValue.textContent = `${{state.temperature}}${{state.temperature_unit || "°F"}}`;
+  }}
+  cardVolume.hidden = !caps.volume || state.volume == null;
+  if (state.volume != null) {{
+    volumeRange.value = state.volume;
+    setRangeFill(volumeRange);
+    volumeValue.textContent = percentOf(state.volume, 8);
+  }}
+  lightSection.hidden = !caps.light_settings || !state.light_settings;
+  const light = state.light_settings;
+  if (light) {{
+    duskSwitch.checked = !!light.dusk_to_dawn;
+    motionSwitch.checked = !!light.motion_activation;
+    fillOptions(motionDuration, light.motion_duration_options || [], light.motion_duration);
+    fillOptions(manualDuration, light.manual_duration_options || [], light.manual_duration);
+  }}
+  renderCardLines();
+  layoutSheets();
+}}
+
+async function loadControls() {{
+  if (controlsLoad) return controlsLoad;
+  sheetNote.classList.remove("warn");
+  sheetNote.textContent = controlsState ? "" : "Reading camera settings";
+  // A read started before a write cannot be allowed to land after it. It was
+  // fetched from a camera that had not been changed yet, so applying it would
+  // put the control back where the viewer had just moved it from.
+  const startedAt = controlsEpoch;
+  controlsLoad = (async () => {{
+    try {{
+      const response = await fetch(controlsUrl(), {{ cache: "no-store" }});
+      if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${{response.status}}`);
+      const fresh = await response.json();
+      if (startedAt !== controlsEpoch) return;
+      controlsState = fresh;
+      // A fresh read is a clean slate for the cards: what a change came to is
+      // in the state now, and a held one renders its own line from it.
+      cardLines.clear();
+      sheetNote.textContent = deferredResultText(fresh.deferred_result);
+    }} catch (err) {{
+      sheetNote.classList.add("warn");
+      sheetNote.textContent = `Camera settings unavailable: ${{err.message}}`;
+    }} finally {{
+      controlsLoad = null;
+      if (startedAt === controlsEpoch) renderControls();
+    }}
+  }})();
+  return controlsLoad;
+}}
+
+const CONTROL_LABELS = {{
+  flood_light: "the flood light",
+  night_vision: "night vision",
+  brightness: "brightness",
+  volume: "volume",
+  dusk_to_dawn: "dusk to dawn",
+  motion_activation: "motion activation",
+  motion_duration: "the motion timeout",
+  manual_duration: "the manual timeout"
+}};
+
+function namesFor(controls) {{
+  const labels = controls.map((name) => CONTROL_LABELS[name] || name);
+  if (labels.length <= 1) return labels[0] || "that";
+  return labels.slice(0, -1).join(", ") + " and " + labels[labels.length - 1];
+}}
+
+function capitalize(text) {{
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}}
+
+// What became of the settings written after the previous live view. The proxy
+// reports it once, on the first read after the write, so this is the sheet's
+// opening line that one time and nothing after.
+function deferredResultText(result) {{
+  if (!result) return "";
+  const applied = result.applied || [];
+  const failed = result.failed || [];
+  const parts = [];
+  if (applied.length) {{
+    parts.push(capitalize(`${{namesFor(applied)}} ${{applied.length > 1 ? "were" : "was"}} set after your last live view.`));
+  }}
+  if (failed.length) {{
+    const why = (result.busy || []).length ? ": the camera stayed busy" : "";
+    parts.push(`Could not set ${{namesFor(failed)}} after your last live view${{why}}.`);
+  }}
+  return parts.join(" ");
+}}
+
+async function sendControls(changes, card) {{
+  // Any read already in flight is now out of date: it left before this change.
+  controlsEpoch += 1;
+  // pointer-events alone still lets a focused slider move under the arrow keys,
+  // so the inputs are disabled for real while the write is in flight.
+  const inputs = Array.from(card.querySelectorAll("input, select, button"));
+  const locked = inputs.filter((el) => !el.disabled);
+  locked.forEach((el) => {{ el.disabled = true; }});
+  card.classList.add("busy");
+  card.setAttribute("aria-busy", "true");
+  cardLines.delete(card);
+  try {{
+    const response = await fetch(controlsUrl(), {{
+      method: "POST",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify(changes)
+    }});
+    if (!response.ok) throw new Error((await response.text()).trim() || `HTTP ${{response.status}}`);
+    controlsState = await response.json();
+    const rejected = controlsState.rejected || [];
+    const busy = controlsState.busy || [];
+    const pending = controlsState.pending || [];
+    const held = controlsState.deferred || [];
+    const volumeChanged = Object.prototype.hasOwnProperty.call(changes, "volume")
+      && !(controlsState.capabilities || {{}}).flood_light;
+    // The message goes under this card's label; see renderCardLines. A held
+    // change needs no line here, its card renders the held line from the
+    // state until the live view ends.
+    if (busy.length) {{
+      cardLines.set(card, {{ text: "The camera was busy. Try again in a moment.", warn: true }});
+    }} else if (rejected.length) {{
+      cardLines.set(card, {{ text: "The camera refused this change.", warn: true }});
+    }} else if (!held.length && (volumeChanged || pending.length)) {{
+      // The camera reads volume at session setup, and anything Blink is still
+      // carrying out lands the same way: not on the stream that is playing.
+      // The lamp is the exception: it goes over this very session and the
+      // camera answers on it, so pending there only means the answer has not
+      // arrived yet.
+      const lampPending = pending.length === 1 && pending[0] === "flood_light";
+      cardLines.set(card, {{
+        text: lampPending
+          ? "Not confirmed by the camera yet."
+          : "Applies to the next live view, not this one."
+      }});
+    }}
+  }} catch (err) {{
+    cardLines.set(card, {{ text: `Could not change this: ${{err.message}}`, warn: true }});
+  }} finally {{
+    card.classList.remove("busy");
+    card.removeAttribute("aria-busy");
+    locked.forEach((el) => {{ el.disabled = false; }});
+    renderControls();
+  }}
+}}
+
+function showSheet(el) {{
+  if (openSheet && openSheet !== el) hideSheet(openSheet, true);
+  openSheet = el;
+  el.hidden = false;
+  layoutSheets();
+  // A forced layout here is what lets the slide-in transition start from
+  // off-screen instead of the sheet simply appearing.
+  void el.offsetHeight;
+  el.classList.add("open");
+}}
+
+function hideSheet(el, now) {{
+  if (openSheet === el) openSheet = null;
+  el.classList.remove("open");
+  const finish = () => {{
+    if (!el.classList.contains("open")) el.hidden = true;
+  }};
+  if (now) finish(); else setTimeout(finish, 300);
+  layoutSheets();
+}}
+
+function closeSheets() {{
+  if (openSheet) hideSheet(openSheet, true);
+}}
+
+function layoutSheets() {{
+  const portrait = isPortrait();
+  document.body.classList.toggle("portrait", portrait);
+  sheet.classList.toggle("bottom", portrait);
+  sheet.classList.toggle("side", !portrait);
+  const open = openSheet;
+  document.body.classList.toggle("sheet-open", !!open);
+  const root = document.documentElement.style;
+  root.setProperty("--sheet-h", open && portrait ? `${{open.offsetHeight}}px` : "0px");
+  root.setProperty("--sheet-w", open && !portrait ? `${{open.offsetWidth}}px` : "0px");
+  liftPicture(open && portrait ? open : null);
+  positionLiveActions();
+}}
+
+function liftPicture(open) {{
+  // How far the picture and its buttons rise so the sheet stops just under
+  // them. The sheet is capped so they always fit above it; layout values
+  // are used, not rendered ones, so the transform being set here never
+  // feeds back into the next measurement.
+  const root = document.documentElement.style;
+  sheet.style.maxHeight = "";
+  if (!open || liveActions.hidden) {{
+    root.setProperty("--lift", "0px");
+    return;
+  }}
+  const topLimit = topbar.offsetHeight + 8;
+  const stack = 16 + liveActions.offsetHeight + 12;
+  const room = window.innerHeight - topLimit - video.offsetHeight - stack;
+  open.style.maxHeight = `${{Math.max(220, room)}}px`;
+  const sheetTop = window.innerHeight - open.offsetHeight;
+  const lift = video.offsetTop + video.offsetHeight + stack - sheetTop;
+  root.setProperty("--lift", `${{Math.max(0, Math.round(lift))}}px`);
+}}
+
+function showLiveChrome() {{
+  topbar.hidden = false;
+  controlsHint.hidden = false;
+  loadControls();
+  renderControls();
+  positionLiveActionsThroughRotation();
+}}
+
+function hideLiveChrome() {{
+  topbar.hidden = true;
+  controlsHint.hidden = true;
+  videoCorner.hidden = true;
+  livePillTop.hidden = true;
+  closeSheets();
+}}
+
+function toggleFullscreen() {{
+  if (document.fullscreenElement) {{
+    document.exitFullscreen().catch(() => {{}});
+    return;
+  }}
+  const root = document.documentElement;
+  if (root.requestFullscreen) {{
+    root.requestFullscreen().catch(() => {{}});
+  }} else if (video.webkitEnterFullscreen) {{
+    video.webkitEnterFullscreen();
+  }}
+}}
+
+function goBack() {{
+  if (window.parent && window.parent !== window) {{
+    window.parent.postMessage({{ type: "blink-liveview-close" }}, window.location.origin);
+    return;
+  }}
+  endCurrentStream();
+}}
+
+back.addEventListener("click", goBack);
+// Inside the dashboard dialog its own close button sits in the same corner.
+back.hidden = !!(window.parent && window.parent !== window);
+// Re-read on open. The state is otherwise only fetched once when the live
+// chrome appears, so anything the camera reported late stayed wrong for the
+// rest of the session however many times the sheet was opened.
+controlsHint.addEventListener("click", () => {{ showSheet(sheet); loadControls(); }});
+sheetClose.addEventListener("click", () => hideSheet(sheet));
+fullscreenButton.addEventListener("click", toggleFullscreen);
+floodSwitch.addEventListener("change", () => sendControls({{ flood_light: floodSwitch.checked }}, cardFlood));
+nightSwitch.addEventListener("change", () => sendControls({{ night_vision: nightSwitch.checked ? "auto" : "off" }}, cardNight));
+brightRange.addEventListener("input", () => {{
+  setRangeFill(brightRange);
+  brightValue.textContent = percentOf(brightRange.value, 10);
+}});
+brightRange.addEventListener("change", () => sendControls({{ brightness: Number(brightRange.value) }}, cardBright));
+volumeRange.addEventListener("input", () => {{
+  setRangeFill(volumeRange);
+  volumeValue.textContent = percentOf(volumeRange.value, 8);
+}});
+volumeRange.addEventListener("change", () => sendControls({{ volume: Number(volumeRange.value) }}, cardVolume));
+duskSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ dusk_to_dawn: duskSwitch.checked }} }}, duskSwitch.closest(".card")));
+motionSwitch.addEventListener("change", () => sendControls({{ light_settings: {{ motion_activation: motionSwitch.checked }} }}, motionSwitch.closest(".card")));
+motionDuration.addEventListener("change", () => sendControls({{ light_settings: {{ motion_duration: Number(motionDuration.value) }} }}, motionDuration.closest(".card")));
+manualDuration.addEventListener("change", () => sendControls({{ light_settings: {{ manual_duration: Number(manualDuration.value) }} }}, manualDuration.closest(".card")));
+overlay.addEventListener("click", () => {{
+  if (statusText.textContent.startsWith("Tap play")) video.play().catch(() => {{}});
+}});
+window.addEventListener("resize", layoutSheets);
+window.addEventListener("message", (event) => {{
+  const data = event.data || {{}};
+  if (event.origin !== window.location.origin || data.type !== "blink-liveview-insets") return;
+  // Both sides come back equal on iOS in landscape; the angle says which
+  // side the notch is really on, and only that side steps in.
+  const inset = Math.max(0, Number(data.left) || 0, Number(data.right) || 0);
+  const angle = Number(data.angle) || 0;
+  const root = document.documentElement.style;
+  root.setProperty("--safe-left", angle === 90 ? `${{inset}}px` : "0px");
+  root.setProperty("--safe-right", angle === -90 ? `${{inset}}px` : "0px");
+  // The dialog's close button sits over this header; start the title after it.
+  closeRight = Math.max(0, Number(data.closeRight) || 0);
+  layoutSheets();
+  positionLiveActions();
+}});
+
 window.__blinkStopPlayer = () => {{
   try {{ stopPlayer(); }} catch (err) {{}}
   // Closing the dialog should free the camera too, not leave it streaming to
@@ -1625,6 +2701,80 @@ class BlinkLiveviewProxyStopView(HomeAssistantView):
             payload if isinstance(payload, dict) else {"stopped": True},
             headers={"Cache-Control": "no-store"},
         )
+
+
+class BlinkLiveviewProxyControlsView(HomeAssistantView):
+    """Read and change a camera's lamp, night vision, volume and temperature.
+
+    The proxy does the talking to Blink; this view only checks the browser
+    token the player already holds and converts the temperature to the unit
+    Home Assistant is set to, so the player shows what the rest of the house
+    shows.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/controls"
+    name = "api:blink_liveview_proxy:controls"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def get(self, request: web.Request, slug: str) -> web.Response:
+        """Return the camera's current controls."""
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        return await self._forward(slug, None, request.query.get("session"))
+
+    async def post(self, request: web.Request, slug: str) -> web.Response:
+        """Change one or more controls and return the new state."""
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        if request.content_length is not None and request.content_length > 4096:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=4096, actual_size=request.content_length
+            )
+        body = await request.read()
+        return await self._forward(slug, body, request.query.get("session"))
+
+    async def _forward(
+        self, slug: str, body: bytes | None, session: str | None = None
+    ) -> web.Response:
+        # The session is the player's own live view. The proxy sends the lamp
+        # over it, because Blink refuses the lights route while any live view
+        # is open on the camera.
+        client = _client(self.hass)
+        headers = {**client.auth_headers(), "Content-Type": "application/json"}
+        query = {"session": session} if session else None
+        try:
+            async with asyncio.timeout(40):
+                async with client._session.request(  # noqa: SLF001
+                    "POST" if body is not None else "GET",
+                    client.proxy_url(f"/cameras/{slug}/controls", query),
+                    headers=headers,
+                    data=body,
+                ) as response:
+                    if response.status >= 400:
+                        text = (await response.text()).strip()
+                        return web.Response(
+                            text=f"{text}\n", status=response.status,
+                            headers={"Cache-Control": "no-store"},
+                        )
+                    payload = await response.json(content_type=None)
+        except (ClientError, asyncio.TimeoutError, ValueError) as err:
+            LOGGER.warning("Camera controls request for %s failed: %s", slug, err)
+            raise web.HTTPBadGateway(text="The proxy did not answer\n") from err
+        if isinstance(payload, dict):
+            payload.update(self._temperature(payload.get("temperature_f")))
+        return web.json_response(payload, headers={"Cache-Control": "no-store"})
+
+    def _temperature(self, fahrenheit: Any) -> dict[str, Any]:
+        """Express Blink's Fahrenheit reading in the house's unit."""
+        if fahrenheit is None:
+            return {"temperature": None, "temperature_unit": None}
+        unit = str(getattr(self.hass.config.units, "temperature_unit", "°F"))
+        if unit == "°C":
+            return {"temperature": round((float(fahrenheit) - 32) * 5 / 9), "temperature_unit": unit}
+        return {"temperature": int(fahrenheit), "temperature_unit": unit}
 
 
 class BlinkLiveviewProxyLastLiveviewInfoView(HomeAssistantView):
