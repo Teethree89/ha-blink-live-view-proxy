@@ -35,7 +35,7 @@ ADDON_BASE_URL = "http://homeassistant.local:8088"
 # build never had. Raise it only when something here genuinely requires a newer
 # proxy — every bump puts a repair notice in front of users who are otherwise
 # working fine.
-MINIMUM_PROXY_VERSION = "0.3.0"
+MINIMUM_PROXY_VERSION = "0.9.0"
 # The proxy release that first reports its environment on /status. An older
 # proxy is not broken by this; the dashboard simply cannot ask it what blinkpy
 # and ffmpeg it has, and says so rather than guessing.
