@@ -49,7 +49,56 @@ Use `name`, `id`, or `serial` to match a Blink camera:
 
 `entity_id` should point to the official HA Blink camera entity. That lets the
 custom integration use the normal snapshot in loading screens and snapshot
-refresh actions.
+refresh actions. With [Blink entities](#blink-entities) on it is not used for
+either: the integration's own snapshot camera takes its place.
+
+## Blink Entities
+
+Off by default. Turn it on under:
+
+```text
+Settings > Devices & services > Blink Live View Proxy > Configure
+```
+
+`Blink entities from the proxy` builds, from the proxy's own Blink session,
+what the official Blink integration otherwise provides. With it on, that
+integration can be removed.
+
+| Entity | Per | What it is |
+|---|---|---|
+| `camera.blink_proxy_<slug>` | camera | the latest Blink thumbnail |
+| `button.blink_proxy_<slug>_refresh_snapshot` | camera | take a new one (wakes the camera) |
+| `switch.blink_proxy_<slug>_motion_detection` | camera | the camera's motion detection |
+| `binary_sensor.blink_proxy_<slug>_motion` | camera | motion since the previous refresh |
+| `binary_sensor.blink_proxy_<slug>_battery` | camera | on when Blink calls the battery low |
+| `sensor.blink_proxy_<slug>_temperature` | camera | °F as Blink reports it |
+| `sensor.blink_proxy_<slug>_wifi_signal` | camera | diagnostic |
+| `sensor.blink_proxy_<slug>_battery_voltage` | camera | diagnostic, where Blink reports it |
+| `alarm_control_panel.blink_proxy_<sync>` | sync module | arm and disarm the system |
+| `sensor.blink_liveview_proxy_last_blink_refresh` | proxy | when Blink was last refreshed, and why not |
+
+`<slug>` is the proxy's camera slug and `<sync>` the sync module's name, lower
+case with underscores. Every id starts `blink_proxy_` so none collides with the
+official integration's, which most people still have installed when they turn
+this on. The loading frame behind live view and the snapshot-refresh button
+use the new snapshot camera, so neither needs the official integration either.
+
+`Blink refresh interval in seconds` (default `300`, range `60-3600`) is how
+often the proxy refreshes Blink while these entities exist. The official
+integration used the same five minutes, and motion is as coarse as it: a clip
+recorded between two refreshes shows up at the second one. Switches, the
+alarm panel and the snapshot button update as soon as Blink confirms them.
+
+The refresh never signs in. It renews the session with its refresh token and
+nothing else, and if that fails it stops, marks the entities unavailable and
+says why on the last-refresh sensor, rather than trying again on a timer. Other
+failures back off, doubling up to an hour. The watchdog, if installed, stays
+the only thing that restarts the proxy. The proxy polls only while the
+integration keeps reading `/devices`, so with the option off it makes no more
+Blink calls than before.
+
+Needs a proxy from this release or newer; an older one has no `/devices`
+route, and the integration logs that once and sets up without these entities.
 
 ## Live View Duration
 

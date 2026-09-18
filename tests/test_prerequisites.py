@@ -159,6 +159,20 @@ def test_blink_integration() -> None:
                                blink_service=False)))["blocking"] == 0,
           "an optional check missing never counts as blocking")
 
+    own = rows(blink_entries=0, blink_loaded=0, blink_service=False,
+               blink_entities=True)
+    check(own["blink_integration"]["state"] == OK,
+          "with Blink entities on, the official integration is not needed")
+    check("Not needed" in own["blink_integration"]["detail"],
+          "and the detail says so rather than calling it missing")
+    leftover = rows(blink_entries=1, blink_loaded=0, blink_service=False,
+                    blink_entities=True)
+    check("can be removed" in leftover["blink_integration"]["detail"],
+          "a leftover official entry is named as removable")
+    check(any("Blink entities" in line
+              for line in absent["blink_integration"]["instructions"]),
+          "the instructions offer the proxy's own entities as the alternative")
+
 
 def test_blinkpy() -> None:
     print("\nblinkpy on the proxy")

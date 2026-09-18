@@ -36,7 +36,7 @@ def check(condition: bool, label: str) -> None:
 
 
 def _defined_names(tree: ast.AST) -> set[str]:
-    """Top-level names const.py makes importable: assignments and imports."""
+    """Top-level names const.py makes importable: assignments, defs and imports."""
     names: set[str] = set()
     for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.Assign):
@@ -45,6 +45,8 @@ def _defined_names(tree: ast.AST) -> set[str]:
                     names.add(target.id)
         elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
             names.add(node.target.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 names.add(alias.asname or alias.name.split(".")[0])

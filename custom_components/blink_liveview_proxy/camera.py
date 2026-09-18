@@ -12,7 +12,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import BlinkLiveviewProxyClient
+from .api import BlinkLiveviewProxyClient, ProxyError
+from .blink_entity import (
+    SNAPSHOT_SUFFIX,
+    BlinkProxyCameraEntity,
+    runtime_cameras,
+    snapshot_source_entity_id,
+)
 from .const import DOMAIN
 from .coordinator import BlinkLiveviewProxyCoordinator
 from .device_parent import parent_device_info
@@ -66,6 +72,12 @@ async def async_setup_entry(
         for camera in cameras
     )
 
+    if runtime.get("blink_entities"):
+        async_add_entities(
+            BlinkProxySnapshotCamera(coordinator, client, entry, camera, hub_device_id)
+            for camera in runtime_cameras(hass, entry)
+        )
+
 
 class BlinkLiveviewProxyCamera(
     CoordinatorEntity[BlinkLiveviewProxyCoordinator], Camera
@@ -88,6 +100,7 @@ class BlinkLiveviewProxyCamera(
         self.content_type = "image/svg+xml"
         self._client = client
         self._camera = camera
+        self._entry_id = entry.entry_id
         slug = str(camera.get("slug") or camera.get("id") or "camera")
         name = str(camera.get("name") or slug.replace("_", " ").title())
         key = str(camera.get("serial") or camera.get("id") or slug)
@@ -138,7 +151,12 @@ class BlinkLiveviewProxyCamera(
         self, width: int | None = None, height: int | None = None
     ) -> bytes:
         """Return a darkened source snapshot while live view starts."""
-        source_entity_id = self._camera.get("entity_id")
+        source_entity_id = snapshot_source_entity_id(
+            self.hass,
+            self._entry_id,
+            self.hass.data[DOMAIN].get(self._entry_id, {}),
+            self._camera,
+        )
         if source_entity_id and source_entity_id != self.entity_id:
             try:
                 image = await async_get_image(
@@ -156,3 +174,60 @@ class BlinkLiveviewProxyCamera(
                     err,
                 )
         return _loading_svg()
+
+
+class BlinkProxySnapshotCamera(BlinkProxyCameraEntity, Camera):
+    """The camera's latest Blink thumbnail, from the proxy's session.
+
+    What the official integration's camera entity showed. It has no stream:
+    live view is the other camera on the same device.
+    """
+
+    _entity_domain = "camera"
+
+    def __init__(
+        self,
+        coordinator: BlinkLiveviewProxyCoordinator,
+        client: BlinkLiveviewProxyClient,
+        entry: ConfigEntry,
+        camera: dict[str, Any],
+        hub_device_id: str,
+    ) -> None:
+        super().__init__(
+            coordinator, client, entry, camera, hub_device_id, SNAPSHOT_SUFFIX
+        )
+        Camera.__init__(self)
+        self.content_type = "image/jpeg"
+        self._image: bytes | None = None
+        self._image_id: str | None = None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Deliberately not proxy_slug: that names the live camera only.
+
+        The dialog and the player find a camera's live entity by that
+        attribute, and a second entity carrying it would be picked instead.
+        """
+        row = self.row or {}
+        return {
+            "snapshot_of": self._slug,
+            "snapshot_id": row.get("snapshot_id"),
+            "last_record": row.get("last_record"),
+        }
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """The thumbnail, fetched from the proxy only when it has changed."""
+        wanted = (self.row or {}).get("snapshot_id")
+        if self._image is not None and wanted and wanted == self._image_id:
+            return self._image
+        try:
+            image = await self._client.async_get_snapshot(self._slug)
+        except ProxyError as err:
+            LOGGER.debug("No snapshot for %s from the proxy: %s", self._slug, err)
+            return self._image
+        if image:
+            self._image = image
+            self._image_id = wanted
+        return self._image

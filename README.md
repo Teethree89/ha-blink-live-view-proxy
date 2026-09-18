@@ -47,6 +47,11 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
 - Fresh snapshot button using the official HA Blink camera entity.
 - Per-camera motion detection controls when the official Blink integration
   exposes `switch.*_camera_motion_detection`.
+- Optional, off by default: **Blink entities from the proxy's own session** —
+  snapshot, snapshot refresh, motion detection switch, motion, battery,
+  temperature and Wi-Fi per camera, and an alarm panel per sync module — so the
+  official integration is no longer needed at all. See
+  [Blink Entities](docs/CONFIGURATION.md#blink-entities).
 - Clip viewer over both inventories — a Sync Module's local storage and Blink's
   cloud — with first-frame thumbnails, a player that seeks, downloads that
   never fetch the same clip from Blink twice, and a source selector. Cloud
@@ -130,8 +135,9 @@ neither.
 **Account and hardware**: a Blink account with cameras; for clips, either a
 Sync Module with local storage or a Blink subscription, which is what makes
 cloud clips exist; and — optional but recommended — the official Blink
-integration for snapshots, motion and battery. This project deliberately does
-not duplicate those.
+integration for snapshots, motion and battery, unless you turn on this
+integration's [Blink entities](docs/CONFIGURATION.md#blink-entities) option,
+which provides them from the proxy's own session instead.
 
 **For push-to-talk only**: an HTTPS address for Home Assistant, or
 `http://localhost`. Browsers only expose a microphone in a secure context, so

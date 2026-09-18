@@ -117,7 +117,19 @@ def _blink_integration(facts: dict[str, Any]) -> dict[str, Any]:
     loaded = int(facts.get("blink_loaded") or 0)
     has_service = bool(facts.get("blink_service"))
 
-    if loaded and has_service:
+    if facts.get("blink_entities"):
+        state, detail = OK, (
+            "Not needed: Blink entities are on, so snapshots, snapshot refresh, "
+            "motion switches, battery and temperature come from the proxy's own "
+            "Blink session."
+            + (
+                f" The official integration is still set up ({entries} "
+                f"{'entry' if entries == 1 else 'entries'}) and can be removed."
+                if entries
+                else ""
+            )
+        )
+    elif loaded and has_service:
         state, detail = OK, (
             f"Set up and loaded ({loaded} "
             f"{'entry' if loaded == 1 else 'entries'}); blink.trigger_camera "
@@ -148,6 +160,8 @@ def _blink_integration(facts: dict[str, Any]) -> dict[str, Any]:
         "Snapshot refresh, motion switches, battery and temperature sensors",
         False,
         [
+            "Or skip it: turn on Blink entities under this integration's "
+            "Configure, and the proxy provides all of these itself.",
             "Settings → Devices & services → Add integration → Blink, signed "
             "in to the same Blink account.",
             "Then point each camera in the proxy's camera map at the "

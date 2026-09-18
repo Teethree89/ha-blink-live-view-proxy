@@ -41,10 +41,14 @@
         "data": {
           "base_url": "Proxy base URL",
           "stream_seconds": "Live-view duration in seconds",
-          "token": "Proxy token"
+          "token": "Proxy token",
+          "blink_entities": "Blink entities from the proxy",
+          "blink_poll_seconds": "Blink refresh interval in seconds"
         },
         "data_description": {
-          "stream_seconds": "Allowed range: 10-300 seconds. Longer sessions can use more Blink live-view quota and may run into camera or cloud-side limits."
+          "stream_seconds": "Allowed range: 10-300 seconds. Longer sessions can use more Blink live-view quota and may run into camera or cloud-side limits.",
+          "blink_entities": "Adds each camera's snapshot, motion detection switch, motion, battery and temperature sensors, and an alarm panel per sync module, all from the proxy's own Blink session. With this on, the official Blink integration is no longer needed. Off changes nothing.",
+          "blink_poll_seconds": "How often the proxy refreshes Blink while these entities are on. Allowed range: 60-3600 seconds. A failed refresh backs off and never signs in again."
         }
       }
     },

@@ -18,9 +18,13 @@ from .api import BlinkLiveviewProxyClient
 from .const import (
     ASSET_URL_BASE,
     CONF_BASE_URL,
+    CONF_BLINK_ENTITIES,
+    CONF_BLINK_POLL_SECONDS,
     CONF_CLIP_RECORDING,
     CONF_STREAM_SECONDS,
     CONF_TOKEN,
+    DEFAULT_BLINK_ENTITIES,
+    DEFAULT_BLINK_POLL_SECONDS,
     DEFAULT_CLIP_RECORDING,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
@@ -28,6 +32,7 @@ from .const import (
     ICONSET_MODULE_URL,
     LEGACY_FRONTEND_RESOURCE_URL,
     PLATFORMS,
+    platforms_for,
 )
 from .coordinator import BlinkLiveviewProxyCoordinator
 from .lovelace import is_writable, resource_collection
@@ -222,14 +227,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {}).setdefault("_auth_clients", {})[
         entry.entry_id
     ] = client
-    coordinator = BlinkLiveviewProxyCoordinator(hass, entry, client)
+    blink_entities = bool(merged.get(CONF_BLINK_ENTITIES, DEFAULT_BLINK_ENTITIES))
+    coordinator = BlinkLiveviewProxyCoordinator(
+        hass,
+        entry,
+        client,
+        blink_entities=blink_entities,
+        blink_poll_seconds=int(
+            merged.get(CONF_BLINK_POLL_SECONDS, DEFAULT_BLINK_POLL_SECONDS)
+        ),
+    )
     await coordinator.async_config_entry_first_refresh()
 
+    platforms = platforms_for(blink_entities)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "client": client,
         "coordinator": coordinator,
         "stream_seconds": int(merged.get(CONF_STREAM_SECONDS, DEFAULT_STREAM_SECONDS)),
         "clip_recording": bool(merged.get(CONF_CLIP_RECORDING, DEFAULT_CLIP_RECORDING)),
+        "blink_entities": blink_entities,
+        # Unload has to take down exactly what setup brought up, and the
+        # option may have changed in between.
+        "platforms": platforms,
     }
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -246,13 +265,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     hass.data[DOMAIN][entry.entry_id]["hub_device_id"] = hub.id
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    platforms = hass.data.get(DOMAIN, {}).get(entry.entry_id, {}).get(
+        "platforms", PLATFORMS
+    )
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
         hass.data[DOMAIN].get("_auth_clients", {}).pop(entry.entry_id, None)

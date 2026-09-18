@@ -315,9 +315,31 @@ def _authorize_browser_request(
     raise web.HTTPForbidden(text="Missing or invalid camera token\n")
 
 
+def _own_snapshot_entity_id(hass: HomeAssistant, camera: dict[str, Any]) -> str:
+    """This integration's snapshot camera for `camera`, if Blink entities are on."""
+    entry_id, runtime = _runtime_entry(hass)
+    if not runtime.get("blink_entities"):
+        return ""
+    # Imported here, not at the top: it needs Home Assistant's entity helpers,
+    # and the tests load this module with only a few Home Assistant names.
+    from .blink_entity import snapshot_entity_id
+
+    return snapshot_entity_id(hass, entry_id, camera) or ""
+
+
+def _snapshot_entity_id(hass: HomeAssistant, camera: dict[str, Any]) -> str:
+    """The camera entity whose picture a live view shows while it starts.
+
+    With Blink entities on, the integration's own snapshot camera, so none of
+    this needs the official integration. Otherwise the entity_id the proxy's
+    camera map names, as before.
+    """
+    return _own_snapshot_entity_id(hass, camera) or str(camera.get("entity_id") or "")
+
+
 def _snapshot_style(hass: HomeAssistant, camera: dict[str, Any]) -> str:
     """Return a CSS background image backed by the normal Blink snapshot."""
-    source_entity_id = str(camera.get("entity_id") or "")
+    source_entity_id = _snapshot_entity_id(hass, camera)
     if not source_entity_id:
         return ""
 
@@ -1721,29 +1743,16 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
     async def _refresh(self, request: web.Request, slug: str) -> web.Response:
         camera = _camera(self.hass, slug)
         _authorize_browser_request(self.hass, request, slug)
-        source_entity_id = str(camera.get("entity_id") or "")
+        own_entity_id = _own_snapshot_entity_id(self.hass, camera)
+        source_entity_id = own_entity_id or str(camera.get("entity_id") or "")
         if not source_entity_id:
             raise web.HTTPNotFound(text="Camera has no source Blink entity\n")
 
-        try:
-            await self.hass.services.async_call(
-                "blink",
-                "trigger_camera",
-                {"entity_id": source_entity_id},
-                blocking=True,
-            )
-        except ServiceNotFound as err:
-            # This is the one feature here that genuinely needs the official
-            # Blink integration: it owns blink.trigger_camera. Say that,
-            # instead of raising a 500 that reads like the proxy is broken.
-            raise web.HTTPNotFound(
-                text=(
-                    "Snapshot refresh needs the official Blink integration, "
-                    "which provides the blink.trigger_camera service. Live "
-                    "view, clips and push-to-talk do not.\n"
-                )
-            ) from err
-        await asyncio.sleep(1)
+        if own_entity_id:
+            await self._refresh_own(_runtime(self.hass), slug)
+        else:
+            await self._refresh_official(source_entity_id)
+
         await self.hass.services.async_call(
             "homeassistant",
             "update_entity",
@@ -1760,6 +1769,41 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
             },
             headers={"Cache-Control": "no-store"},
         )
+
+    @staticmethod
+    async def _refresh_own(runtime: dict[str, Any], slug: str) -> None:
+        """Take the picture through the proxy's own Blink session."""
+        try:
+            row = await runtime["client"].async_snap_camera(slug)
+        except (ProxyAuthError, ProxyConnectionError) as err:
+            raise web.HTTPBadGateway(
+                text="Blink did not take a new snapshot. Try again shortly.\n"
+            ) from err
+        runtime["coordinator"].apply_camera_row(row)
+
+    async def _refresh_official(self, source_entity_id: str) -> None:
+        """Take the picture through the official Blink integration."""
+        try:
+            await self.hass.services.async_call(
+                "blink",
+                "trigger_camera",
+                {"entity_id": source_entity_id},
+                blocking=True,
+            )
+        except ServiceNotFound as err:
+            # Without Blink entities turned on, this is the one feature that
+            # needs the official Blink integration: it owns
+            # blink.trigger_camera. Say that, instead of raising a 500 that
+            # reads like the proxy is broken.
+            raise web.HTTPNotFound(
+                text=(
+                    "Snapshot refresh needs the official Blink integration, "
+                    "which provides the blink.trigger_camera service, or Blink "
+                    "entities turned on in this integration's options. Live "
+                    "view, clips and push-to-talk need neither.\n"
+                )
+            ) from err
+        await asyncio.sleep(1)
 
 
 def _rewrite_clip_download_urls(
@@ -2735,6 +2779,11 @@ def _blink_integration_facts(hass: HomeAssistant) -> dict[str, Any]:
             1 for entry in entries if entry.state is ConfigEntryState.LOADED
         ),
         "blink_service": hass.services.has_service("blink", "trigger_camera"),
+        "blink_entities": any(
+            isinstance(runtime, dict) and runtime.get("blink_entities")
+            for key, runtime in hass.data.get(DOMAIN, {}).items()
+            if not str(key).startswith("_")
+        ),
     }
 
 
