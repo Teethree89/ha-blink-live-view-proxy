@@ -17,7 +17,7 @@ from .blink_entity import (
     SNAPSHOT_SUFFIX,
     BlinkProxyCameraEntity,
     runtime_cameras,
-    snapshot_source_entity_id,
+    snapshot_entity_id,
 )
 from .const import DOMAIN
 from .coordinator import BlinkLiveviewProxyCoordinator
@@ -72,11 +72,10 @@ async def async_setup_entry(
         for camera in cameras
     )
 
-    if runtime.get("blink_entities"):
-        async_add_entities(
-            BlinkProxySnapshotCamera(coordinator, client, entry, camera, hub_device_id)
-            for camera in runtime_cameras(hass, entry)
-        )
+    async_add_entities(
+        BlinkProxySnapshotCamera(coordinator, client, entry, camera, hub_device_id)
+        for camera in runtime_cameras(hass, entry)
+    )
 
 
 class BlinkLiveviewProxyCamera(
@@ -132,7 +131,12 @@ class BlinkLiveviewProxyCamera(
         return {
             "proxy_slug": self._camera.get("slug"),
             "blink_camera_id": self._camera.get("id"),
-            "blink_entity_id": self._camera.get("entity_id"),
+            # The snapshot camera for this Blink camera. Once the official
+            # integration's camera; kept under the same name so templates
+            # reading it still find a picture.
+            "blink_entity_id": snapshot_entity_id(
+                self.hass, self._entry_id, self._camera
+            ),
             "network_id": self._camera.get("network_id"),
             "camera_type": self._camera.get("camera_type"),
             "product_type": self._camera.get("product_type"),
@@ -151,12 +155,7 @@ class BlinkLiveviewProxyCamera(
         self, width: int | None = None, height: int | None = None
     ) -> bytes:
         """Return a darkened source snapshot while live view starts."""
-        source_entity_id = snapshot_source_entity_id(
-            self.hass,
-            self._entry_id,
-            self.hass.data[DOMAIN].get(self._entry_id, {}),
-            self._camera,
-        )
+        source_entity_id = snapshot_entity_id(self.hass, self._entry_id, self._camera)
         if source_entity_id and source_entity_id != self.entity_id:
             try:
                 image = await async_get_image(
@@ -179,8 +178,8 @@ class BlinkLiveviewProxyCamera(
 class BlinkProxySnapshotCamera(BlinkProxyCameraEntity, Camera):
     """The camera's latest Blink thumbnail, from the proxy's session.
 
-    What the official integration's camera entity showed. It has no stream:
-    live view is the other camera on the same device.
+    The picture behind the live view's loading frame. It has no stream: live
+    view is the other camera on the same device.
     """
 
     _entity_domain = "camera"

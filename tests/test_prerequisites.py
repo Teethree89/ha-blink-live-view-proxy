@@ -65,9 +65,6 @@ def facts(**overrides) -> dict:
             "/hacsfiles/lovelace-auto-entities/auto-entities.js",
         ],
         "lovelace_mode": "storage",
-        "blink_entries": 1,
-        "blink_loaded": 1,
-        "blink_service": True,
         # Only the browser can answer this one, and the panel does. True here
         # so a healthy install is all green; the three states are exercised in
         # test_secure_context.
@@ -86,7 +83,6 @@ def test_shape() -> None:
     keys = {
         "home_assistant",
         "integration_update",
-        "blink_integration",
         "blinkpy",
         "ffmpeg",
         "dashboard_resource",
@@ -95,7 +91,7 @@ def test_shape() -> None:
         "secure_context",
     }
     result = build(facts())
-    check(set(row["key"] for row in result) == keys, "all nine checks are present")
+    check(set(row["key"] for row in result) == keys, "all eight checks are present")
     check(
         len({row["key"] for row in result}) == len(result),
         "no two checks share a key",
@@ -122,7 +118,7 @@ def test_all_green() -> None:
     result = build(facts())
     check(all(row["state"] == OK for row in result), "every check passes")
     summary = summarize(result)
-    check(summary == {"total": 9, "ok": 9, "missing": 0, "unknown": 0, "blocking": 0},
+    check(summary == {"total": 8, "ok": 8, "missing": 0, "unknown": 0, "blocking": 0},
           f"the summary counts them all as ready ({summary})")
 
 
@@ -138,40 +134,10 @@ def test_home_assistant() -> None:
           "an unreported core version is not called a failure")
 
 
-def test_blink_integration() -> None:
-    print("\nofficial Blink integration")
-    absent = rows(blink_entries=0, blink_loaded=0, blink_service=False)
-    check(absent["blink_integration"]["state"] == MISSING, "absence is reported")
-    check(absent["blink_integration"]["required"] is False,
-          "but it is never marked required")
-    check("without it" in absent["blink_integration"]["detail"],
-          "and the detail says what still works")
-
-    retrying = rows(blink_entries=1, blink_loaded=0, blink_service=False)
-    check("not loaded" in retrying["blink_integration"]["detail"],
-          "an entry stuck in setup_retry is distinguished from absence")
-
-    no_service = rows(blink_service=False)
-    check("trigger_camera" in no_service["blink_integration"]["detail"],
-          "a loaded entry without the action names the action")
-
-    check(summarize(build(facts(blink_entries=0, blink_loaded=0,
-                               blink_service=False)))["blocking"] == 0,
-          "an optional check missing never counts as blocking")
-
-    own = rows(blink_entries=0, blink_loaded=0, blink_service=False,
-               blink_entities=True)
-    check(own["blink_integration"]["state"] == OK,
-          "with Blink entities on, the official integration is not needed")
-    check("Not needed" in own["blink_integration"]["detail"],
-          "and the detail says so rather than calling it missing")
-    leftover = rows(blink_entries=1, blink_loaded=0, blink_service=False,
-                    blink_entities=True)
-    check("can be removed" in leftover["blink_integration"]["detail"],
-          "a leftover official entry is named as removable")
-    check(any("Blink entities" in line
-              for line in absent["blink_integration"]["instructions"]),
-          "the instructions offer the proxy's own entities as the alternative")
+def test_no_official_integration_row() -> None:
+    print("\nthe official Blink integration is not a check")
+    check("blink_integration" not in rows(),
+          "the Overview does not ask about Home Assistant's own Blink integration")
 
 
 def test_blinkpy() -> None:
@@ -325,7 +291,7 @@ def main() -> int:
         test_all_green,
         test_home_assistant,
         test_integration_update,
-        test_blink_integration,
+        test_no_official_integration_row,
         test_blinkpy,
         test_ffmpeg,
         test_old_proxy_is_not_a_failure,

@@ -1,6 +1,8 @@
 """Shared base for the entities built from the proxy's Blink session.
 
-Only set up with the Blink entities option on; see CONF_BLINK_ENTITIES.
+The proxy's session provides everything the camera and sync module entities
+need, so Home Assistant's own Blink integration is not used at all. See
+proxy/blink_proxy/devices.py for why that matters.
 """
 
 from __future__ import annotations
@@ -44,8 +46,9 @@ def runtime_cameras(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str, A
     cameras = devices_cameras((coordinator.data or {}).get("devices"))
     if not cameras:
         LOGGER.warning(
-            "Blink entities are on, but the proxy reported no cameras for them. "
-            "Update the proxy if it is older than this integration, then reload."
+            "The proxy reported no Blink device state, so no snapshot, motion, "
+            "battery or alarm entities were created. Update the proxy if it is "
+            "older than this integration, then reload."
         )
     return cameras
 
@@ -69,20 +72,6 @@ def snapshot_entity_id(
     )
 
 
-def snapshot_source_entity_id(
-    hass: HomeAssistant, entry_id: str, runtime: dict[str, Any], camera: dict[str, Any]
-) -> str:
-    """The camera entity whose picture sits behind the live view.
-
-    With Blink entities on it is this integration's own snapshot camera, so the
-    official integration can be removed. Otherwise it is whatever the proxy's
-    camera map names in entity_id, as it always was.
-    """
-    if runtime.get("blink_entities"):
-        own = snapshot_entity_id(hass, entry_id, camera)
-        if own:
-            return own
-    return str(camera.get("entity_id") or "")
 
 
 class BlinkProxyCameraEntity(CoordinatorEntity[BlinkLiveviewProxyCoordinator]):

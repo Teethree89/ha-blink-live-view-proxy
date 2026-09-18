@@ -4,7 +4,6 @@ Runs the Blink Live View Proxy as a Home Assistant add-on. No separate Linux hos
 
 ## Prerequisites
 
-- The official **Blink** integration installed and working in Home Assistant.
 - The **Blink Live View Proxy** custom integration installed via HACS (or copied from `custom_components/` in this repo).
 
 ## Installation
@@ -25,7 +24,7 @@ Runs the Blink Live View Proxy as a Home Assistant add-on. No separate Linux hos
 | `aarch64` or `amd64` | ffmpeg transcoding a live stream is beyond 32-bit ARM; those builds were dropped in 0.2.0 |
 | A Blink account with cameras | The add-on logs in as you, and Blink texts a 2FA PIN the first time |
 | The matching custom integration | Only if you want the Home Assistant side: entities, the player, the clip viewer, and the **Blink Live View Proxy** panel |
-| The official Blink integration | Optional. It adds the snapshot behind the loading frame, the snapshot-refresh button and motion switches. Everything else works without it |
+| The official Blink integration | Not needed. Snapshots, motion switches, battery, temperature and the alarm panel all come from the proxy's session; remove it |
 
 ffmpeg and Python are inside the add-on image; there is nothing to install on
 the host.

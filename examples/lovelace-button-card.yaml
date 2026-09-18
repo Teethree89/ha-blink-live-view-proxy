@@ -1,5 +1,5 @@
 type: custom:button-card
-entity: camera.front_door
+entity: camera.blink_proxy_front_door
 name: Front Door
 show_state: false
 show_label: false
@@ -13,8 +13,8 @@ styles:
     - background-position: center
     - background-image: >
         [[[
-          const token = states['camera.front_door']?.attributes?.access_token || '';
-          return `url("/api/camera_proxy/camera.front_door?token=${token}")`;
+          const token = states['camera.blink_proxy_front_door']?.attributes?.access_token || '';
+          return `url("/api/camera_proxy/camera.blink_proxy_front_door?token=${token}")`;
         ]]]
   custom_fields:
     clips:
@@ -57,14 +57,14 @@ custom_fields:
         blink_snapshot_refresh:
           slug: front_door
           entity_id: camera.blink_live_front_door
-          source_entity_id: camera.front_door
+          source_entity_id: camera.blink_proxy_front_door
   motion:
     card:
       type: custom:button-card
-      entity: switch.front_door_camera_motion_detection
+      entity: switch.blink_proxy_front_door_motion_detection
       icon: >
         [[[
-          return states['switch.front_door_camera_motion_detection']?.state === 'on'
+          return states['switch.blink_proxy_front_door_motion_detection']?.state === 'on'
             ? 'mdi:motion-sensor'
             : 'mdi:motion-sensor-off';
         ]]]
@@ -73,4 +73,4 @@ custom_fields:
         action: call-service
         service: switch.toggle
         target:
-          entity_id: switch.front_door_camera_motion_detection
+          entity_id: switch.blink_proxy_front_door_motion_detection

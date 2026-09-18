@@ -1,6 +1,6 @@
 """Switch platform: each Blink camera's motion detection.
 
-Only set up with the Blink entities option on; see CONF_BLINK_ENTITIES.
+Built from the proxy's own Blink session; see proxy/blink_proxy/devices.py.
 """
 
 from __future__ import annotations

@@ -1,10 +1,9 @@
-"""The Blink entities option, inside real Home Assistant.
+"""The Blink entities built from the proxy's session, inside real Home Assistant.
 
-Two promises are pinned here. With the option off, the entry creates exactly
-the entities it always has and never asks the proxy for device state. With it
-on, every camera gets a snapshot, a motion switch, motion and battery sensors,
+Every camera gets a snapshot, a motion switch, motion and battery sensors,
 temperature and the rest, the sync module gets an alarm panel, and each
-control goes all the way through to blinkpy and back.
+control goes all the way through to blinkpy and back - with Home Assistant's
+own Blink integration nowhere in sight.
 
 See conftest.py for how to run these.
 """
@@ -21,7 +20,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blink_liveview_proxy.const import (
     CONF_BASE_URL,
-    CONF_BLINK_ENTITIES,
     CONF_BLINK_POLL_SECONDS,
     CONF_TOKEN,
     DOMAIN,
@@ -32,7 +30,7 @@ from .conftest import PROXY_TOKEN
 # What every install has had since 0.8: a live camera per Blink camera and the
 # proxy's health sensor. Compared by unique id, because the entity ids Home
 # Assistant derives for these two changed shape in 2026.9 (it prefixes the
-# device name now) and that is not this option's doing.
+# device name now).
 BASELINE_SUFFIXES = {"_health", "_SERIAL-A_live", "_SERIAL-B_live"}
 
 # The new entities set their ids outright, so these hold on every release.
@@ -101,25 +99,11 @@ def _live_entity_id(hass: HomeAssistant, entry: MockConfigEntry, serial: str) ->
     )
 
 
-async def test_option_off_changes_nothing(hass: HomeAssistant, fake_proxy: Any) -> None:
-    entry = await _setup(hass, fake_proxy)
-    assert {item.unique_id for item in _entries(hass, entry)} == _baseline_unique_ids(entry)
-    assert fake_proxy.asked("/devices") == 0, "no device state is asked for"
-    assert fake_proxy.blink.refreshes == [], "and Blink is never polled"
-    assert hass.states.get(_live_entity_id(hass, entry, "SERIAL-A")).state != "unavailable"
-
-    explicitly_off = await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: False})
-    assert {item.unique_id for item in _entries(hass, explicitly_off)} == (
-        _baseline_unique_ids(explicitly_off)
-    )
-    assert fake_proxy.asked("/devices") == 0
-
-
-async def test_option_on_creates_every_entity(
+async def test_creates_every_entity(
     hass: HomeAssistant, fake_proxy: Any
 ) -> None:
     entry = await _setup(
-        hass, fake_proxy, **{CONF_BLINK_ENTITIES: True, CONF_BLINK_POLL_SECONDS: 300}
+        hass, fake_proxy, **{CONF_BLINK_POLL_SECONDS: 300}
     )
     baseline = _baseline_unique_ids(entry)
     entries = _entries(hass, entry)
@@ -158,7 +142,7 @@ async def test_option_on_creates_every_entity(
 async def test_motion_switch_reaches_blinkpy(
     hass: HomeAssistant, fake_proxy: Any
 ) -> None:
-    await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    await _setup(hass, fake_proxy)
     await hass.services.async_call(
         "switch",
         "turn_off",
@@ -180,7 +164,7 @@ async def test_motion_switch_reaches_blinkpy(
 
 
 async def test_alarm_panel_reaches_blinkpy(hass: HomeAssistant, fake_proxy: Any) -> None:
-    await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    await _setup(hass, fake_proxy)
     await hass.services.async_call(
         "alarm_control_panel",
         "alarm_disarm",
@@ -204,7 +188,7 @@ async def test_snapshot_button_and_camera_image(
 ) -> None:
     from homeassistant.components.camera import async_get_image
 
-    await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    await _setup(hass, fake_proxy)
     image = await async_get_image(hass, "camera.blink_proxy_driveway")
     assert image.content == b"JPEG-1"
     assert image.content_type == "image/jpeg"
@@ -227,7 +211,7 @@ async def test_live_view_loading_frame_uses_own_snapshot(
 
     from homeassistant.components.camera import async_get_image
 
-    await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    await _setup(hass, fake_proxy)
     # camera.driveway (the official integration's) does not exist here.
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     frame = await async_get_image(hass, _live_entity_id(hass, entry, "SERIAL-A"))
@@ -239,7 +223,7 @@ async def test_live_view_loading_frame_uses_own_snapshot(
 async def test_snapshot_refresh_view_without_official_integration(
     hass: HomeAssistant, fake_proxy: Any, hass_client: Any
 ) -> None:
-    await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    await _setup(hass, fake_proxy)
     assert not hass.services.has_service("blink", "trigger_camera")
     client = await hass_client()
     resp = await client.post("/api/blink_liveview_proxy/cameras/driveway/snapshot-refresh")
@@ -250,21 +234,10 @@ async def test_snapshot_refresh_view_without_official_integration(
     assert fake_proxy.blink.cameras["Driveway"].snaps == 1
 
 
-async def test_snapshot_refresh_view_option_off_still_needs_official(
-    hass: HomeAssistant, fake_proxy: Any, hass_client: Any
-) -> None:
-    await _setup(hass, fake_proxy)
-    client = await hass_client()
-    resp = await client.post("/api/blink_liveview_proxy/cameras/driveway/snapshot-refresh")
-    assert resp.status == 404, "unchanged: without the option this needs blink.trigger_camera"
-    assert "official Blink integration" in await resp.text()
-    assert fake_proxy.blink.cameras["Driveway"].snaps == 0
-
-
 async def test_failed_session_marks_entities_unavailable(
     hass: HomeAssistant, fake_proxy: Any
 ) -> None:
-    entry = await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    entry = await _setup(hass, fake_proxy)
     poller = fake_proxy.app["device_poller"]
     poller.state = "auth_failed"
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
@@ -281,7 +254,7 @@ async def test_old_proxy_without_devices_route(hass: HomeAssistant, fake_proxy: 
     for route in list(fake_proxy.app.router.routes()):
         if route.resource is not None and route.resource.canonical == "/devices":
             route._handler = _not_found  # type: ignore[attr-defined]
-    entry = await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+    entry = await _setup(hass, fake_proxy)
     unique_ids = {item.unique_id for item in _entries(hass, entry)}
     assert _baseline_unique_ids(entry) <= unique_ids, "live view still sets up"
     assert not any(uid.endswith("_motion_detection") for uid in unique_ids)
@@ -293,8 +266,31 @@ async def _not_found(_request: Any) -> Any:
     raise web.HTTPNotFound()
 
 
-async def test_unload_with_option_on(hass: HomeAssistant, fake_proxy: Any) -> None:
-    entry = await _setup(hass, fake_proxy, **{CONF_BLINK_ENTITIES: True})
+async def test_unload(hass: HomeAssistant, fake_proxy: Any) -> None:
+    entry = await _setup(hass, fake_proxy)
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert hass.states.get("switch.blink_proxy_driveway_motion_detection").state == "unavailable"
+
+
+async def test_panel_and_dashboard_use_own_entities(
+    hass: HomeAssistant, fake_proxy: Any
+) -> None:
+    from custom_components.blink_liveview_proxy.dashboard_yaml import _camera_card
+    from custom_components.blink_liveview_proxy.views import _panel_cameras
+
+    entry = await _setup(hass, fake_proxy)
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    cameras = {item["slug"]: item for item in _panel_cameras(hass, entry.entry_id, runtime)}
+    driveway = cameras["driveway"]
+    assert driveway["entity_id"] == "camera.blink_proxy_driveway"
+    assert "motion_detection" in driveway["capabilities"]
+    listed = {item["entity_id"] for item in driveway["entities"]}
+    assert "switch.blink_proxy_driveway_motion_detection" in listed
+    assert driveway["live_entity_id"] in listed, "one device holds the live camera too"
+
+    card = _camera_card(driveway)
+    assert "camera.blink_proxy_driveway" in card
+    assert "switch.blink_proxy_driveway_motion_detection" in card, (
+        "the motion button toggles the switch, not the motion binary sensor"
+    )

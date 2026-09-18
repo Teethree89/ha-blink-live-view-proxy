@@ -166,7 +166,7 @@ Useful `mpegts` query parameters:
 
 ## Blink Devices
 
-What the integration's optional [Blink entities](CONFIGURATION.md#blink-entities)
+What the integration's [Blink entities](CONFIGURATION.md#blink-entities)
 are built from.
 
 - `GET /devices?poll=300`

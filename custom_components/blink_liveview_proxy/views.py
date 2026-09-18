@@ -17,7 +17,6 @@ from aiohttp import ClientError, ClientResponse, ClientTimeout, WSMsgType, web
 
 from homeassistant.components.http import HomeAssistantView, require_admin
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ServiceNotFound
 from homeassistant.helpers.http import KEY_AUTHENTICATED
 
 from . import prerequisites
@@ -315,26 +314,19 @@ def _authorize_browser_request(
     raise web.HTTPForbidden(text="Missing or invalid camera token\n")
 
 
-def _own_snapshot_entity_id(hass: HomeAssistant, camera: dict[str, Any]) -> str:
-    """This integration's snapshot camera for `camera`, if Blink entities are on."""
-    entry_id, runtime = _runtime_entry(hass)
-    if not runtime.get("blink_entities"):
-        return ""
+def _snapshot_entity_id(hass: HomeAssistant, camera: dict[str, Any]) -> str:
+    """The camera entity whose picture a live view shows while it starts.
+
+    This integration's own snapshot camera for that Blink camera, built from
+    the proxy's session. Empty until it exists, which is only the case with a
+    proxy too old to report device state.
+    """
+    entry_id, _runtime_data = _runtime_entry(hass)
     # Imported here, not at the top: it needs Home Assistant's entity helpers,
     # and the tests load this module with only a few Home Assistant names.
     from .blink_entity import snapshot_entity_id
 
     return snapshot_entity_id(hass, entry_id, camera) or ""
-
-
-def _snapshot_entity_id(hass: HomeAssistant, camera: dict[str, Any]) -> str:
-    """The camera entity whose picture a live view shows while it starts.
-
-    With Blink entities on, the integration's own snapshot camera, so none of
-    this needs the official integration. Otherwise the entity_id the proxy's
-    camera map names, as before.
-    """
-    return _own_snapshot_entity_id(hass, camera) or str(camera.get("entity_id") or "")
 
 
 def _snapshot_style(hass: HomeAssistant, camera: dict[str, Any]) -> str:
@@ -1723,7 +1715,7 @@ class BlinkLiveviewProxyLastLiveviewMp4DownloadView(HomeAssistantView):
 
 
 class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
-    """Ask Home Assistant's normal Blink camera entity for a fresh snapshot."""
+    """Take a new snapshot through the proxy's Blink session."""
 
     requires_auth = False
     url = "/api/blink_liveview_proxy/cameras/{slug}/snapshot-refresh"
@@ -1743,15 +1735,23 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
     async def _refresh(self, request: web.Request, slug: str) -> web.Response:
         camera = _camera(self.hass, slug)
         _authorize_browser_request(self.hass, request, slug)
-        own_entity_id = _own_snapshot_entity_id(self.hass, camera)
-        source_entity_id = own_entity_id or str(camera.get("entity_id") or "")
+        source_entity_id = _snapshot_entity_id(self.hass, camera)
         if not source_entity_id:
-            raise web.HTTPNotFound(text="Camera has no source Blink entity\n")
+            raise web.HTTPNotFound(
+                text=(
+                    "This camera has no snapshot entity yet. The proxy may be "
+                    "older than this integration; update it.\n"
+                )
+            )
 
-        if own_entity_id:
-            await self._refresh_own(_runtime(self.hass), slug)
-        else:
-            await self._refresh_official(source_entity_id)
+        runtime = _runtime(self.hass)
+        try:
+            row = await runtime["client"].async_snap_camera(slug)
+        except (ProxyAuthError, ProxyConnectionError) as err:
+            raise web.HTTPBadGateway(
+                text="Blink did not take a new snapshot. Try again shortly.\n"
+            ) from err
+        runtime["coordinator"].apply_camera_row(row)
 
         await self.hass.services.async_call(
             "homeassistant",
@@ -1769,41 +1769,6 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
             },
             headers={"Cache-Control": "no-store"},
         )
-
-    @staticmethod
-    async def _refresh_own(runtime: dict[str, Any], slug: str) -> None:
-        """Take the picture through the proxy's own Blink session."""
-        try:
-            row = await runtime["client"].async_snap_camera(slug)
-        except (ProxyAuthError, ProxyConnectionError) as err:
-            raise web.HTTPBadGateway(
-                text="Blink did not take a new snapshot. Try again shortly.\n"
-            ) from err
-        runtime["coordinator"].apply_camera_row(row)
-
-    async def _refresh_official(self, source_entity_id: str) -> None:
-        """Take the picture through the official Blink integration."""
-        try:
-            await self.hass.services.async_call(
-                "blink",
-                "trigger_camera",
-                {"entity_id": source_entity_id},
-                blocking=True,
-            )
-        except ServiceNotFound as err:
-            # Without Blink entities turned on, this is the one feature that
-            # needs the official Blink integration: it owns
-            # blink.trigger_camera. Say that, instead of raising a 500 that
-            # reads like the proxy is broken.
-            raise web.HTTPNotFound(
-                text=(
-                    "Snapshot refresh needs the official Blink integration, "
-                    "which provides the blink.trigger_camera service, or Blink "
-                    "entities turned on in this integration's options. Live "
-                    "view, clips and push-to-talk need neither.\n"
-                )
-            ) from err
-        await asyncio.sleep(1)
 
 
 def _rewrite_clip_download_urls(
@@ -2700,9 +2665,18 @@ def _entity_summary(hass: HomeAssistant, entity_entry: Any) -> dict[str, Any]:
     }
 
 
-def _panel_cameras(hass: HomeAssistant, runtime: dict[str, Any]) -> list[dict[str, Any]]:
-    """Join proxy cameras to their official Blink device entities."""
+def _panel_cameras(
+    hass: HomeAssistant, entry_id: str, runtime: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Join proxy cameras to the entities on their Home Assistant device.
+
+    One device per Blink camera holds the live camera and everything built
+    from the proxy's session - snapshot, motion switch, sensors - so that
+    device's entities are the camera's controls.
+    """
     from homeassistant.helpers import entity_registry as er
+
+    from .blink_entity import snapshot_entity_id
 
     coordinator = runtime["coordinator"]
     registry = er.async_get(hass)
@@ -2732,15 +2706,19 @@ def _panel_cameras(hass: HomeAssistant, runtime: dict[str, Any]) -> list[dict[st
             None,
         )
         camera["live_entity_id"] = live_state.entity_id if live_state else ""
+        # The picture a tile shows and the snapshot button refreshes.
+        camera["entity_id"] = (
+            snapshot_entity_id(hass, entry_id, camera) or ""
+        )
 
-        source_entry = registry.async_get(str(camera.get("entity_id") or ""))
-        device_id = source_entry.device_id if source_entry else None
+        live_entry = registry.async_get(camera["live_entity_id"])
+        device_id = live_entry.device_id if live_entry else None
         entries = (
             er.async_entries_for_device(
                 registry, device_id, include_disabled_entities=True
             )
             if device_id
-            else ([source_entry] if source_entry else [])
+            else []
         )
         camera["entities"] = sorted(
             (_entity_summary(hass, item) for item in entries),
@@ -2754,37 +2732,14 @@ def _panel_cameras(hass: HomeAssistant, runtime: dict[str, Any]) -> list[dict[st
             *(
                 ["motion_detection"]
                 if any(
-                    "motion" in item["entity_id"] for item in camera["entities"]
+                    item["domain"] == "switch" and "motion" in item["entity_id"]
+                    for item in camera["entities"]
                 )
                 else []
             ),
         ]
         result.append(camera)
     return sorted(result, key=lambda item: item.get("name") or item.get("slug"))
-
-
-def _blink_integration_facts(hass: HomeAssistant) -> dict[str, Any]:
-    """What the official Blink integration is doing, if it is here at all.
-
-    Three separate questions, because they fail separately: an entry can exist
-    while sitting in setup_retry, and a loaded entry is still no use to
-    snapshot refresh until blink.trigger_camera is actually registered.
-    """
-    from homeassistant.config_entries import ConfigEntryState
-
-    entries = hass.config_entries.async_entries("blink")
-    return {
-        "blink_entries": len(entries),
-        "blink_loaded": sum(
-            1 for entry in entries if entry.state is ConfigEntryState.LOADED
-        ),
-        "blink_service": hass.services.has_service("blink", "trigger_camera"),
-        "blink_entities": any(
-            isinstance(runtime, dict) and runtime.get("blink_entities")
-            for key, runtime in hass.data.get(DOMAIN, {}).items()
-            if not str(key).startswith("_")
-        ),
-    }
 
 
 async def _lovelace_resource_urls(hass: HomeAssistant) -> list[str] | None:
@@ -2857,7 +2812,6 @@ async def _prerequisite_facts(
         "lovelace_mode": resource_mode(hass.data.get("lovelace")),
         "integration_version": own_version,
         "hacs_update": _hacs_update_facts(hass),
-        **_blink_integration_facts(hass),
     }
 
 
@@ -2933,7 +2887,7 @@ async def _panel_payload(
             "checks": checks,
             "summary": prerequisites.summarize(checks),
         },
-        "cameras": _panel_cameras(hass, runtime),
+        "cameras": _panel_cameras(hass, entry_id, runtime),
     }
 
 

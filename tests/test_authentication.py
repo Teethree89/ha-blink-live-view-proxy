@@ -600,42 +600,45 @@ def test_proxy_version_notice() -> None:
     )
 
 
-def test_official_integration_is_optional() -> None:
-    print("\nthe official Blink integration stays optional")
+def test_official_integration_is_not_used() -> None:
+    print("\nthe official Blink integration is not used at all")
 
-    views = (ROOT / "custom_components/blink_liveview_proxy/views.py").read_text()
-    camera = (ROOT / "custom_components/blink_liveview_proxy/camera.py").read_text()
-    manifest = json.loads(
-        (ROOT / "custom_components/blink_liveview_proxy/manifest.json").read_text()
-    )
+    component = ROOT / "custom_components/blink_liveview_proxy"
+    code = "\n".join(path.read_text() for path in sorted(component.glob("*.py")))
+    camera = (component / "camera.py").read_text()
+    manifest = json.loads((component / "manifest.json").read_text())
     install = (ROOT / "docs/INSTALL.md").read_text()
     readme = (ROOT / "README.md").read_text()
+    package = (ROOT / "examples/homeassistant-package.yaml").read_text()
+    generator = (ROOT / "scripts/generate-dashboard.py").read_text()
 
     check(
-        "blink" in manifest.get("after_dependencies", [])
+        "blink" not in manifest.get("after_dependencies", [])
         and "blink" not in manifest.get("dependencies", []),
-        "the blink domain is an ordering hint, never a hard dependency",
+        "the manifest does not name the blink domain at all",
+    )
+    # Its reloads and refreshes are what texted 2FA codes until the account
+    # was locked out, twice. Nothing here may lean on it again.
+    check("trigger_camera" not in code, "no code calls blink.trigger_camera")
+    check('async_entries("blink")' not in code, "no code looks for its config entries")
+    check(
+        "reload_config_entry" not in package and "blink_reload" not in package,
+        "the example package has no reload script for it",
     )
     check(
-        "ServiceNotFound" in views and "needs the official Blink integration" in views,
-        "the one feature that needs it says so instead of raising a 500",
+        "camera_motion_detection" not in generator,
+        "the dashboard generator does not guess its switch names",
     )
     check(
         "_loading_svg()" in camera,
-        "a missing source snapshot falls back to the generic loading image",
-    )
-    # The guide used to open by assuming it was installed, while the README
-    # called it optional. Both cannot be true.
-    check(
-        "recommended but not required" in install,
-        "the install guide does not claim it is assumed",
+        "a missing snapshot still falls back to the generic loading image",
     )
     check(
-        "assumes Home Assistant already has the official Blink integration" not in install,
-        "the old assumption is gone, not merely contradicted further down",
+        "**not needed**" in install and "Replacing the official Blink integration" in install,
+        "the install guide says it is not needed and how to remove it",
     )
     check(
-        "optional but recommended" in readme,
+        "optional but recommended" not in readme and "no longer needed" in readme,
         "the README agrees with the install guide",
     )
 
@@ -693,7 +696,7 @@ async def async_main() -> None:
     test_home_assistant_route_authorization()
     test_failure_classification()
     test_proxy_version_notice()
-    test_official_integration_is_optional()
+    test_official_integration_is_not_used()
     test_panel_contract()
     test_compatibility_assets()
 

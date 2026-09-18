@@ -1,7 +1,6 @@
 """Button platform: take a new snapshot on each Blink camera.
 
-Only set up with the Blink entities option on; see CONF_BLINK_ENTITIES. The
-official integration offered this as the blink.trigger_camera action.
+Built from the proxy's own Blink session; see proxy/blink_proxy/devices.py.
 """
 
 from __future__ import annotations

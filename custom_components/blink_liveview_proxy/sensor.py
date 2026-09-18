@@ -1,7 +1,7 @@
 """Sensor platform: temperature, Wi-Fi signal and battery voltage per camera,
 plus when the proxy last refreshed Blink.
 
-Only set up with the Blink entities option on; see CONF_BLINK_ENTITIES.
+Built from the proxy's own Blink session; see proxy/blink_proxy/devices.py.
 """
 
 from __future__ import annotations

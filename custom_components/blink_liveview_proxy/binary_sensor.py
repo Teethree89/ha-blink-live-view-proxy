@@ -23,25 +23,24 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up proxy health binary sensor, and the camera sensors if enabled."""
+    """Set up the proxy health sensor and each camera's motion and battery."""
     runtime = hass.data[DOMAIN][entry.entry_id]
     coordinator: BlinkLiveviewProxyCoordinator = runtime["coordinator"]
-    async_add_entities([BlinkLiveviewProxyHealthSensor(coordinator, entry)])
-
-    if runtime.get("blink_entities"):
-        entities: list[BinarySensorEntity] = []
-        for camera in runtime_cameras(hass, entry):
-            for sensor_class in (BlinkProxyMotionSensor, BlinkProxyBatterySensor):
-                entities.append(
-                    sensor_class(
-                        coordinator,
-                        runtime["client"],
-                        entry,
-                        camera,
-                        runtime["hub_device_id"],
-                    )
+    entities: list[BinarySensorEntity] = [
+        BlinkLiveviewProxyHealthSensor(coordinator, entry)
+    ]
+    for camera in runtime_cameras(hass, entry):
+        for sensor_class in (BlinkProxyMotionSensor, BlinkProxyBatterySensor):
+            entities.append(
+                sensor_class(
+                    coordinator,
+                    runtime["client"],
+                    entry,
+                    camera,
+                    runtime["hub_device_id"],
                 )
-        async_add_entities(entities)
+            )
+    async_add_entities(entities)
 
 
 class BlinkLiveviewProxyHealthSensor(
@@ -86,8 +85,8 @@ class BlinkLiveviewProxyHealthSensor(
 class BlinkProxyMotionSensor(BlinkProxyCameraEntity, BinarySensorEntity):
     """Motion on one camera since the proxy's previous Blink refresh.
 
-    As coarse as the poll interval, the same as the official integration: a
-    clip recorded between two polls shows as motion at the second one.
+    As coarse as the poll interval: a clip recorded between two polls shows
+    as motion at the second one.
     """
 
     _entity_domain = "binary_sensor"
@@ -110,7 +109,7 @@ class BlinkProxyMotionSensor(BlinkProxyCameraEntity, BinarySensorEntity):
 
 
 class BlinkProxyBatterySensor(BlinkProxyCameraEntity, BinarySensorEntity):
-    """On when Blink calls the battery low, as the official integration did."""
+    """On when Blink calls the battery low."""
 
     _entity_domain = "binary_sensor"
 

@@ -42,7 +42,6 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         entry: ConfigEntry,
         client: BlinkLiveviewProxyClient,
         *,
-        blink_entities: bool = False,
         blink_poll_seconds: int = 300,
     ) -> None:
         super().__init__(
@@ -54,7 +53,6 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             always_update=False,
         )
         self.client = client
-        self.blink_entities = blink_entities
         self.blink_poll_seconds = blink_poll_seconds
         self._devices_warned = False
         # Two notices, never both at once: one for a proxy too old to do
@@ -79,10 +77,12 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._review_proxy_version(
             infer_version(status), await self._async_own_version(), status
         )
-        data = {"health": health, "status": status, "cameras": cameras}
-        if self.blink_entities:
-            data["devices"] = await self._async_devices()
-        return data
+        return {
+            "health": health,
+            "status": status,
+            "cameras": cameras,
+            "devices": await self._async_devices(),
+        }
 
     async def _async_devices(self) -> dict[str, Any] | None:
         """Blink device state, or the last known one if the proxy cannot say.
@@ -100,8 +100,9 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except ProxyConnectionError as err:
             if not self._devices_warned:
                 LOGGER.warning(
-                    "Blink entities are on, but the proxy did not return device "
-                    "state (%s). A proxy older than this integration has no "
+                    "The proxy did not return Blink device state (%s), so the "
+                    "snapshot, motion, battery and alarm entities cannot be "
+                    "built. A proxy older than this integration has no "
                     "/devices route; update it.",
                     err,
                 )

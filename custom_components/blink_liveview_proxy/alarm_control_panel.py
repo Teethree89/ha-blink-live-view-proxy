@@ -1,6 +1,6 @@
 """Alarm panel platform: arm and disarm each Blink sync module.
 
-Only set up with the Blink entities option on; see CONF_BLINK_ENTITIES.
+Built from the proxy's own Blink session; see proxy/blink_proxy/devices.py.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ async def async_setup_entry(
 class BlinkProxySyncAlarm(BlinkProxySyncEntity, AlarmControlPanelEntity):
     """The sync module's system arm, the same switch the Blink app shows.
 
-    Blink has one armed state, so it maps to armed_away, as it does in the
-    official integration. No code: Blink has none to check.
+    Blink has one armed state, so it maps to armed_away. No code: Blink has
+    none to check.
     """
 
     _entity_domain = "alarm_control_panel"

@@ -1,4 +1,4 @@
-"""Entity ids and values for the Blink entities option, without Home Assistant.
+"""Entity ids and values for the Blink entities, without Home Assistant.
 
 blink_devices.py holds every decision the platforms make: which entity ids a
 household gets, which unique ids they are registered under, and how a row from
@@ -115,37 +115,30 @@ def test_values() -> None:
           "an ordinary backoff keeps the last values on screen")
 
 
-def test_platform_gating() -> None:
-    print("\nthe option gates the platforms")
+def test_platforms() -> None:
+    print("\nevery platform is set up, with no switch to turn them off")
     tree = ast.parse((COMPONENT / "const.py").read_text(encoding="utf-8"))
     names = {
         node.targets[0].id: node
         for node in tree.body
         if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
     }
-    base = [elt.attr for elt in names["PLATFORMS"].value.elts]
-    extra = [elt.attr for elt in names["BLINK_ENTITY_PLATFORMS"].value.elts]
-    check(base == ["CAMERA", "BINARY_SENSOR"], "PLATFORMS is unchanged")
-    check(set(extra) == {"ALARM_CONTROL_PANEL", "BUTTON", "SENSOR", "SWITCH"},
-          "the four new platforms are separate from it")
-    default = names["DEFAULT_BLINK_ENTITIES"].value
-    check(isinstance(default, ast.Constant) and default.value is False,
-          "and the option defaults to off")
-
-    source = (COMPONENT / "__init__.py").read_text(encoding="utf-8")
-    check("async_forward_entry_setups(entry, platforms)" in source
-          and "platforms_for(blink_entities)" in source,
-          "setup forwards only the platforms the option asks for")
-    for name in ("camera.py", "binary_sensor.py"):
+    platforms = [elt.attr for elt in names["PLATFORMS"].value.elts]
+    check(platforms[0] == "CAMERA", "CAMERA first, so the proxy device exists for the rest")
+    check(set(platforms) == {"CAMERA", "BINARY_SENSOR", "ALARM_CONTROL_PANEL",
+                             "BUTTON", "SENSOR", "SWITCH"},
+          "all six platforms")
+    check("DEFAULT_BLINK_ENTITIES" not in names and "CONF_BLINK_ENTITIES" not in names,
+          "there is no option to turn the Blink entities off")
+    for name in ("camera.py", "binary_sensor.py", "__init__.py"):
         text = (COMPONENT / name).read_text(encoding="utf-8")
-        check('if runtime.get("blink_entities"):' in text,
-              f"{name} adds its new entities only with the option on")
+        check("blink_entities" not in text, f"{name} does not gate on an option")
 
 
 def main() -> int:
     test_ids()
     test_values()
-    test_platform_gating()
+    test_platforms()
     if FAILURES:
         print(f"\n{len(FAILURES)} of {CHECKS} failed")
         return 1

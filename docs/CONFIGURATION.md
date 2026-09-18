@@ -31,8 +31,7 @@ Important fields:
 ## Camera Map
 
 The proxy can discover Blink cameras without a camera map. A map is still useful
-for stable slugs and for linking proxy cameras back to official Home Assistant
-Blink camera entities.
+for stable slugs, which every entity id and dashboard is built from.
 
 Use `name`, `id`, or `serial` to match a Blink camera:
 
@@ -40,29 +39,20 @@ Use `name`, `id`, or `serial` to match a Blink camera:
 {
   "cameras": {
     "front_door": {
-      "name": "Front Door",
-      "entity_id": "camera.front_door"
+      "name": "Front Door"
     }
   }
 }
 ```
 
-`entity_id` should point to the official HA Blink camera entity. That lets the
-custom integration use the normal snapshot in loading screens and snapshot
-refresh actions. With [Blink entities](#blink-entities) on it is not used for
-either: the integration's own snapshot camera takes its place.
+An `entity_id` key from older releases, which pointed at Home Assistant's own
+Blink camera, is still accepted and no longer used.
 
 ## Blink Entities
 
-Off by default. Turn it on under:
-
-```text
-Settings > Devices & services > Blink Live View Proxy > Configure
-```
-
-`Blink entities from the proxy` builds, from the proxy's own Blink session,
-what the official Blink integration otherwise provides. With it on, that
-integration can be removed.
+The integration builds, from the proxy's own Blink session, what Home
+Assistant's own Blink integration used to provide, so that integration is not
+needed.
 
 | Entity | Per | What it is |
 |---|---|---|
@@ -73,32 +63,32 @@ integration can be removed.
 | `binary_sensor.blink_proxy_<slug>_battery` | camera | on when Blink calls the battery low |
 | `sensor.blink_proxy_<slug>_temperature` | camera | °F as Blink reports it |
 | `sensor.blink_proxy_<slug>_wifi_signal` | camera | diagnostic |
-| `sensor.blink_proxy_<slug>_battery_voltage` | camera | diagnostic, where Blink reports it |
+| `sensor.blink_proxy_<slug>_battery_voltage` | camera | diagnostic |
 | `alarm_control_panel.blink_proxy_<sync>` | sync module | arm and disarm the system |
 | `sensor.blink_liveview_proxy_last_blink_refresh` | proxy | when Blink was last refreshed, and why not |
 
 `<slug>` is the proxy's camera slug and `<sync>` the sync module's name, lower
-case with underscores. Every id starts `blink_proxy_` so none collides with the
-official integration's, which most people still have installed when they turn
-this on. The loading frame behind live view and the snapshot-refresh button
-use the new snapshot camera, so neither needs the official integration either.
+case with underscores. Every id starts `blink_proxy_`, so none collides with the
+official integration's if it is still installed. Blink reports no temperature,
+Wi-Fi or voltage for Doorbells and Minis, so those three are not created for
+them. The live view's loading frame and the snapshot-refresh button use the
+snapshot camera.
 
-`Blink refresh interval in seconds` (default `300`, range `60-3600`) is how
-often the proxy refreshes Blink while these entities exist. The official
-integration used the same five minutes, and motion is as coarse as it: a clip
-recorded between two refreshes shows up at the second one. Switches, the
-alarm panel and the snapshot button update as soon as Blink confirms them.
+`Blink refresh interval in seconds`, under Configure (default `300`, range
+`60-3600`), is how often the proxy refreshes Blink. Motion is as coarse as the
+interval: a clip recorded between two refreshes shows up at the second one.
+Switches, the alarm panel and the snapshot button update as soon as Blink
+confirms them, and report an error when Blink accepts a change but does not
+apply it.
 
 The refresh never signs in. It renews the session with its refresh token and
 nothing else, and if that fails it stops, marks the entities unavailable and
 says why on the last-refresh sensor, rather than trying again on a timer. Other
 failures back off, doubling up to an hour. The watchdog, if installed, stays
-the only thing that restarts the proxy. The proxy polls only while the
-integration keeps reading `/devices`, so with the option off it makes no more
-Blink calls than before.
+the only thing that restarts the proxy.
 
 Needs a proxy from this release or newer; an older one has no `/devices`
-route, and the integration logs that once and sets up without these entities.
+route, and the integration logs that once and sets up with live view only.
 
 ## Live View Duration
 

@@ -9,9 +9,12 @@ service for direct Blink live view, push-to-talk experiments, last-live-view
 downloads, and clip browsing from both a Sync Module's local storage and
 Blink's cloud.
 
-This project exists because the official Home Assistant Blink integration is
-good for snapshots, motion switches, arming, sensors, and normal Blink services,
-but it does not expose Blink's live-view stream. The proxy uses
+This project started because Home Assistant's own Blink integration does not
+expose Blink's live-view stream. It now also provides that integration's
+snapshots, motion switches, sensors and arming from its own session, so that
+one is no longer needed — and is better removed, since it cannot keep its
+tokens alive (see [INSTALL.md](docs/INSTALL.md#replacing-the-official-blink-integration)).
+The proxy uses
 [BlinkPy](https://github.com/fronzbot/blinkpy) to log in to Blink with your
 own account, request a live-view session, read whichever
 transport Blink hands that camera — its own `immis://` framing, or `rtsps://`
@@ -44,14 +47,10 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
   and `superior` (Wired Floodlight), where it is the audio format rather than
   the transport. Any single camera can be forced back on with
   `ptt_force_enabled_slugs`.
-- Fresh snapshot button using the official HA Blink camera entity.
-- Per-camera motion detection controls when the official Blink integration
-  exposes `switch.*_camera_motion_detection`.
-- Optional, off by default: **Blink entities from the proxy's own session** —
-  snapshot, snapshot refresh, motion detection switch, motion, battery,
-  temperature and Wi-Fi per camera, and an alarm panel per sync module — so the
-  official integration is no longer needed at all. See
-  [Blink Entities](docs/CONFIGURATION.md#blink-entities).
+- **Blink entities from the proxy's own session**: snapshot, snapshot refresh,
+  motion detection switch, motion, battery, temperature and Wi-Fi per camera,
+  and an alarm panel per sync module. Home Assistant's own Blink integration is
+  not needed at all. See [Blink Entities](docs/CONFIGURATION.md#blink-entities).
 - Clip viewer over both inventories — a Sync Module's local storage and Blink's
   cloud — with first-frame thumbnails, a player that seeks, downloads that
   never fetch the same clip from Blink twice, and a source selector. Cloud
@@ -134,10 +133,9 @@ neither.
 
 **Account and hardware**: a Blink account with cameras; for clips, either a
 Sync Module with local storage or a Blink subscription, which is what makes
-cloud clips exist; and — optional but recommended — the official Blink
-integration for snapshots, motion and battery, unless you turn on this
-integration's [Blink entities](docs/CONFIGURATION.md#blink-entities) option,
-which provides them from the proxy's own session instead.
+cloud clips exist. Home Assistant's own Blink integration is not needed, and is
+better removed — see
+[Replacing the official Blink integration](docs/INSTALL.md#replacing-the-official-blink-integration).
 
 **For push-to-talk only**: an HTTPS address for Home Assistant, or
 `http://localhost`. Browsers only expose a microphone in a secure context, so

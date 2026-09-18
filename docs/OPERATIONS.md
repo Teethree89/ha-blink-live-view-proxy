@@ -9,40 +9,33 @@ costs you 2FA texts and, eventually, a rate-limited account.
 
 | | What it does | Costs a login | Fixes |
 |---|---|---|---|
-| **Reload** | Restarts the *Home Assistant* Blink config entry | **Yes**, every time | A stuck integration: entry loaded, entities gone stale |
+| **Reload** | Restarts this integration's config entry | No — the proxy holds the Blink session | Entities stuck after a proxy update |
 | **Restart** | Restarts the *proxy* service or add-on | Only if the cached token is dead | A wedged proxy: `/health` down, live views hanging |
 | **Re-auth** | Full OAuth sign-in, SMS code, new refresh token, in one live session | Yes, and needs a human answering the PIN while it waits | Expired or rejected credentials |
 
-The trap is that **reload cannot fix credentials**, but it is the cheapest
-button to press, so it gets pressed repeatedly. Every press re-runs the full
-blinkpy login, and under OAuth v2 with SMS 2FA that texts a fresh code each
-time.
+**Neither reload nor restart can fix credentials.** Only a re-auth can.
+
+This table used to have a very different Reload row. Home Assistant's own
+Blink integration re-ran the full blinkpy login on every reload, and under
+OAuth v2 with SMS 2FA that texted a fresh code each time:
 
 > On 2026-08-18 a stale token dropped the Blink entry into `setup_retry`.
 > A watchdog reloaded it every five minutes. Every reload sent another text,
 > until Blink rate-limited the account with HTTP 406 — at which point even a
-> correct re-auth failed until the limit aged out.
+> correct re-auth failed until the limit aged out. On 2026-09-18 the same
+> integration's refresh token expired, and its password fallback did it again.
 
-That is why the reload script in
-[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml)
-refuses unless all four hold:
-
-1. Something is actually wrong — cameras missing
-2. The last reload was over five minutes ago
-3. The integration is not already down, so HA is not already retrying on its own backoff
-4. Fewer than three reloads have failed in a row
-
-Guard 3 is the one people leave out. When the entry is in `setup_retry` HA is
-*already* retrying with backoff; adding reloads on top multiplies the login
-attempts rather than replacing them.
+That integration is no longer used — this one builds its entities from the
+proxy's session instead — and removing it removes that whole failure. If you
+still have it installed, delete it rather than guarding its reloads.
 
 ## Which one do I need
 
 | Symptom | Cause | Do this | Not this |
 |---|---|---|---|
 | Tap does nothing, no error anywhere | Dashboard resource not registered | Register `blink-liveview-dialog.js` | Anything else — check this first |
-| Some cameras stale, others fine | Integration stuck | Guarded reload | — |
-| Every Blink entity unavailable | Credentials expired | Re-auth in **Blink Proxy → Authentication** | Reload, repeatedly |
+| Snapshot, motion or alarm entities unavailable | The proxy's Blink refresh stopped | Read `sensor.blink_liveview_proxy_last_blink_refresh` — `auth_failed` means re-auth | Reloading until it works |
+| Every Blink entity unavailable | Credentials expired | Re-auth in **Blink Proxy → Authentication** | Restarting, repeatedly |
 | `/health` not answering | Proxy wedged | Restart the proxy | Re-auth |
 | Watchdog attempts stuck at 3 | Refresh token rejected | Re-auth in **Blink Proxy → Authentication** | More restarts |
 | iPhone shows E-001b | Browser has no Media Source Extensions | Native HLS playback | — |
