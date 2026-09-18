@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .api import BlinkLiveviewProxyClient
 from .const import DOMAIN
 from .coordinator import BlinkLiveviewProxyCoordinator
+from .device_parent import parent_device_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -101,8 +102,9 @@ class BlinkLiveviewProxyCamera(
             # `via_device` is deprecated and stops working in Home Assistant
             # 2027.8. Its replacement takes a device registry id, not an
             # identifier tuple, so __init__ registers the proxy device up front
-            # and hands its id down.
-            "via_device_id": hub_device_id,
+            # and hands its id down. Older releases only take the tuple;
+            # device_parent.py picks whichever this one accepts.
+            **parent_device_info(hub_device_id, (DOMAIN, entry.entry_id)),
         }
 
     @property
