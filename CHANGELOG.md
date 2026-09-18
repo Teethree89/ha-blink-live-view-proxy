@@ -8,10 +8,66 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
-## [Unreleased]
+## [0.9.0] — 2026-09-18
+
+Home Assistant's own Blink integration is no longer needed, and is better
+removed. This release builds its snapshots, motion switches, sensors and
+arming from the proxy's own Blink session ([#64]), and adds a Camera Controls
+sheet to the live-view player, by @bbolinger ([#63]).
+
+Why remove it: on 2026-09-18 that integration refreshed its tokens from one
+issued a month earlier, which it had never saved back. When that token died it
+fell back to a password sign-in, Blink texted a 2FA code for every attempt, and
+the account was locked out for hours. It had done the same through a reload
+loop on 2026-08-18. The proxy saves every refreshed token and stores no
+password, and nothing it does here can start a sign-in.
+
+### Upgrading
+
+- **Update the proxy along with the integration.** This integration needs
+  proxy 0.9.0 for the new entities, the snapshot behind the live view and
+  snapshot refresh. Against an older proxy it shows a repair notice with an
+  Update button, and sets up with live view only until then.
+- **About fifty new entities appear**, all starting `blink_proxy_`, so none
+  collides with the official integration's. Per camera: `camera.`,
+  `button.…_refresh_snapshot`, `switch.…_motion_detection`,
+  `binary_sensor.…_motion`, `binary_sensor.…_battery`, `sensor.…_temperature`,
+  `sensor.…_wifi_signal`, `sensor.…_battery_voltage`; per sync module an
+  `alarm_control_panel.`; and `sensor.blink_liveview_proxy_last_blink_refresh`.
+  The full table is in `docs/CONFIGURATION.md` under Blink Entities.
+- **Point dashboards and automations at the new ids**, then delete the Blink
+  integration under Settings → Devices & services. Regenerating a dashboard
+  from the panel's YAML tab or `scripts/generate-dashboard.py` does the first
+  part for you.
+- **Until you remove it, your account is polled twice**: by the official
+  integration and by the proxy, each every five minutes.
+- **The proxy now refreshes Blink every five minutes** while the integration is
+  running. The interval is under Configure, from 60 to 3600 seconds.
+- **The example package's reload scripts and the dashboards' Reload pill are
+  gone.** They reloaded the official integration, and every press was a Blink
+  login. If you installed `examples/homeassistant-package.yaml`, take the new
+  copy; the status sensors and the needs-attention alert are unchanged.
 
 ### Added
 
+- **Blink entities from the proxy's own session** ([#64]): a snapshot camera,
+  a snapshot button, the motion-detection switch, motion and low-battery
+  binary sensors, and temperature, Wi-Fi and battery-voltage sensors for every
+  camera, plus an alarm panel for every sync module. Each camera's entities
+  sit on the device its live camera already has. Blink reports no temperature,
+  Wi-Fi or voltage for Doorbells and Minis, so those three are not created for
+  them rather than sitting at "unknown" forever.
+- **The proxy's `/devices` route and the device actions** — snapshot, motion
+  detection, arm — that the entities use. `/devices` answers from memory; the
+  refresh behind it runs only while something reads it. It calls blinkpy's
+  refresh, which renews with the refresh token and never signs in; after a
+  failed token refresh it stops and says so on the last-refresh sensor, and
+  other failures back off, doubling up to an hour. Tested against blinkpy's
+  real login code with only the network faked: a failed refresh, with or
+  without a password present, reaches no sign-in or 2FA step.
+- **A command Blink accepts but does not apply is an error, not a success**,
+  and a camera Blink calls busy — which it does while any live view is open on
+  it, as #63 measured — says so and to try again once the live view ends.
 - **A Camera Controls sheet in the live-view player.** A Controls pill under
   the Unmute / Hold Talk / End row opens a sheet — from the bottom in portrait,
   from the side in landscape — with the camera's flood light, night vision,
@@ -66,6 +122,20 @@ fixes that change nothing about how it is used.
 
 ### Changed
 
+- **The live view's loading frame and snapshot refresh use the proxy's own
+  snapshot**, so neither needs `blink.trigger_camera` or the official camera
+  entity. The live camera's `blink_entity_id` attribute now names the snapshot
+  camera, so templates reading it still find a picture.
+- **Dashboards use the new entities.** The panel's YAML tab,
+  `scripts/generate-dashboard.py` and the examples point their pictures at
+  `camera.blink_proxy_<slug>` and their motion buttons at
+  `switch.blink_proxy_<slug>_motion_detection` — named from the slug, so no
+  more guessing the official integration's names.
+- **The panel's Cameras & entities tab** lists each camera's own device: the
+  live camera and everything built for it.
+- **One lock for everything that can renew the Blink token.** The device poll,
+  the entity actions and the Camera Controls writes take turns, so two token
+  refreshes never race with the same refresh token.
 - **A refused change says which control it was.** Failures used to surface the
   Blink field name they happened to be stored in, so the sheet could only offer
   one message for everything, including when the camera had refused outright
@@ -80,13 +150,29 @@ fixes that change nothing about how it is used.
   a session starts, so a change mid-stream does nothing audible until the next
   live view. The sheet now says so instead of looking broken.
 
+### Removed
+
+- **The Overview's check for the official Blink integration**, and `blink`
+  from the manifest's `after_dependencies`.
+- **The guarded and forced reload scripts** in the example package, and the
+  Reload pill in the generated and example dashboards.
+
 ### Fixed
 
+- **Cameras failed to load on Home Assistant releases without
+  `via_device_id`.** The device-tree change after 0.8.1 sent it
+  unconditionally, and up to at least 2026.5 the device registry rejects it, so
+  every live camera failed with a TypeError. The key is now chosen by asking
+  the registry which one it takes. This never reached a release.
 - **The side sheet clears the notch on whichever side it is.** Inside the
   dialog's frame the safe-area insets read as zero, and iOS reports the same
   inset on both sides in landscape anyway, so the dialog now measures the
   insets and the rotation angle and hands them to the player; only the sheet
   and the header step in, and the picture still paints edge to edge.
+
+[#63]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/63
+[#64]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/64
+
 ## [0.8.1] — 2026-09-10
 
 ### Fixed
