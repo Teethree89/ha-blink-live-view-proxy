@@ -45,6 +45,14 @@ from .clips import (
 )
 from .config import resolve_path
 from .constants import LOGGER_NAME, PROXY_VERSION
+from .devices import (
+    ActionError,
+    DevicePoller,
+    devices_payload,
+    set_motion_detection,
+    set_sync_armed,
+    snap_picture,
+)
 from .hls import HlsManager
 from .liveview_cache import ensure_last_liveview_mp4, find_last_liveview
 from .ptt import liveview_session_key, ptt_handler
@@ -252,6 +260,13 @@ async def status_handler(request: web.Request) -> web.Response:
             "watchdog_last_restart": watchdog.get("last_restart") or None,
             "watchdog_attempts": watchdog.get("attempts", 0),
             "auth_state": controller.state,
+            # Only for a caller with the token: last_error can carry a Blink
+            # URL, and a stranger has no use for when this proxy polls.
+            **(
+                {"device_poll": request.app["device_poller"].status()}
+                if authorized and "device_poller" in request.app
+                else {}
+            ),
         }
     )
 
@@ -731,6 +746,100 @@ async def hls_segment_handler(request: web.Request) -> web.FileResponse:
         raise web.HTTPNotFound()
     return web.FileResponse(path, headers={"Cache-Control": "no-store"})
 
+def _check_device_action_authorized(request: web.Request) -> None:
+    """Require the token in a header, not the URL, before changing a device.
+
+    Stricter than check_authorized: arming a camera must not follow from a
+    pasted link. A proxy run without a token has nothing to check, the same
+    as every other route on it.
+    """
+    if request.app.get("proxy_token"):
+        check_header_authorized(request, "Blink device control")
+
+async def _action_bool(request: web.Request, key: str) -> bool:
+    body = await _auth_json_body(request)
+    value = body.get(key)
+    if not isinstance(value, bool):
+        raise web.HTTPBadRequest(text=f"{key} must be true or false\n")
+    return value
+
+async def devices_handler(request: web.Request) -> web.Response:
+    """Camera and sync module state for Home Assistant's Blink entities.
+
+    Reading this is what keeps the Blink poll running; ?poll= sets its
+    interval in seconds. The answer itself comes from memory, never Blink.
+    """
+    check_authorized(request)
+    client = _require_client(request)
+    poller: DevicePoller = request.app["device_poller"]
+    poller.demand(request.query.get("poll"))
+    payload = devices_payload(client)
+    payload["poll"] = poller.status()
+    return web.json_response(payload, headers={"Cache-Control": "no-store"})
+
+async def snapshot_handler(request: web.Request) -> web.Response:
+    """The camera's current thumbnail, as blinkpy last downloaded it."""
+    check_authorized(request)
+    client = _require_client(request)
+    slug = request.match_info["slug"]
+    try:
+        camera = client.camera_for_slug(slug)
+    except KeyError as exc:
+        raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
+    image = camera.image_from_cache
+    if not image:
+        raise web.HTTPNotFound(text=f"No snapshot cached for {slug} yet\n")
+    return web.Response(
+        body=image,
+        content_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+async def snapshot_refresh_handler(request: web.Request) -> web.Response:
+    """Have the camera take a new picture, and answer once it is cached."""
+    _check_device_action_authorized(request)
+    client = _require_client(request)
+    slug = request.match_info["slug"]
+    try:
+        row = await snap_picture(client, request.app["device_poller"], slug)
+    except KeyError as exc:
+        raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
+    except ActionError as exc:
+        raise web.HTTPBadGateway(text=f"{exc}\n") from exc
+    return web.json_response(row, headers={"Cache-Control": "no-store"})
+
+async def motion_detection_handler(request: web.Request) -> web.Response:
+    """Turn one camera's motion detection on or off: {"enabled": bool}."""
+    _check_device_action_authorized(request)
+    client = _require_client(request)
+    slug = request.match_info["slug"]
+    enabled = await _action_bool(request, "enabled")
+    try:
+        row = await set_motion_detection(
+            client, request.app["device_poller"], slug, enabled
+        )
+    except KeyError as exc:
+        raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
+    except ActionError as exc:
+        raise web.HTTPBadGateway(text=f"{exc}\n") from exc
+    return web.json_response(row, headers={"Cache-Control": "no-store"})
+
+async def sync_arm_handler(request: web.Request) -> web.Response:
+    """Arm or disarm one sync module by network id: {"armed": bool}."""
+    _check_device_action_authorized(request)
+    client = _require_client(request)
+    network_id = request.match_info["network_id"]
+    armed = await _action_bool(request, "armed")
+    try:
+        row = await set_sync_armed(
+            client, request.app["device_poller"], network_id, armed
+        )
+    except KeyError as exc:
+        raise web.HTTPNotFound(text=f"Unknown sync network: {network_id}\n") from exc
+    except ActionError as exc:
+        raise web.HTTPBadGateway(text=f"{exc}\n") from exc
+    return web.json_response(row, headers={"Cache-Control": "no-store"})
+
 def clip_cache_dir(config: dict[str, Any], config_base: Path) -> Path:
     """Where clips are kept: as configured, else beside the live-view cache."""
     configured = config.get("clip_cache_dir")
@@ -767,6 +876,7 @@ async def make_app(
         int(config.get("clip_cache_max_mb", 512)) * 1024 * 1024,
     )
     app["clip_index"] = {}
+    app["device_poller"] = DevicePoller(lambda: app["client"])
 
     def activate_client(client) -> None:
         app["client"] = client
@@ -806,6 +916,11 @@ async def make_app(
     app.router.add_post("/cameras/{slug}/stop", stop_liveview_handler)
     app.router.add_get("/cameras/{slug}/hls/index.m3u8", hls_playlist_handler)
     app.router.add_get("/cameras/{slug}/hls/{filename}", hls_segment_handler)
+    app.router.add_get("/devices", devices_handler)
+    app.router.add_get("/cameras/{slug}/snapshot.jpg", snapshot_handler)
+    app.router.add_post("/cameras/{slug}/snapshot", snapshot_refresh_handler)
+    app.router.add_post("/cameras/{slug}/motion", motion_detection_handler)
+    app.router.add_post("/sync/{network_id}/arm", sync_arm_handler)
 
     async def cleanup_context(_app: web.Application):
         cleanup_task = asyncio.create_task(hls_manager.cleanup_loop())
@@ -818,6 +933,7 @@ async def make_app(
             cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await cleanup_task
+            await app["device_poller"].close()
             await hls_manager.stop_all()
             await auth_controller.close()
 
