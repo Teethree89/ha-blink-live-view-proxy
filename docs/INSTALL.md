@@ -1,8 +1,9 @@
 # Install Guide
 
-The official Blink integration is **recommended but not required** — see
-[Alongside the official Blink integration](#alongside-the-official-blink-integration)
-for exactly what it adds and what stops working without it.
+Home Assistant's own Blink integration is **not needed**: this integration
+builds snapshots, motion switches, battery, temperature and the alarm panel from
+the proxy's session. See
+[Replacing the official Blink integration](#replacing-the-official-blink-integration).
 
 ## Which install am I?
 
@@ -373,32 +374,25 @@ password or PIN is placed in a URL, response, log, generated asset, or browser
 persistent storage. If the service restarts, the challenge is cancelled; start
 a new attempt and use the newly issued PIN.
 
-## Alongside the official Blink integration
+## Replacing the official Blink integration
 
-They are independent. This project never calls Blink through the official
-integration, and the official integration never calls this proxy. Live view,
-clips, push-to-talk, the direct player and the authentication panel all work
-with it absent.
+You do not need it, and it is better removed. Everything it provided comes
+from the proxy's own Blink session — see
+[Blink entities](CONFIGURATION.md#blink-entities) for the list and entity ids.
 
-What having it adds:
+Why remove it rather than run both: it logs in to Blink separately, and its
+blinkpy refreshes tokens on every setup or reload without saving them. After
+about thirty days it is refreshing from a dead token, falls back to a password
+sign-in, and Blink texts a 2FA code for every attempt until the account is
+rate-limited. Blink's limits are per *account*, so that lockout also stops this
+proxy from signing in again. The proxy saves every refreshed token and stores
+no password, so it has none of that.
 
-| Feature | Without the official integration |
-|---|---|
-| Snapshot behind the live-view loading frame | A generic loading image instead of your camera's last still |
-| **Snapshot refresh** button | Unavailable — it calls `blink.trigger_camera`, which that integration owns |
-| Motion detection toggles in the example dashboards | The `switch.*_camera_motion_detection` entities do not exist |
-| Battery, temperature, motion sensors | Not provided here — this project deliberately does not duplicate them |
+To switch over:
 
-The link between the two is the `entity_id` in your camera map: point a proxy
-slug at the official camera entity and the snapshot features find it.
-
-**One account, two sessions.** Each logs in to Blink separately, with its own
-device id and its own refresh token, so re-authenticating one does nothing to
-the other. Blink's rate limits, though, are per *account*: a reload loop on the
-official integration can exhaust them and make this proxy's next login fail too.
-That is the failure described in
-[OPERATIONS.md](OPERATIONS.md#reload-restart-re-auth-are-not-interchangeable),
-and it is worth reading before adding automations that reload either one.
+1. Update both halves — the proxy and this integration — to the same release.
+2. Point any dashboards and automations at the `blink_proxy_*` entities.
+3. Settings → Devices & services → Blink → Delete.
 
 ## 4. Add Lovelace Helper Resource
 

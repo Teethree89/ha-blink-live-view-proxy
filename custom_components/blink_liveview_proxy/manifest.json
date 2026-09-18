@@ -2,7 +2,6 @@
   "domain": "blink_liveview_proxy",
   "name": "Blink Live View Proxy",
   "after_dependencies": [
-    "blink",
     "camera",
     "hassio",
     "lovelace",

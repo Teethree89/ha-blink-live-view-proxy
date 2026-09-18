@@ -113,45 +113,27 @@ views:
                   name:
                     - font-size: 12px
 
-              # Guarded reload. It refuses when a reload cannot help, which
-              # matters — every reload is a login attempt, and repeated
-              # attempts get the account texted and then rate-limited.
-              # See the package for the four guards.
-              - type: custom:button-card
-                name: Reload
-                icon: mdi:refresh
-                tap_action:
-                  action: call-service
-                  service: script.blink_reload_guarded
-                hold_action:
-                  action: call-service
-                  service: script.blink_reload_force
-                styles:
-                  card:
-                    - height: 74px
-                  name:
-                    - font-size: 12px
-
       # ------------------------------------------------------------------
-      # Arming and per-camera detail, from the official Blink integration.
-      # Entity names vary by account — delete the rows you do not have.
+      # Arming and per-camera detail, from the integration's own entities.
+      # The alarm panel is named after your sync module; the rest after the
+      # camera's proxy slug.
       # ------------------------------------------------------------------
       - type: grid
         cards:
           - type: entities
             title: Blink
             entities:
-              - entity: alarm_control_panel.blink_home
+              - entity: alarm_control_panel.blink_proxy_home
                 name: Arming
               - entity: sensor.blink_proxy_uptime
                 name: Proxy uptime
               - type: section
                 label: Front Door
-              - entity: sensor.front_door_temperature
+              - entity: sensor.blink_proxy_front_door_temperature
                 name: Temperature
-              - entity: sensor.front_door_battery
-                name: Battery
-              - entity: switch.front_door_camera_motion_detection
+              - entity: binary_sensor.blink_proxy_front_door_battery
+                name: Battery low
+              - entity: switch.blink_proxy_front_door_motion_detection
                 name: Motion detection
 
       # ------------------------------------------------------------------
@@ -170,7 +152,7 @@ views:
       - type: grid
         cards:
           - type: picture-elements
-            camera_image: camera.front_door
+            camera_image: camera.blink_proxy_front_door
             camera_view: auto
             aspect_ratio: 16x9
             card_mod:
@@ -264,7 +246,7 @@ views:
                   action: fire-dom-event
                   blink_snapshot_refresh:
                     slug: front_door
-                    source_entity_id: camera.front_door
+                    source_entity_id: camera.blink_proxy_front_door
                 styles:
                   card:
                     - background: rgba(2, 6, 23, 0.55)
@@ -282,10 +264,10 @@ views:
                   transform: none
                   z-index: 2
 
-              # Motion detection, from the official Blink integration.
+              # Motion detection, from the integration's own switch.
               # Drop this element if that integration is not set up.
               - type: custom:button-card
-                entity: switch.front_door_camera_motion_detection
+                entity: switch.blink_proxy_front_door_motion_detection
                 show_name: false
                 icon: >
                   [[[

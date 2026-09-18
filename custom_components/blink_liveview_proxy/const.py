@@ -15,6 +15,9 @@ CONF_TOKEN = "token"
 # flow sets it yet and nothing reads the stored value, but __init__ imports
 # both names, so they must exist here or the integration fails to import.
 CONF_CLIP_RECORDING = "clip_recording"
+# How often the proxy refreshes Blink for the camera and sync module entities,
+# in seconds.
+CONF_BLINK_POLL_SECONDS = "blink_poll_seconds"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8088"
 # What the add-on leaves in the Home Assistant config directory: its generated
@@ -77,5 +80,19 @@ LEGACY_FRONTEND_RESOURCE_URL = f"{LEGACY_ASSET_URL_BASE}/blink-liveview-dialog.j
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
 DEFAULT_STREAM_SECONDS = 60
 DEFAULT_CLIP_RECORDING = False
+# What Home Assistant's own Blink integration polled at. The proxy clamps to
+# 60-3600.
+DEFAULT_BLINK_POLL_SECONDS = 300
+MIN_BLINK_POLL_SECONDS = 60
+MAX_BLINK_POLL_SECONDS = 3600
 
-PLATFORMS = [Platform.CAMERA, Platform.BINARY_SENSOR]
+# CAMERA first: __init__ registers the proxy device before forwarding, and the
+# cameras hang off it.
+PLATFORMS = [
+    Platform.CAMERA,
+    Platform.BINARY_SENSOR,
+    Platform.ALARM_CONTROL_PANEL,
+    Platform.BUTTON,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]

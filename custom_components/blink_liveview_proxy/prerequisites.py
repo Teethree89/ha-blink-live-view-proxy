@@ -8,8 +8,7 @@ fault.
 
 The interesting failures on this list are all silent. A missing Lovelace
 resource makes every tile do nothing at all: no console error, no log line, no
-failed request. A missing official Blink integration shows up only as one
-button returning a 404. A blinkpy a few releases back reports a failed login
+failed request. A blinkpy a few releases back reports a failed login
 while Blink texts the code anyway. None of those announce themselves, so the
 panel says them out loud instead.
 
@@ -103,61 +102,6 @@ def _home_assistant(facts: dict[str, Any]) -> dict[str, Any]:
             "install this integration below it.",
             "Settings → System → Updates installs core updates.",
         ],
-    )
-
-
-def _blink_integration(facts: dict[str, Any]) -> dict[str, Any]:
-    """Whether the official Blink integration is set up and answering.
-
-    Recommended, never required. This project talks to Blink itself and shares
-    nothing with that integration but the account, so its absence costs three
-    named features and breaks nothing.
-    """
-    entries = int(facts.get("blink_entries") or 0)
-    loaded = int(facts.get("blink_loaded") or 0)
-    has_service = bool(facts.get("blink_service"))
-
-    if loaded and has_service:
-        state, detail = OK, (
-            f"Set up and loaded ({loaded} "
-            f"{'entry' if loaded == 1 else 'entries'}); blink.trigger_camera "
-            "is available."
-        )
-    elif loaded:
-        state, detail = MISSING, (
-            "Loaded, but blink.trigger_camera is not registered. Snapshot "
-            "refresh calls that action and will return a 404 until it is."
-        )
-    elif entries:
-        state, detail = MISSING, (
-            f"Installed but not loaded ({entries} "
-            f"{'entry' if entries == 1 else 'entries'} in an error or retry "
-            "state). Re-authenticate it under Settings → Devices & services."
-        )
-    else:
-        state, detail = MISSING, (
-            "Not set up. Live view, clips, push-to-talk, the direct player and "
-            "this panel all work without it."
-        )
-
-    return _row(
-        "blink_integration",
-        "Official Blink integration",
-        state,
-        detail,
-        "Snapshot refresh, motion switches, battery and temperature sensors",
-        False,
-        [
-            "Settings → Devices & services → Add integration → Blink, signed "
-            "in to the same Blink account.",
-            "Then point each camera in the proxy's camera map at the "
-            "camera.* entity it creates, so the snapshot features find it.",
-            "The two log in separately, with their own device ids and refresh "
-            "tokens, so re-authenticating one does nothing to the other. "
-            "Blink's rate limits are per account, though: a reload loop on "
-            "either can exhaust them and make the other's next login fail.",
-        ],
-        f"{DOCS_BASE}/INSTALL.md#alongside-the-official-blink-integration",
     )
 
 
@@ -484,7 +428,6 @@ def build(facts: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         _home_assistant(facts),
         _integration_update(facts),
-        _blink_integration(facts),
         _blinkpy(facts),
         _ffmpeg(facts),
         _dashboard_resource(facts),

@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .blink_entity import BlinkProxyCameraEntity, runtime_cameras
 from .const import DOMAIN
 from .coordinator import BlinkLiveviewProxyCoordinator
 
@@ -22,11 +23,24 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up proxy health binary sensor."""
-    coordinator: BlinkLiveviewProxyCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
+    """Set up the proxy health sensor and each camera's motion and battery."""
+    runtime = hass.data[DOMAIN][entry.entry_id]
+    coordinator: BlinkLiveviewProxyCoordinator = runtime["coordinator"]
+    entities: list[BinarySensorEntity] = [
+        BlinkLiveviewProxyHealthSensor(coordinator, entry)
     ]
-    async_add_entities([BlinkLiveviewProxyHealthSensor(coordinator, entry)])
+    for camera in runtime_cameras(hass, entry):
+        for sensor_class in (BlinkProxyMotionSensor, BlinkProxyBatterySensor):
+            entities.append(
+                sensor_class(
+                    coordinator,
+                    runtime["client"],
+                    entry,
+                    camera,
+                    runtime["hub_device_id"],
+                )
+            )
+    async_add_entities(entities)
 
 
 class BlinkLiveviewProxyHealthSensor(
@@ -66,3 +80,55 @@ class BlinkLiveviewProxyHealthSensor(
         """Return whether the proxy is reachable."""
         health: dict[str, Any] = self.coordinator.data.get("health", {})
         return bool(health.get("ok"))
+
+
+class BlinkProxyMotionSensor(BlinkProxyCameraEntity, BinarySensorEntity):
+    """Motion on one camera since the proxy's previous Blink refresh.
+
+    As coarse as the poll interval: a clip recorded between two polls shows
+    as motion at the second one.
+    """
+
+    _entity_domain = "binary_sensor"
+
+    _attr_device_class = BinarySensorDeviceClass.MOTION
+
+    def __init__(self, coordinator, client, entry, camera, hub_device_id) -> None:
+        super().__init__(
+            coordinator, client, entry, camera, hub_device_id, "motion", "Motion"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        row = self.row
+        return None if row is None else bool(row.get("motion_detected"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"last_record": (self.row or {}).get("last_record")}
+
+
+class BlinkProxyBatterySensor(BlinkProxyCameraEntity, BinarySensorEntity):
+    """On when Blink calls the battery low."""
+
+    _entity_domain = "binary_sensor"
+
+    _attr_device_class = BinarySensorDeviceClass.BATTERY
+
+    def __init__(self, coordinator, client, entry, camera, hub_device_id) -> None:
+        super().__init__(
+            coordinator, client, entry, camera, hub_device_id, "battery", "Battery"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        row = self.row
+        return None if row is None else row.get("battery_low")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        row = self.row or {}
+        return {
+            "battery_state": row.get("battery"),
+            "battery_level": row.get("battery_level"),
+        }

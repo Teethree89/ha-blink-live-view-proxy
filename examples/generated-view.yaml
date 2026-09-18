@@ -12,8 +12,8 @@
 # Settings -> Dashboards -> Resources, as a JavaScript module:
 #   /api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 #
-# The motion-detection button assumes the official Blink integration named its
-# switch after the slug. Fix or delete any that show as unavailable.
+# Thumbnails and motion buttons use the integration's own entities,
+# camera.blink_proxy_<slug> and switch.blink_proxy_<slug>_motion_detection.
   - title: Cameras
     path: cameras
     type: sections
@@ -45,7 +45,7 @@
         cards:
           # Back Yard — catalina (push-to-talk available)
           - type: picture-elements
-            camera_image: camera.back_yard
+            camera_image: camera.blink_proxy_back_yard
             camera_view: auto
             aspect_ratio: 16x9
             elements:
@@ -125,7 +125,7 @@
                   action: fire-dom-event
                   blink_snapshot_refresh:
                     slug: back_yard
-                    source_entity_id: camera.back_yard
+                    source_entity_id: camera.blink_proxy_back_yard
                 styles:
                   card:
                     - background: rgba(2, 6, 23, 0.55)
@@ -143,7 +143,7 @@
                   transform: none
                   z-index: 2
               - type: custom:button-card
-                entity: switch.back_yard_camera_motion_detection
+                entity: switch.blink_proxy_back_yard_motion_detection
                 show_name: false
                 icon: >
                   [[[
@@ -178,7 +178,7 @@
         cards:
           # Driveway — catalina (push-to-talk available)
           - type: picture-elements
-            camera_image: camera.driveway
+            camera_image: camera.blink_proxy_driveway
             camera_view: auto
             aspect_ratio: 16x9
             elements:
@@ -258,7 +258,7 @@
                   action: fire-dom-event
                   blink_snapshot_refresh:
                     slug: driveway
-                    source_entity_id: camera.driveway
+                    source_entity_id: camera.blink_proxy_driveway
                 styles:
                   card:
                     - background: rgba(2, 6, 23, 0.55)
@@ -276,7 +276,7 @@
                   transform: none
                   z-index: 2
               - type: custom:button-card
-                entity: switch.driveway_camera_motion_detection
+                entity: switch.blink_proxy_driveway_motion_detection
                 show_name: false
                 icon: >
                   [[[
@@ -311,7 +311,7 @@
         cards:
           # Front Door — lotus (push-to-talk available)
           - type: picture-elements
-            camera_image: camera.front_door
+            camera_image: camera.blink_proxy_front_door
             camera_view: auto
             aspect_ratio: 16x9
             elements:
@@ -391,7 +391,7 @@
                   action: fire-dom-event
                   blink_snapshot_refresh:
                     slug: front_door
-                    source_entity_id: camera.front_door
+                    source_entity_id: camera.blink_proxy_front_door
                 styles:
                   card:
                     - background: rgba(2, 6, 23, 0.55)
@@ -409,7 +409,7 @@
                   transform: none
                   z-index: 2
               - type: custom:button-card
-                entity: switch.front_door_camera_motion_detection
+                entity: switch.blink_proxy_front_door_motion_detection
                 show_name: false
                 icon: >
                   [[[
@@ -444,7 +444,7 @@
         cards:
           # Kitchen — owl
           - type: picture-elements
-            camera_image: camera.kitchen
+            camera_image: camera.blink_proxy_kitchen
             camera_view: auto
             aspect_ratio: 16x9
             elements:
@@ -524,7 +524,7 @@
                   action: fire-dom-event
                   blink_snapshot_refresh:
                     slug: kitchen
-                    source_entity_id: camera.kitchen
+                    source_entity_id: camera.blink_proxy_kitchen
                 styles:
                   card:
                     - background: rgba(2, 6, 23, 0.55)
@@ -542,7 +542,7 @@
                   transform: none
                   z-index: 2
               - type: custom:button-card
-                entity: switch.kitchen_camera_motion_detection
+                entity: switch.blink_proxy_kitchen_motion_detection
                 show_name: false
                 icon: >
                   [[[

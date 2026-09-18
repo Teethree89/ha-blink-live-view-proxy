@@ -12,9 +12,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import BlinkLiveviewProxyClient
+from .api import BlinkLiveviewProxyClient, ProxyError
+from .blink_entity import (
+    SNAPSHOT_SUFFIX,
+    BlinkProxyCameraEntity,
+    runtime_cameras,
+    snapshot_entity_id,
+)
 from .const import DOMAIN
 from .coordinator import BlinkLiveviewProxyCoordinator
+from .device_parent import parent_device_info
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +72,11 @@ async def async_setup_entry(
         for camera in cameras
     )
 
+    async_add_entities(
+        BlinkProxySnapshotCamera(coordinator, client, entry, camera, hub_device_id)
+        for camera in runtime_cameras(hass, entry)
+    )
+
 
 class BlinkLiveviewProxyCamera(
     CoordinatorEntity[BlinkLiveviewProxyCoordinator], Camera
@@ -87,6 +99,7 @@ class BlinkLiveviewProxyCamera(
         self.content_type = "image/svg+xml"
         self._client = client
         self._camera = camera
+        self._entry_id = entry.entry_id
         slug = str(camera.get("slug") or camera.get("id") or "camera")
         name = str(camera.get("name") or slug.replace("_", " ").title())
         key = str(camera.get("serial") or camera.get("id") or slug)
@@ -101,8 +114,9 @@ class BlinkLiveviewProxyCamera(
             # `via_device` is deprecated and stops working in Home Assistant
             # 2027.8. Its replacement takes a device registry id, not an
             # identifier tuple, so __init__ registers the proxy device up front
-            # and hands its id down.
-            "via_device_id": hub_device_id,
+            # and hands its id down. Older releases only take the tuple;
+            # device_parent.py picks whichever this one accepts.
+            **parent_device_info(hub_device_id, (DOMAIN, entry.entry_id)),
         }
 
     @property
@@ -117,7 +131,12 @@ class BlinkLiveviewProxyCamera(
         return {
             "proxy_slug": self._camera.get("slug"),
             "blink_camera_id": self._camera.get("id"),
-            "blink_entity_id": self._camera.get("entity_id"),
+            # The snapshot camera for this Blink camera. Once the official
+            # integration's camera; kept under the same name so templates
+            # reading it still find a picture.
+            "blink_entity_id": snapshot_entity_id(
+                self.hass, self._entry_id, self._camera
+            ),
             "network_id": self._camera.get("network_id"),
             "camera_type": self._camera.get("camera_type"),
             "product_type": self._camera.get("product_type"),
@@ -136,7 +155,7 @@ class BlinkLiveviewProxyCamera(
         self, width: int | None = None, height: int | None = None
     ) -> bytes:
         """Return a darkened source snapshot while live view starts."""
-        source_entity_id = self._camera.get("entity_id")
+        source_entity_id = snapshot_entity_id(self.hass, self._entry_id, self._camera)
         if source_entity_id and source_entity_id != self.entity_id:
             try:
                 image = await async_get_image(
@@ -154,3 +173,60 @@ class BlinkLiveviewProxyCamera(
                     err,
                 )
         return _loading_svg()
+
+
+class BlinkProxySnapshotCamera(BlinkProxyCameraEntity, Camera):
+    """The camera's latest Blink thumbnail, from the proxy's session.
+
+    The picture behind the live view's loading frame. It has no stream: live
+    view is the other camera on the same device.
+    """
+
+    _entity_domain = "camera"
+
+    def __init__(
+        self,
+        coordinator: BlinkLiveviewProxyCoordinator,
+        client: BlinkLiveviewProxyClient,
+        entry: ConfigEntry,
+        camera: dict[str, Any],
+        hub_device_id: str,
+    ) -> None:
+        super().__init__(
+            coordinator, client, entry, camera, hub_device_id, SNAPSHOT_SUFFIX
+        )
+        Camera.__init__(self)
+        self.content_type = "image/jpeg"
+        self._image: bytes | None = None
+        self._image_id: str | None = None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Deliberately not proxy_slug: that names the live camera only.
+
+        The dialog and the player find a camera's live entity by that
+        attribute, and a second entity carrying it would be picked instead.
+        """
+        row = self.row or {}
+        return {
+            "snapshot_of": self._slug,
+            "snapshot_id": row.get("snapshot_id"),
+            "last_record": row.get("last_record"),
+        }
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """The thumbnail, fetched from the proxy only when it has changed."""
+        wanted = (self.row or {}).get("snapshot_id")
+        if self._image is not None and wanted and wanted == self._image_id:
+            return self._image
+        try:
+            image = await self._client.async_get_snapshot(self._slug)
+        except ProxyError as err:
+            LOGGER.debug("No snapshot for %s from the proxy: %s", self._slug, err)
+            return self._image
+        if image:
+            self._image = image
+            self._image_id = wanted
+        return self._image

@@ -12,13 +12,18 @@ identifier tuple - it takes a device registry id - so swapping the key alone
 would hand the registry a tuple and silently lose the parent link.
 
 That is why `__init__.py` registers the proxy device itself and stashes its id
-before forwarding the platforms. Two things can quietly undo it, and this test
-guards both:
+before forwarding the platforms. Three things can quietly undo it, and this
+test guards them:
 
   1. `via_device` creeping back into a device_info dict anywhere.
   2. `hub_device_id` being written after `async_forward_entry_setups`, which
      would hand the camera platform a KeyError. PLATFORMS lists CAMERA first,
      so on a fresh install nothing else creates the parent in time.
+  3. `via_device_id` sent to a Home Assistant that does not know it. Up to at
+     least 2026.5 the registry has no such parameter, device_info goes
+     straight into it, and every camera fails with a TypeError. So the key is
+     chosen in device_parent.py, the one file allowed to spell the old one,
+     and it must prefer the new key wherever the registry takes it.
 """
 
 from __future__ import annotations
@@ -37,10 +42,23 @@ def fail(message: str) -> None:
     FAILURES.append(message)
 
 
+# The compatibility fallback for releases without via_device_id lives here,
+# and only here.
+FALLBACK_MODULE = "device_parent.py"
+
+
 def check_no_via_device() -> None:
     """No source file may pass `via_device` to the device registry."""
     for path in sorted(COMPONENT.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        if path.name != FALLBACK_MODULE:
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and node.value == "via_device":
+                    fail(
+                        f"{path.name}:{node.lineno} spells `via_device`; only "
+                        f"{FALLBACK_MODULE} may, as its fallback for older "
+                        "Home Assistant releases"
+                    )
         for node in ast.walk(tree):
             # device_info written as a dict literal
             if isinstance(node, ast.Dict):
@@ -103,14 +121,35 @@ def check_camera_reads_hub_id() -> None:
     source = path.read_text(encoding="utf-8")
     if "hub_device_id" not in source:
         fail("camera.py does not read `hub_device_id`; the parent link is lost")
-    if '"via_device_id"' not in source and "via_device_id=" not in source:
-        fail("camera.py sets no `via_device_id`; cameras would sit at the root")
+    if "parent_device_info(" not in source:
+        fail(
+            "camera.py does not build its parent link with parent_device_info(); "
+            "cameras would sit at the root, or fail on older Home Assistant"
+        )
+
+
+def check_fallback_prefers_new_key() -> None:
+    """device_parent.py returns via_device_id first, the tuple only as fallback."""
+    source = (COMPONENT / FALLBACK_MODULE).read_text(encoding="utf-8")
+    new_key = source.find('{"via_device_id": hub_device_id}')
+    old_key = source.find("{_LEGACY_PARENT_KEY: hub_identifier}")
+    if new_key < 0 or old_key < 0 or new_key > old_key:
+        fail(
+            f"{FALLBACK_MODULE} must return via_device_id when the registry "
+            "takes it, and fall back to the identifier tuple only otherwise"
+        )
+    if "inspect.signature(dr.DeviceRegistry.async_get_or_create)" not in source:
+        fail(
+            f"{FALLBACK_MODULE} must ask the registry which key it takes, not "
+            "guess from a version number"
+        )
 
 
 def main() -> int:
     check_no_via_device()
     check_hub_registered_before_platforms()
     check_camera_reads_hub_id()
+    check_fallback_prefers_new_key()
 
     if FAILURES:
         for line in FAILURES:

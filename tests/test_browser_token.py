@@ -54,7 +54,14 @@ def _stub_home_assistant() -> None:
 
     module("homeassistant", package=True)
     ha_const = module("homeassistant.const")
-    ha_const.Platform = types.SimpleNamespace(CAMERA="camera", BINARY_SENSOR="binary_sensor")
+    ha_const.Platform = types.SimpleNamespace(
+        ALARM_CONTROL_PANEL="alarm_control_panel",
+        BINARY_SENSOR="binary_sensor",
+        BUTTON="button",
+        CAMERA="camera",
+        SENSOR="sensor",
+        SWITCH="switch",
+    )
 
     module("homeassistant.components", package=True)
     http_mod = module("homeassistant.components.http")

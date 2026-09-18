@@ -178,6 +178,14 @@ jobs:
       - name: device tree tests
         run: python tests/test_via_device_id.py
 
+      - name: Blink device poll and route tests
+        # Runs blinkpy's real Auth and Blink with the network faked, and fails
+        # if a failed token refresh reaches any sign-in or 2FA entry point.
+        run: python tests/test_device_poll.py
+
+      - name: Blink entity naming and value tests
+        run: python tests/test_blink_devices.py
+
       - name: Camera controls tests
         run: python tests/test_camera_controls.py
 
@@ -186,3 +194,39 @@ jobs:
 
       - name: Player layout tests
         run: python tests/test_player_layout.py
+
+  home-assistant:
+    name: Home Assistant (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Two releases on either side of via_device_id: the older has only
+          # via_device, and device_parent.py must fall back to it there.
+          - label: "2026.2"
+            python: "3.13"
+            harness: "pytest-homeassistant-custom-component==0.13.316"
+          - label: "2026.9"
+            python: "3.14"
+            harness: "pytest-homeassistant-custom-component==0.13.365"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install Home Assistant test harness
+        # blinkpy without its dependencies: it pins newer aiohttp and requests
+        # than Home Assistant does, and the proxy code under test only needs
+        # its modules to import. Nothing here contacts Blink.
+        run: |
+          # PyTurboJPEG: Home Assistant's camera component imports it.
+          pip install "${{ matrix.harness }}" PyTurboJPEG
+          pip install --no-deps blinkpy==0.25.9 aiofiles sortedcontainers python-slugify
+
+      - name: Blink entity platform tests
+        run: pytest tests/ha -o asyncio_mode=auto -p no:cacheprovider

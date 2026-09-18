@@ -67,10 +67,24 @@ python tests/test_login_decisions.py # stale-PIN handling, PTT eligibility
 python tests/test_authentication.py  # browser/CLI/add-on authentication
 python tests/test_ffmpeg_log.py      # ffmpeg failure messages
 python tests/test_frontend_resource.py  # Lovelace resource registration
+python tests/test_device_poll.py     # Blink device poll: never signs in
+python tests/test_blink_devices.py   # Blink entity ids and values
 ```
 
-CI runs all six on every pull request, alongside a compile pass over every
-tracked Python file and a syntax check on the shell scripts.
+The Blink entity platforms are tested inside real Home Assistant, which the
+tests above deliberately avoid. They need their own environment:
+
+```bash
+pip install pytest-homeassistant-custom-component PyTurboJPEG
+pip install --no-deps blinkpy==0.25.9 aiofiles sortedcontainers python-slugify
+pytest tests/ha -o asyncio_mode=auto
+```
+
+CI runs them against two Home Assistant releases, one either side of
+`via_device_id`.
+
+CI runs every script in `tests/` on every pull request, alongside a compile
+pass over every tracked Python file and a syntax check on the shell scripts.
 
 `test_authentication.py` is the guard on the authentication rewrite: route
 authorization, one-challenge-at-a-time, same-session PIN delivery, auth-cache

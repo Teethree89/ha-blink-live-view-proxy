@@ -15,16 +15,18 @@ def _camera_card(camera: dict[str, Any], indent: int = 6) -> str:
     """Return one camera tile with live view, clips, snapshot, and motion."""
     slug = str(camera.get("slug") or "camera")
     name = str(camera.get("name") or slug.replace("_", " ").title())
-    source = str(camera.get("entity_id") or f"camera.{slug}")
+    # Snapshot and motion switch are built from the proxy's own Blink session;
+    # entity_id is the snapshot camera the panel found on this camera's device.
+    source = str(camera.get("entity_id") or f"camera.blink_proxy_{slug}")
     live = str(camera.get("live_entity_id") or f"camera.blink_live_{slug}")
     motion = next(
         (
             str(item.get("entity_id"))
             for item in camera.get("entities", [])
-            if item.get("domain") in {"switch", "binary_sensor"}
+            if item.get("domain") == "switch"
             and "motion" in str(item.get("entity_id", ""))
         ),
-        f"switch.{slug}_camera_motion_detection",
+        f"switch.blink_proxy_{slug}_motion_detection",
     )
     style_anchor = "round_" + "".join(
         character if character.isalnum() else "_" for character in slug

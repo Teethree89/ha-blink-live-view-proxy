@@ -18,9 +18,11 @@ from .api import BlinkLiveviewProxyClient
 from .const import (
     ASSET_URL_BASE,
     CONF_BASE_URL,
+    CONF_BLINK_POLL_SECONDS,
     CONF_CLIP_RECORDING,
     CONF_STREAM_SECONDS,
     CONF_TOKEN,
+    DEFAULT_BLINK_POLL_SECONDS,
     DEFAULT_CLIP_RECORDING,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
@@ -222,7 +224,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {}).setdefault("_auth_clients", {})[
         entry.entry_id
     ] = client
-    coordinator = BlinkLiveviewProxyCoordinator(hass, entry, client)
+    coordinator = BlinkLiveviewProxyCoordinator(
+        hass,
+        entry,
+        client,
+        blink_poll_seconds=int(
+            merged.get(CONF_BLINK_POLL_SECONDS, DEFAULT_BLINK_POLL_SECONDS)
+        ),
+    )
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {

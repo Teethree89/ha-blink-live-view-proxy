@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
 REQUEST_TIMEOUT = 10
+# A Blink command is sent, then polled until the camera reports it done, and
+# the proxy re-reads the camera before answering. blinkpy waits up to two
+# minutes on the command alone, so ten seconds would give up on most of them.
+ACTION_TIMEOUT = 150
 
 
 class ProxyError(Exception):
@@ -70,6 +74,69 @@ class BlinkLiveviewProxyClient:
     async def async_get_status(self) -> dict[str, Any]:
         """Fetch the proxy's unauthenticated status, including its version."""
         return await self._request_json("/status")
+
+    async def async_get_devices(self, poll_seconds: int) -> dict[str, Any]:
+        """Fetch camera and sync module state, and keep the proxy's poll alive.
+
+        Only called with Blink entities turned on. The proxy refreshes Blink
+        every `poll_seconds` for as long as something keeps reading this.
+        """
+        data = await self._request_json(f"/devices?poll={int(poll_seconds)}")
+        if not isinstance(data.get("cameras"), list):
+            raise ProxyConnectionError("Proxy /devices response did not include a list")
+        return data
+
+    async def async_get_snapshot(self, slug: str) -> bytes | None:
+        """The camera's cached thumbnail, or None when the proxy has none."""
+        path = f"/cameras/{quote(slug, safe='')}/snapshot.jpg"
+        try:
+            async with asyncio.timeout(REQUEST_TIMEOUT):
+                async with self._session.get(
+                    self._absolute_url(path), headers=self.auth_headers()
+                ) as response:
+                    if response.status in (401, 403):
+                        raise ProxyAuthError("Proxy token was rejected")
+                    if response.status == 404:
+                        return None
+                    response.raise_for_status()
+                    return await response.read()
+        except ProxyAuthError:
+            raise
+        except (asyncio.TimeoutError, ClientResponseError, ClientError) as err:
+            raise ProxyConnectionError(
+                f"Proxy request to {path} failed ({type(err).__name__})",
+                status=getattr(err, "status", None),
+            ) from err
+
+    async def async_snap_camera(self, slug: str) -> dict[str, Any]:
+        """Take a new picture; answers with the camera's row once it is cached."""
+        return await self._request_json(
+            f"/cameras/{quote(slug, safe='')}/snapshot",
+            method="POST",
+            timeout=ACTION_TIMEOUT,
+        )
+
+    async def async_set_motion_detection(
+        self, slug: str, enabled: bool
+    ) -> dict[str, Any]:
+        """Turn a camera's motion detection on or off; answers with its row."""
+        return await self._request_json(
+            f"/cameras/{quote(slug, safe='')}/motion",
+            method="POST",
+            json_body={"enabled": bool(enabled)},
+            timeout=ACTION_TIMEOUT,
+        )
+
+    async def async_set_sync_armed(
+        self, network_id: str, armed: bool
+    ) -> dict[str, Any]:
+        """Arm or disarm a sync module; answers with its row."""
+        return await self._request_json(
+            f"/sync/{quote(str(network_id), safe='')}/arm",
+            method="POST",
+            json_body={"armed": bool(armed)},
+            timeout=ACTION_TIMEOUT,
+        )
 
     async def async_start_proxy_update(self) -> dict[str, Any]:
         """Ask the proxy to run its own updater, and return once it has begun.
@@ -165,6 +232,7 @@ class BlinkLiveviewProxyClient:
         *,
         method: str = "GET",
         json_body: dict[str, Any] | None = None,
+        timeout: float = REQUEST_TIMEOUT,
     ) -> dict[str, Any]:
         """Fetch and decode a JSON proxy endpoint."""
         headers = {}
@@ -172,7 +240,7 @@ class BlinkLiveviewProxyClient:
             headers["Authorization"] = f"Bearer {self.token}"
 
         try:
-            async with asyncio.timeout(REQUEST_TIMEOUT):
+            async with asyncio.timeout(timeout):
                 async with self._session.request(
                     method,
                     self._absolute_url(path),

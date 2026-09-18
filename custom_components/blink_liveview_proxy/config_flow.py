@@ -25,11 +25,15 @@ from .api import (
 from .const import (
     ADDON_BASE_URL,
     CONF_BASE_URL,
+    CONF_BLINK_POLL_SECONDS,
     CONF_STREAM_SECONDS,
     CONF_TOKEN,
     DEFAULT_BASE_URL,
+    DEFAULT_BLINK_POLL_SECONDS,
     DEFAULT_STREAM_SECONDS,
     DOMAIN,
+    MAX_BLINK_POLL_SECONDS,
+    MIN_BLINK_POLL_SECONDS,
     TOKEN_HANDOFF_FILE,
     URL_HANDOFF_FILE,
 )
@@ -45,8 +49,30 @@ LOGGER = logging.getLogger(__name__)
 PROBE_TIMEOUT = 4
 
 
-def _schema(defaults: dict[str, Any]) -> vol.Schema:
-    """Build the setup/options schema."""
+def _schema(defaults: dict[str, Any], *, blink_options: bool = False) -> vol.Schema:
+    """Build the setup/options schema.
+
+    The Blink refresh interval appears only in Options: the default suits
+    almost everyone, and setup is about reaching the proxy.
+    """
+    blink_fields: dict[Any, Any] = {}
+    if blink_options:
+        blink_fields = {
+            vol.Optional(
+                CONF_BLINK_POLL_SECONDS,
+                default=defaults.get(
+                    CONF_BLINK_POLL_SECONDS, DEFAULT_BLINK_POLL_SECONDS
+                ),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=MIN_BLINK_POLL_SECONDS,
+                    max=MAX_BLINK_POLL_SECONDS,
+                    step=30,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="s",
+                )
+            ),
+        }
     return vol.Schema(
         {
             vol.Required(
@@ -69,6 +95,7 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
                     unit_of_measurement="s",
                 )
             ),
+            **blink_fields,
         }
     )
 
@@ -301,6 +328,11 @@ class BlinkLiveviewProxyOptionsFlow(config_entries.OptionsFlow):
                     CONF_STREAM_SECONDS: user_input.get(
                         CONF_STREAM_SECONDS, DEFAULT_STREAM_SECONDS
                     ),
+                    CONF_BLINK_POLL_SECONDS: int(
+                        user_input.get(
+                            CONF_BLINK_POLL_SECONDS, DEFAULT_BLINK_POLL_SECONDS
+                        )
+                    ),
                 }
                 await _validate_input(self.hass, data)
             except ProxyAuthError:
@@ -315,6 +347,6 @@ class BlinkLiveviewProxyOptionsFlow(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=_schema(user_input or current),
+            data_schema=_schema(user_input or current, blink_options=True),
             errors=errors,
         )

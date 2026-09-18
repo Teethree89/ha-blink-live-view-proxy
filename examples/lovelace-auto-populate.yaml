@@ -9,7 +9,8 @@
 # attributes, so a template can read them back instead of you typing them:
 #
 #   proxy_slug        the slug the proxy uses in its URLs
-#   blink_entity_id   the official Blink integration's camera, for thumbnails
+#   (thumbnail and motion switch are camera.blink_proxy_<slug> and
+#    switch.blink_proxy_<slug>_motion_detection, named from the slug)
 #   ptt_supported     whether push-to-talk is offered for this camera
 #   camera_type       e.g. default, doorbell, mini
 #   product_type      e.g. catalina, lotus, owl, xt
@@ -52,8 +53,6 @@ views:
     cards:
       # Status pills. The "N of M" and "Health" pills need the REST sensor
       # from examples/homeassistant-package.yaml; drop them if you skipped it.
-      # Reload is guarded — see that package for why an unguarded one is a bad
-      # idea. Hold to force.
       - type: horizontal-stack
         cards:
           - type: custom:button-card
@@ -114,21 +113,6 @@ views:
               name:
                 - font-size: 12px
 
-          - type: custom:button-card
-            name: Reload
-            icon: mdi:refresh
-            tap_action:
-              action: call-service
-              service: script.blink_reload_guarded
-            hold_action:
-              action: call-service
-              service: script.blink_reload_force
-            styles:
-              card:
-                - height: 74px
-              name:
-                - font-size: 12px
-
       - type: custom:auto-entities
         card:
           type: grid
@@ -142,10 +126,9 @@ views:
                   and state_attr(s.entity_id, 'proxy_slug') -%}
               {%- set slug = state_attr(s.entity_id, 'proxy_slug') -%}
               {%- set live = s.entity_id -%}
-              {%- set src  = state_attr(s.entity_id, 'blink_entity_id')
-                             or 'camera.' ~ slug -%}
+              {%- set src  = 'camera.blink_proxy_' ~ slug -%}
               {%- set title = s.name | replace('Blink Live ', '') -%}
-              {%- set motion = 'switch.' ~ slug ~ '_camera_motion_detection' -%}
+              {%- set motion = 'switch.blink_proxy_' ~ slug ~ '_motion_detection' -%}
               {{
                 {
                   'type': 'picture-elements',

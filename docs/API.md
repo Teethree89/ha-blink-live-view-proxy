@@ -164,6 +164,41 @@ Useful `mpegts` query parameters:
 - `session`: browser session ID used by push-to-talk
 - `force=1`: bypass local cooldown after a previous live view
 
+## Blink Devices
+
+What the integration's [Blink entities](CONFIGURATION.md#blink-entities)
+are built from.
+
+- `GET /devices?poll=300`
+- `GET /cameras/{slug}/snapshot.jpg`
+- `POST /cameras/{slug}/snapshot`
+- `POST /cameras/{slug}/motion` with `{"enabled": true|false}`
+- `POST /sync/{network_id}/arm` with `{"armed": true|false}`
+
+`/devices` answers from memory — each camera's motion, battery, temperature,
+Wi-Fi and snapshot id, each sync module's armed state, and the poll's own
+state under `poll` — and never contacts Blink itself. Reading it is what keeps
+the proxy refreshing Blink, every `poll` seconds (clamped to `60-3600`); with
+nothing reading it for three intervals, and at least fifteen minutes, the
+refresh stops. The refresh renews the session with its refresh token and
+never signs in. After a failed token refresh `poll.state` is `auth_failed`
+and it stops until the session is replaced; any other failure is `backoff`,
+retried at double the wait each time, up to an hour. `/status` includes the
+same `device_poll` object for a caller with the token.
+
+`snapshot.jpg` is the camera's cached thumbnail, or `404` when there is none.
+The three `POST` routes send a command to Blink, wait for it to complete, and
+answer with the camera's or sync module's row as Blink then reports it. `409`
+means Blink called the camera busy, which it does for as long as any client
+has a live view open on it; try again once that ends. `502` means Blink did
+not accept the command, or accepted it and did not apply it.
+
+These routes, the device poll and the Camera Controls writes all take one
+lock, so only one of them talks to Blink at a time and two token refreshes
+never race with the same refresh token. With a proxy token configured they take it in
+the `Authorization` header only, never `?token=`, because arming a camera must
+not follow from a pasted link.
+
 ## Push-to-Talk
 
 - `GET /cameras/{slug}/ptt`

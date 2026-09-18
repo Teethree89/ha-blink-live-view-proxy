@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.loader import async_get_integration
 
 from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
+from .blink_devices import replace_camera, replace_sync
 from .const import CONF_BASE_URL, DEFAULT_SCAN_INTERVAL, DOMAIN, MINIMUM_PROXY_VERSION
 from .version_check import (
     NOTICE_OUTDATED,
@@ -40,6 +41,8 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         hass: HomeAssistant,
         entry: ConfigEntry,
         client: BlinkLiveviewProxyClient,
+        *,
+        blink_poll_seconds: int = 300,
     ) -> None:
         super().__init__(
             hass,
@@ -50,6 +53,8 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             always_update=False,
         )
         self.client = client
+        self.blink_poll_seconds = blink_poll_seconds
+        self._devices_warned = False
         # Two notices, never both at once: one for a proxy too old to do
         # what is asked of it, one for a proxy that merely trails this
         # release. They read differently and clear on different events, so
@@ -72,7 +77,55 @@ class BlinkLiveviewProxyCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._review_proxy_version(
             infer_version(status), await self._async_own_version(), status
         )
-        return {"health": health, "status": status, "cameras": cameras}
+        return {
+            "health": health,
+            "status": status,
+            "cameras": cameras,
+            "devices": await self._async_devices(),
+        }
+
+    async def _async_devices(self) -> dict[str, Any] | None:
+        """Blink device state, or the last known one if the proxy cannot say.
+
+        A failure here never fails the whole update: live view and clips do
+        not depend on it, and the device entities keep their last values
+        until the next read works. An older proxy without /devices answers
+        404, and that is said once rather than every thirty seconds.
+        """
+        previous = (self.data or {}).get("devices")
+        try:
+            devices = await self.client.async_get_devices(self.blink_poll_seconds)
+        except ProxyAuthError:
+            raise
+        except ProxyConnectionError as err:
+            if not self._devices_warned:
+                LOGGER.warning(
+                    "The proxy did not return Blink device state (%s), so the "
+                    "snapshot, motion, battery and alarm entities cannot be "
+                    "built. A proxy older than this integration has no "
+                    "/devices route; update it.",
+                    err,
+                )
+                self._devices_warned = True
+            return previous
+        self._devices_warned = False
+        return devices
+
+    def apply_camera_row(self, row: dict[str, Any]) -> None:
+        """Show a camera's state as an action left it, without waiting a poll."""
+        devices = (self.data or {}).get("devices")
+        if isinstance(devices, dict) and isinstance(row, dict):
+            self.async_set_updated_data(
+                {**self.data, "devices": replace_camera(devices, row)}
+            )
+
+    def apply_sync_row(self, row: dict[str, Any]) -> None:
+        """Show a sync module's state as an action left it."""
+        devices = (self.data or {}).get("devices")
+        if isinstance(devices, dict) and isinstance(row, dict):
+            self.async_set_updated_data(
+                {**self.data, "devices": replace_sync(devices, row)}
+            )
 
     async def _async_own_version(self) -> str | None:
         """This integration's own version, read once and kept.

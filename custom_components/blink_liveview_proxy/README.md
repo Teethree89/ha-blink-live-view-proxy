@@ -36,7 +36,7 @@ Blink. It is an interoperability layer for cameras you own.
 | Matching proxy and integration releases | A newer integration raises a repair issue and offers **Fix** when systemd or Supervisor can perform the update |
 | `button-card` (HACS → Frontend) | Every example dashboard fires `fire-dom-event` through it |
 | `auto-entities` (HACS → Frontend) | Only for the self-populating dashboard |
-| The official Blink integration | Optional. Snapshots behind the loading frame, the snapshot-refresh button, and motion switches come from it |
+| The official Blink integration | Not needed. Snapshots, motion switches, battery, temperature and the alarm panel come from the proxy's session |
 
 This integration installs no Python dependencies of its own — it uses Home
 Assistant's `aiohttp` — and depends only on the built-in `http`, `frontend` and
@@ -186,7 +186,7 @@ The sidebar panel has four tabs: **Overview**, **Cameras & entities**,
 for systemd or add-on installs, offers the same confirmation-gated update as a
 Repairs Fix button. Cameras & entities shows model, serial, network, live view,
 clips, snapshot refresh, push-to-talk availability, and every entity attached
-to the official Blink device. Selecting an entity opens Home Assistant's native
+to that camera's device. Selecting an entity opens Home Assistant's native
 More Info control. YAML generates a whole dashboard, one view, or a card from
 the current inventory and copies it without exposing the proxy token.
 

@@ -26,7 +26,7 @@ Home Assistant entities. Select an entity to open its native More Info dialog.
 
 The **Blink Live View Proxy** panel's Overview tab checks all of this against the running
 install and says what to do about anything it finds — the Home Assistant
-version, the official Blink integration, the proxy's blinkpy and ffmpeg, the
+version, the proxy's blinkpy and ffmpeg, the
 dialog resource below, and both frontend cards. Each row keeps its setup steps
 in an accordion whether or not the check passes, so it doubles as the reference
 for rebuilding this on another host.
@@ -142,11 +142,11 @@ proxy service or add-on described in the package example.
 | Live view | `blink_liveview_proxy` | `slug` |
 | Local clips | `blink_liveview_proxy_clips` | `slug` |
 | Fresh snapshot | `blink_snapshot_refresh` | `slug` |
-| Motion on/off | `switch.toggle` | official Blink integration |
+| Motion on/off | `switch.toggle` | `switch.blink_proxy_<slug>_motion_detection` |
 
 `entity_id` and `source_entity_id` are optional everywhere — they default to
-`camera.blink_live_<slug>` and `camera.<slug>`. Pass them when your entities
-were renamed.
+`camera.blink_live_<slug>` and `camera.blink_proxy_<slug>`. Pass them when your
+entities were renamed.
 
 Push-to-talk, **End** and **Save MP4** are inside the live-view dialog,
 not on the tile. PTT only appears for cameras the proxy reports as supporting
@@ -199,11 +199,10 @@ python3 scripts/generate-dashboard.py --format card --camera front_door
 | `card --camera SLUG` | one `picture-elements` tile | + Add card → Manual |
 
 By default the output carries only the **Proxy** pill, because that is the one
-that works with the integration alone. Add `--with-package` for the Cameras,
-Health and Reload pills once you have installed
+that works with the integration alone. Add `--with-package` for the Cameras and
+Health pills once you have installed
 [`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml)
-— without it those two read a sensor that does not exist and Reload calls a
-script that does not exist, so it looks fine and silently does nothing.
+— without it they read a sensor that does not exist.
 
 Other options: `--proxy-url http://homeassistant.local:8088` and
 `--token "$BLINK_PROXY_TOKEN"` if the proxy requires one.
@@ -240,7 +239,7 @@ them:
 | Attribute | Use |
 |---|---|
 | `proxy_slug` | the slug in every proxy URL |
-| `blink_entity_id` | official Blink camera, for the thumbnail |
+| `blink_entity_id` | the camera's snapshot entity, `camera.blink_proxy_<slug>` |
 | `ptt_supported` | whether PTT is offered |
 | `camera_type` | `default`, `doorbell`, `mini` |
 | `product_type` | `catalina`, `lotus`, `owl`, `xt` … |
@@ -254,33 +253,27 @@ ones that can talk back:
       and state_attr(s.entity_id, 'ptt_supported') -%}
 ```
 
-## Motion detection entity names
+## Snapshot and motion entity names
 
-The motion switch belongs to the **official** Blink integration, and its name
-comes from the camera's name there, not from the proxy slug. Options 2 and 3
-guess `switch.<slug>_camera_motion_detection`. When a camera was renamed on one
-side only, that guess is wrong and the button shows as unavailable — fix the
-entity id or delete that element.
+Both come from this integration, and it sets their ids from the proxy slug:
+`camera.blink_proxy_<slug>` and `switch.blink_proxy_<slug>_motion_detection`.
+So the generator and the self-populating dashboard name them without guessing.
+If you rename one in Home Assistant, edit the dashboard to match.
 
-## Status pills and the reload button
+## Status pills
 
 The dashboards open with a pill row: proxy up/down, `N of M` cameras
-discovered, an overall health pill, and a reload button.
+discovered, and an overall health pill.
 
-**Only the Proxy pill works on its own.** The other three need
-[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml):
-Cameras and Health read its REST sensor, and Reload calls its guarded script.
-Without that package the first two render as a stub and Reload looks perfectly
-normal while doing nothing at all.
+**Only the Proxy pill works on its own.** The other two read the REST sensor in
+[`examples/homeassistant-package.yaml`](../examples/homeassistant-package.yaml),
+and without that package they render as a stub. So either install the package,
+or delete those two pills. The generator leaves them out unless you pass
+`--with-package`.
 
-So either install the package, or delete those three pills. The generator
-leaves them out unless you pass `--with-package`.
-
-The reload button calls `script.blink_reload_guarded`, which **refuses to run**
-unless a reload could actually help. Hold it to force. That is not
-over-engineering — a reload re-runs the full Blink login, and an unguarded
-reload loop will text you until the account is rate-limited. The reasoning and
-the incident behind it are in [OPERATIONS.md](OPERATIONS.md).
+There is no reload button any more. It reloaded Home Assistant's own Blink
+integration, which is no longer used, and every press was a Blink login — see
+[OPERATIONS.md](OPERATIONS.md).
 
 ## Wall panels
 

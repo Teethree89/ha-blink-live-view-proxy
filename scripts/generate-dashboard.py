@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import urllib.error
 import urllib.request
 
@@ -32,11 +31,11 @@ DEFAULT_PROXY = "http://127.0.0.1:8088"
 
 # Pills.
 #
-# Only the proxy pill works with the integration alone. The other three need
-# examples/homeassistant-package.yaml: two read its REST sensor, and Reload
-# calls its guarded script. Without that package they render as a stub or, in
-# Reload's case, look fine and silently do nothing — so they are opt-in behind
-# --with-package rather than shipped broken.
+# Only the proxy pill works with the integration alone. The other two read the
+# REST sensor in examples/homeassistant-package.yaml, and without that package
+# they render as a stub - so they are opt-in behind --with-package rather than
+# shipped broken. There is no Reload pill: it reloaded Home Assistant's own
+# Blink integration, which is no longer used, and every press was a login.
 
 # The same mark in both states, coloured rather than swapped for a different
 # glyph: beside the live state a crossed-out camera is a different object, and
@@ -107,29 +106,11 @@ PILL_HEALTH = """\
                 - font-size: 12px
 """
 
-PILL_RELOAD = """\
-          - type: custom:button-card
-            name: Reload
-            icon: mdi:refresh
-            tap_action:
-              action: call-service
-              service: script.blink_reload_guarded
-            hold_action:
-              action: call-service
-              service: script.blink_reload_force
-            styles:
-              card:
-                - height: 74px
-              name:
-                - font-size: 12px
-"""
-
-
 def status_pills(with_package: bool) -> str:
     """The pill row. Only the proxy pill stands on its own."""
     pills = PILL_PROXY
     if with_package:
-        pills += PILL_CAMERAS + PILL_HEALTH + PILL_RELOAD
+        pills += PILL_CAMERAS + PILL_HEALTH
     return "      - type: horizontal-stack\n        cards:\n" + pills
 
 
@@ -141,7 +122,6 @@ DEMO_CAMERAS = [
     {
         "slug": "front_door",
         "name": "Front Door",
-        "entity_id": "camera.front_door",
         "camera_type": "doorbell",
         "product_type": "lotus",
         "ptt_supported": True,
@@ -149,7 +129,6 @@ DEMO_CAMERAS = [
     {
         "slug": "driveway",
         "name": "Driveway",
-        "entity_id": "camera.driveway",
         "camera_type": "default",
         "product_type": "catalina",
         "ptt_supported": True,
@@ -157,7 +136,6 @@ DEMO_CAMERAS = [
     {
         "slug": "back_yard",
         "name": "Back Yard",
-        "entity_id": "camera.back_yard",
         "camera_type": "default",
         "product_type": "catalina",
         "ptt_supported": True,
@@ -165,7 +143,6 @@ DEMO_CAMERAS = [
     {
         "slug": "kitchen",
         "name": "Kitchen",
-        "entity_id": "camera.kitchen",
         "camera_type": "mini",
         "product_type": "owl",
         "ptt_supported": False,
@@ -237,8 +214,10 @@ def card_for(camera: dict) -> str:
     slug = camera["slug"]
     name = camera.get("name") or slug.replace("_", " ").title()
     live = f"camera.blink_live_{slug}"
-    source = camera.get("entity_id") or f"camera.{slug}"
-    motion = f"switch.{slug}_camera_motion_detection"
+    # Both built by the integration from the proxy's own Blink session, with
+    # ids it sets itself, so they can be named here without guessing.
+    source = f"camera.blink_proxy_{slug}"
+    motion = f"switch.blink_proxy_{slug}_motion_detection"
 
     ptt = " (push-to-talk available)" if camera.get("ptt_supported") else ""
     header = f"      # {name} — {camera.get('product_type') or 'unknown'}{ptt}\n"
@@ -311,8 +290,7 @@ def card_for(camera: dict) -> str:
         f"                source_entity_id: {source}",
     )
 
-    # Motion detection comes from the official Blink integration. The entity is
-    # guessed from the slug, so it is commented out when we cannot be sure.
+    # Motion detection, from the integration's own switch for this camera.
     tile += f"""\
           - type: custom:button-card
             entity: {motion}
@@ -376,8 +354,8 @@ HEADER_COMMON = """\
 # Settings -> Dashboards -> Resources, as a JavaScript module:
 #   /api/blink_liveview_proxy/assets/blink-liveview-dialog.js
 #
-# The motion-detection button assumes the official Blink integration named its
-# switch after the slug. Fix or delete any that show as unavailable.
+# Thumbnails and motion buttons use the integration's own entities,
+# camera.blink_proxy_<slug> and switch.blink_proxy_<slug>_motion_detection.
 """
 
 HEADER_DASHBOARD = """\
@@ -509,9 +487,9 @@ def main() -> int:
     parser.add_argument(
         "--with-package",
         action="store_true",
-        help="add the cameras / health / reload pills. These need "
+        help="add the cameras / health pills. These need "
         "examples/homeassistant-package.yaml installed; without it they show "
-        "as a stub and Reload does nothing.",
+        "as a stub.",
     )
     args = parser.parse_args()
 
@@ -554,16 +532,6 @@ def main() -> int:
     print(HEADER_COMMON, end="")
     print(body, end="")
 
-    missing = [c["slug"] for c in cameras if not c.get("entity_id")]
-    if missing:
-        print(
-            "\n# No entity_id configured for: " + ", ".join(missing),
-            file=sys.stderr,
-        )
-        print(
-            "# Their thumbnails fall back to camera.<slug> and may not exist.",
-            file=sys.stderr,
-        )
     return 0
 
 

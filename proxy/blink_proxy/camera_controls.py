@@ -38,6 +38,7 @@ that session; the route is kept for a write that arrives with nothing streaming.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
@@ -650,8 +651,13 @@ async def flush_deferred(
     *,
     retry_interval: float = DEFERRED_RETRY_SECONDS,
     give_up_after: float = DEFERRED_GIVE_UP_SECONDS,
+    lock: asyncio.Lock | None = None,
 ) -> dict[str, Any]:
     """Write held-back changes now that the live view has closed.
+
+    ``lock`` is the proxy's Blink lock (DevicePoller.lock), taken for each
+    attempt and released between them, so a retry waiting out another
+    client's live view never holds up the device poll.
 
     Values the camera already reports are dropped first: Blink answers a
     same-value write with ``state: done`` and no command, which reads as a
@@ -673,7 +679,8 @@ async def flush_deferred(
     if not wanted:
         return result
     while True:
-        state = await apply_changes(blink, row, wanted)
+        async with lock if lock is not None else contextlib.nullcontext():
+            state = await apply_changes(blink, row, wanted)
         busy = list(state.get("busy") or [])
         if not busy or loop.time() - started >= give_up_after:
             break
