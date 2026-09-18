@@ -57,6 +57,11 @@ IDLE_INTERVALS = 3
 IDLE_MIN_SECONDS = 900
 # How often the loop wakes to notice that nobody is reading any more.
 LOOP_TICK_SECONDS = 30
+# After a snapshot, how many more times to fetch a thumbnail that has not
+# changed yet, and how long to wait between. Seen on a Mini: the new address
+# arrives before the image behind it can be downloaded.
+SNAPSHOT_RETRIES = 3
+SNAPSHOT_RETRY_SECONDS = 2
 
 # What a failed token refresh surfaces as. Any of these means the session
 # itself is in trouble, and asking again on a timer would only add to whatever
@@ -100,13 +105,15 @@ def _number_or_none(value: Any) -> float | int | None:
 def _snapshot_id(camera: Any) -> str | None:
     """A short id that changes whenever the cached thumbnail does.
 
-    The thumbnail URL carries Blink's timestamp, so it moves when a new image
-    is taken, and Home Assistant uses the id to know its copy is stale.
+    A hash of the image itself, not of its URL. blinkpy records a new
+    thumbnail URL even when downloading it fails, so a URL-based id announced
+    a new picture while the old one was still being served. Home Assistant
+    uses the id to know its copy is stale.
     """
-    if not getattr(camera, "_cached_image", None):
+    image = getattr(camera, "_cached_image", None)
+    if not image:
         return None
-    source = str(getattr(camera, "thumbnail", "") or "")
-    return hashlib.sha1(source.encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
+    return hashlib.sha1(image, usedforsecurity=False).hexdigest()[:12]
 
 
 def sync_armed(sync: Any) -> bool | None:
@@ -392,11 +399,20 @@ async def set_motion_detection(client: Any, poller: DevicePoller, slug: str, ena
         if not response:
             raise ActionError(f"Blink did not accept the motion change for {slug}")
         await refresh_camera(client._require_blink(), camera)
+    # Blink can answer a command it then does not apply - seen on a Mini
+    # whose live view had just ended. Saying so beats reporting success
+    # while the switch quietly stays where it was.
+    if _bool_or_none(camera.motion_enabled) is not bool(enabled):
+        raise ActionError(
+            f"Blink accepted the motion change for {slug} but did not apply it; "
+            "the camera may be busy. Try again in a minute."
+        )
     return camera_row(client, camera.name, camera)
 
 
 async def snap_picture(client: Any, poller: DevicePoller, slug: str) -> dict[str, Any]:
     camera = client.camera_for_slug(slug)
+    before = camera._cached_image
     async with poller.lock:
         response = await camera.snap_picture()
         if not response:
@@ -405,6 +421,18 @@ async def snap_picture(client: Any, poller: DevicePoller, slug: str) -> dict[str
         # already knew about. The new one's address arrives with the camera's
         # next state, so read that before answering.
         await refresh_camera(client._require_blink(), camera)
+        for _ in range(SNAPSHOT_RETRIES):
+            if camera._cached_image and camera._cached_image != before:
+                break
+            await asyncio.sleep(SNAPSHOT_RETRY_SECONDS)
+            media = await camera.get_media()
+            if media is not None and getattr(media, "status", None) == 200:
+                camera._cached_image = await media.read()
+    if not camera._cached_image or camera._cached_image == before:
+        raise ActionError(
+            f"Blink took a picture on {slug}, but the new image could not be "
+            "downloaded yet. Try again shortly."
+        )
     return camera_row(client, camera.name, camera)
 
 
@@ -423,4 +451,9 @@ async def set_sync_armed(client: Any, poller: DevicePoller, network_id: str, arm
         if not response:
             raise ActionError(f"Blink did not accept the arm change for {name}")
         await sync.get_network_info()
+    if sync_armed(sync) is not bool(armed):
+        raise ActionError(
+            f"Blink accepted the arm change for {name} but did not apply it. "
+            "Try again in a minute."
+        )
     return sync_row(name, sync)

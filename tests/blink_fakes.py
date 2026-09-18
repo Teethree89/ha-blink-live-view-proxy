@@ -38,6 +38,15 @@ class FakeSync:
         return {"id": camera_id}
 
 
+class FakeMedia:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self.body = body
+
+    async def read(self) -> bytes:
+        return self.body
+
+
 class FakeCamera:
     def __init__(self, name: str, camera_id: str, serial: str, sync: FakeSync) -> None:
         self.name = name
@@ -64,6 +73,11 @@ class FakeCamera:
         self.arm_calls: list[bool] = []
         self.snaps = 0
         self._pending_arm: bool | None = None
+        # Blink answering a command it then does not apply.
+        self.ignore_arm = False
+        # How many downloads of a new thumbnail fail before one works.
+        self.thumbnail_not_ready = 0
+        self.downloads = 0
 
     @property
     def image_from_cache(self) -> bytes | None:
@@ -78,13 +92,24 @@ class FakeCamera:
         self.snaps += 1
         return {"id": 2}
 
+    async def get_media(self) -> Any:
+        self.downloads += 1
+        if self.thumbnail_not_ready > 0:
+            self.thumbnail_not_ready -= 1
+            return FakeMedia(404, b"")
+        return FakeMedia(200, f"JPEG-{1 + self.snaps}".encode())
+
     async def update(self, _info: Any, **_kwargs: Any) -> None:
         # What Blink reports once the command has landed.
-        if self._pending_arm is not None:
+        if self._pending_arm is not None and not self.ignore_arm:
             self.motion_enabled = self._pending_arm
         if self.snaps:
+            # Like blinkpy: the new address is recorded whether or not the
+            # image behind it could be downloaded.
             self.thumbnail = f"https://example/thumb.jpg?ts={1 + self.snaps}"
-            self._cached_image = f"JPEG-{1 + self.snaps}".encode()
+            media = await self.get_media()
+            if media.status == 200:
+                self._cached_image = media.body
 
 
 class FakeBlink:

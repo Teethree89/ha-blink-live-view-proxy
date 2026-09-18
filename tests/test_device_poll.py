@@ -401,6 +401,45 @@ async def test_routes() -> None:
             resp = await http.post("/sync/9999/arm", headers=bearer, json={"armed": True})
             check(resp.status == 404, "an unknown network is a 404")
 
+            print("\ncommands Blink answers but does not apply")
+            camera.ignore_arm = True
+            resp = await http.post(
+                "/cameras/driveway/motion", headers=bearer, json={"enabled": True}
+            )
+            check(resp.status == 502 and "did not apply" in await resp.text(),
+                  "a motion change Blink did not apply is an error, not a success")
+            camera.ignore_arm = False
+
+            devices.SNAPSHOT_RETRY_SECONDS = 0
+            camera.thumbnail_not_ready = 2
+            resp = await http.post("/cameras/driveway/snapshot", headers=bearer)
+            check(resp.status == 200 and camera.snaps == 2,
+                  "a thumbnail not ready at first is fetched again until it is")
+            resp = await http.get("/cameras/driveway/snapshot.jpg", headers=bearer)
+            check(await resp.read() == b"JPEG-3", "and the new image is served")
+            camera.thumbnail_not_ready = 99
+            resp = await http.post("/cameras/driveway/snapshot", headers=bearer)
+            check(resp.status == 502 and "could not be downloaded" in await resp.text(),
+                  "one that never arrives is an error, not the old picture again")
+            camera.thumbnail_not_ready = 0
+            row = await (await http.get("/devices", headers=bearer)).json()
+            served = await (await http.get("/cameras/driveway/snapshot.jpg",
+                                           headers=bearer)).read()
+            same_id = [r for r in row["cameras"] if r["slug"] == "driveway"][0]["snapshot_id"]
+            check(served == b"JPEG-3" and same_id == devices._snapshot_id(camera),
+                  "and the snapshot id still names the image actually served")
+
+            sync = blink.sync["114 Cooper"]
+            original = sync.get_network_info
+
+            async def unchanged() -> bool:
+                return True
+
+            sync.get_network_info = unchanged
+            resp = await http.post("/sync/2001/arm", headers=bearer, json={"armed": True})
+            check(resp.status == 502, "an arm change Blink did not apply is an error")
+            sync.get_network_info = original
+
             async def refused(_value: bool) -> None:
                 return None
 
