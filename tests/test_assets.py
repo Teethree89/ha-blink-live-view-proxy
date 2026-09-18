@@ -893,12 +893,13 @@ def test_liveview_safe_areas_do_not_pad_the_player() -> None:
         "portrait can put live actions in the gutter below the video",
     )
     check(
-        "window.innerHeight - videoRect.bottom" in player,
+        "window.innerHeight - bottom" in player,
         "bottom placement uses the rendered video edge",
     )
     check(
-        "roomBelow >= liveActions.offsetHeight + 80" in player,
-        "buttons move only when the gutter clears the home indicator",
+        "roomBelow >= needed" in player
+        and "liveActions.offsetHeight + controlsHint.offsetHeight + 44" in player,
+        "buttons go under the picture only when the Controls hint fits there too",
     )
 
 

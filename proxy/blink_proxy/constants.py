@@ -30,6 +30,30 @@ LIVEVIEW_SESSION_COMMAND_START_AUDIO = 3
 
 LIVEVIEW_SESSION_COMMAND_STOP_AUDIO = 4
 
+# An inline command rides the live-view session itself, the socket the video
+# arrives on. That is how the Blink app works the floodlight's lamp while it is
+# watching: its LightsOn command is msgtype 0x14 with command id 1 in the
+# sequence field and no payload, and LightsOff is id 2. Read from the app's own
+# command objects on 2026-09-15. It matters because Blink answers the lights
+# route 307 for as long as any live view is open on the camera, and a lamp
+# control inside the player is only ever used during one.
+IMMI_DATA_FLAG_INLINE_LV_CMD = 0x14
+
+LIVEVIEW_INLINE_COMMAND_LIGHTS_ON = 1
+
+LIVEVIEW_INLINE_COMMAND_LIGHTS_OFF = 2
+
+# The camera speaks back on its accessory channel, msgtype 0x15, with the state
+# in the sequence field: 0 is lights off, 1 is lights on. A Wired Floodlight
+# sends one as the session opens, and another about 120 ms after a command
+# changes the lamp, so the lamp's state is known before anyone asks for it
+# and confirmed as soon as it moves. Measured 2026-09-15.
+IMMI_DATA_FLAG_ACCESSORY_MESSAGE = 0x15
+
+LIVEVIEW_ACCESSORY_LIGHTS_OFF = 0
+
+LIVEVIEW_ACCESSORY_LIGHTS_ON = 1
+
 AUDIO_CLOCK_RATE = 90_000
 
 AAC_FRAME_SAMPLES = 1024
