@@ -175,5 +175,15 @@ class BlinkProxySyncEntity(CoordinatorEntity[BlinkLiveviewProxyCoordinator]):
 
 
 def action_error(what: str, err: ProxyError) -> HomeAssistantError:
-    """A failed Blink command, said in terms of what was asked for."""
+    """A failed Blink command, said in terms of what was asked for.
+
+    409 is the proxy saying Blink called the camera busy, which almost always
+    means a live view is open on it. That one is worth retrying later, so it
+    reads differently from a refusal.
+    """
+    if getattr(err, "status", None) == 409:
+        return HomeAssistantError(
+            f"Blink did not {what}: the camera is busy, usually because a live "
+            "view is open on it. Try again once it has ended."
+        )
     return HomeAssistantError(f"Blink did not {what}: {err}")

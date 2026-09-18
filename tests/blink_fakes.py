@@ -75,6 +75,8 @@ class FakeCamera:
         self._pending_arm: bool | None = None
         # Blink answering a command it then does not apply.
         self.ignore_arm = False
+        # Blink answering 307, as it does while a live view is open.
+        self.busy = False
         # How many downloads of a new thumbnail fail before one works.
         self.thumbnail_not_ready = 0
         self.downloads = 0
@@ -85,6 +87,8 @@ class FakeCamera:
 
     async def async_arm(self, value: bool) -> dict[str, Any]:
         self.arm_calls.append(value)
+        if self.busy:
+            return {"code": 307, "message": "System is busy"}
         self._pending_arm = value
         return {"id": 1}
 

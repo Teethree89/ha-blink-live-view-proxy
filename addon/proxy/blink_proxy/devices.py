@@ -41,6 +41,7 @@ from blinkpy.auth import (
     UnauthorizedError,
 )
 
+from .camera_controls import _answer_busy
 from .constants import LOGGER_NAME
 
 LOGGER = logging.getLogger(LOGGER_NAME)
@@ -392,10 +393,30 @@ class ActionError(Exception):
     """Blink did not accept a command."""
 
 
+class BlinkBusyError(ActionError):
+    """Blink answered 307: the camera is mid-command or streaming a live view.
+
+    Worth telling apart from a refusal, because only this one is worth
+    retrying, and only once the live view has ended. Blink holds a camera
+    busy for as long as any client, the app included, has a live view open on
+    it - measured for the Camera Controls sheet, and the reason a Mini's
+    motion change was dropped during this feature's own live test.
+    """
+
+
+def _raise_if_busy(response: Any, what: str) -> None:
+    if _answer_busy(response):
+        raise BlinkBusyError(
+            f"{what}: the camera is busy, usually because a live view is open "
+            "on it. Try again once it has ended."
+        )
+
+
 async def set_motion_detection(client: Any, poller: DevicePoller, slug: str, enabled: bool) -> dict[str, Any]:
     camera = client.camera_for_slug(slug)
     async with poller.lock:
         response = await camera.async_arm(bool(enabled))
+        _raise_if_busy(response, f"Motion detection on {slug} was not changed")
         if not response:
             raise ActionError(f"Blink did not accept the motion change for {slug}")
         await refresh_camera(client._require_blink(), camera)
@@ -415,6 +436,7 @@ async def snap_picture(client: Any, poller: DevicePoller, slug: str) -> dict[str
     before = camera._cached_image
     async with poller.lock:
         response = await camera.snap_picture()
+        _raise_if_busy(response, f"No new picture was taken on {slug}")
         if not response:
             raise ActionError(f"Blink did not take a new picture for {slug}")
         # snap_picture waits for the command, then downloads the thumbnail it
@@ -448,6 +470,7 @@ async def set_sync_armed(client: Any, poller: DevicePoller, network_id: str, arm
     name, sync = sync_for_network(client, network_id)
     async with poller.lock:
         response = await sync.async_arm(bool(armed))
+        _raise_if_busy(response, f"{name} was not {'armed' if armed else 'disarmed'}")
         if not response:
             raise ActionError(f"Blink did not accept the arm change for {name}")
         await sync.get_network_info()

@@ -401,6 +401,17 @@ async def test_routes() -> None:
             resp = await http.post("/sync/9999/arm", headers=bearer, json={"armed": True})
             check(resp.status == 404, "an unknown network is a 404")
 
+            print("\na camera Blink calls busy")
+            camera.busy = True
+            before = camera.motion_enabled
+            resp = await http.post(
+                "/cameras/driveway/motion", headers=bearer, json={"enabled": not before}
+            )
+            check(resp.status == 409 and "live view" in await resp.text(),
+                  "Blink's 307 is a 409 that says why, not a generic failure")
+            check(camera.motion_enabled is before, "and nothing was changed")
+            camera.busy = False
+
             print("\ncommands Blink answers but does not apply")
             camera.ignore_arm = True
             resp = await http.post(
@@ -469,6 +480,43 @@ async def test_routes() -> None:
         await app["device_poller"].close()
 
 
+async def test_camera_controls_share_the_lock() -> None:
+    print("\nCamera Controls writes wait for the device poll's lock")
+    from blink_proxy import camera_controls
+
+    calls: list[str] = []
+    real_fetch, real_apply = camera_controls.fetch_state, camera_controls.apply_changes
+
+    async def fetch_state(_blink: Any, _row: Any, *_args: Any) -> dict[str, Any]:
+        return {"night_vision": "off"}
+
+    async def apply_changes(_blink: Any, _row: Any, _changes: Any, *_args: Any) -> dict:
+        calls.append("write")
+        return {"busy": [], "rejected": []}
+
+    camera_controls.fetch_state = fetch_state
+    camera_controls.apply_changes = apply_changes
+    try:
+        lock = asyncio.Lock()
+        await lock.acquire()
+        flush = asyncio.create_task(camera_controls.flush_deferred(
+            object(), {"product_type": "catalina"}, {"night_vision": "on"}, lock=lock
+        ))
+        await asyncio.sleep(0.05)
+        check(calls == [], "a held-back write does not run while a poll holds the lock")
+        lock.release()
+        await asyncio.wait_for(flush, 5)
+        check(calls == ["write"], "and runs as soon as it is released")
+    finally:
+        camera_controls.fetch_state, camera_controls.apply_changes = real_fetch, real_apply
+
+    source = (ROOT / "proxy/blink_proxy/routes.py").read_text(encoding="utf-8")
+    handler = source[source.index("async def camera_controls_update_handler"):]
+    handler = handler[:handler.index("\nasync def ", 10)]
+    check("async with _blink_lock(request.app)" in handler,
+          "the Controls sheet's writes take the same lock")
+
+
 async def test_module_never_calls_a_sign_in() -> None:
     print("\nsource guard")
     tree = ast.parse(pathlib.Path(devices.__file__).read_text(encoding="utf-8"))
@@ -487,6 +535,7 @@ async def main() -> int:
     await test_refresh_failure_never_signs_in()
     await test_backoff_and_pacing()
     await test_routes()
+    await test_camera_controls_share_the_lock()
     await test_module_never_calls_a_sign_in()
     if FAILURES:
         print(f"\n{len(FAILURES)} of {CHECKS} failed")

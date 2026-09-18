@@ -188,8 +188,14 @@ same `device_poll` object for a caller with the token.
 
 `snapshot.jpg` is the camera's cached thumbnail, or `404` when there is none.
 The three `POST` routes send a command to Blink, wait for it to complete, and
-answer with the camera's or sync module's row as Blink then reports it; `502`
-means Blink did not accept it. With a proxy token configured they take it in
+answer with the camera's or sync module's row as Blink then reports it. `409`
+means Blink called the camera busy, which it does for as long as any client
+has a live view open on it; try again once that ends. `502` means Blink did
+not accept the command, or accepted it and did not apply it.
+
+These routes, the device poll and the Camera Controls writes all take one
+lock, so only one of them talks to Blink at a time and two token refreshes
+never race with the same refresh token. With a proxy token configured they take it in
 the `Authorization` header only, never `?token=`, because arming a camera must
 not follow from a pasted link.
 

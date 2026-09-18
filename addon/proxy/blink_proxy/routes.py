@@ -56,6 +56,7 @@ from .config import resolve_path
 from .constants import LOGGER_NAME, PROXY_VERSION
 from .devices import (
     ActionError,
+    BlinkBusyError,
     DevicePoller,
     devices_payload,
     set_motion_detection,
@@ -371,6 +372,11 @@ def schedule_deferred_flush(app: web.Application, slug: str) -> asyncio.Task[Non
     tasks[slug] = task
     return task
 
+def _blink_lock(app: web.Application) -> asyncio.Lock | None:
+    """The lock every Blink write and refresh takes; see DevicePoller.lock."""
+    poller = app.get("device_poller")
+    return poller.lock if poller is not None else None
+
 async def _flush_when_idle(app: web.Application, slug: str) -> None:
     deferred: DeferredControls = app["deferred_controls"]
     deadline = time.monotonic() + camera_controls.DEFERRED_GIVE_UP_SECONDS
@@ -403,7 +409,12 @@ async def _flush_when_idle(app: web.Application, slug: str) -> None:
         LOGGER.warning("Settings held back for %s were not written: no Blink client", slug)
         return
     try:
-        result = await flush_deferred(client._require_blink(), row, changes)  # noqa: SLF001
+        result = await flush_deferred(
+            client._require_blink(),  # noqa: SLF001
+            row,
+            changes,
+            lock=_blink_lock(app),
+        )
     except Exception as err:  # noqa: BLE001
         LOGGER.exception("Writing the settings held back for %s failed", slug)
         result = {
@@ -447,14 +458,19 @@ async def camera_controls_update_handler(request: web.Request) -> web.Response:
         raise web.HTTPBadRequest(text="Body must be JSON\n") from err
     blink = _require_client(request)._require_blink()  # noqa: SLF001
     try:
-        async with asyncio.timeout(30):
-            state = await apply_changes(
-                blink,
-                row,
-                body,
-                _active_liveview(request, slug),
-                request.app["deferred_controls"],
-            )
+        # The same lock as the device poll and the entity actions: one Blink
+        # write or refresh at a time, so two token refreshes never race with
+        # the same refresh token. Taken before the timeout starts, so a poll
+        # in progress does not eat into the time Blink gets to answer.
+        async with _blink_lock(request.app) or contextlib.nullcontext():
+            async with asyncio.timeout(30):
+                state = await apply_changes(
+                    blink,
+                    row,
+                    body,
+                    _active_liveview(request, slug),
+                    request.app["deferred_controls"],
+                )
     except ControlError as err:
         raise web.HTTPBadRequest(text=f"{err}\n") from err
     except (TimeoutError, OSError) as err:
@@ -954,6 +970,8 @@ async def snapshot_refresh_handler(request: web.Request) -> web.Response:
         row = await snap_picture(client, request.app["device_poller"], slug)
     except KeyError as exc:
         raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
+    except BlinkBusyError as exc:
+        raise web.HTTPConflict(text=f"{exc}\n") from exc
     except ActionError as exc:
         raise web.HTTPBadGateway(text=f"{exc}\n") from exc
     return web.json_response(row, headers={"Cache-Control": "no-store"})
@@ -970,6 +988,8 @@ async def motion_detection_handler(request: web.Request) -> web.Response:
         )
     except KeyError as exc:
         raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
+    except BlinkBusyError as exc:
+        raise web.HTTPConflict(text=f"{exc}\n") from exc
     except ActionError as exc:
         raise web.HTTPBadGateway(text=f"{exc}\n") from exc
     return web.json_response(row, headers={"Cache-Control": "no-store"})
@@ -986,6 +1006,8 @@ async def sync_arm_handler(request: web.Request) -> web.Response:
         )
     except KeyError as exc:
         raise web.HTTPNotFound(text=f"Unknown sync network: {network_id}\n") from exc
+    except BlinkBusyError as exc:
+        raise web.HTTPConflict(text=f"{exc}\n") from exc
     except ActionError as exc:
         raise web.HTTPBadGateway(text=f"{exc}\n") from exc
     return web.json_response(row, headers={"Cache-Control": "no-store"})

@@ -2897,7 +2897,18 @@ class BlinkLiveviewProxySnapshotRefreshView(HomeAssistantView):
         runtime = _runtime(self.hass)
         try:
             row = await runtime["client"].async_snap_camera(slug)
-        except (ProxyAuthError, ProxyConnectionError) as err:
+        except ProxyConnectionError as err:
+            if err.status == 409:
+                raise web.HTTPConflict(
+                    text=(
+                        "The camera is busy, usually because a live view is open "
+                        "on it. Refresh the snapshot once it has ended.\n"
+                    )
+                ) from err
+            raise web.HTTPBadGateway(
+                text="Blink did not take a new snapshot. Try again shortly.\n"
+            ) from err
+        except ProxyAuthError as err:
             raise web.HTTPBadGateway(
                 text="Blink did not take a new snapshot. Try again shortly.\n"
             ) from err

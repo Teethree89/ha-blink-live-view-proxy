@@ -163,6 +163,22 @@ async def test_motion_switch_reaches_blinkpy(
     assert hass.states.get("switch.blink_proxy_driveway_motion_detection").state == "on"
 
 
+async def test_busy_camera_is_explained(hass: HomeAssistant, fake_proxy: Any) -> None:
+    import pytest
+    from homeassistant.exceptions import HomeAssistantError
+
+    await _setup(hass, fake_proxy)
+    fake_proxy.blink.cameras["Driveway"].busy = True
+    with pytest.raises(HomeAssistantError, match="busy"):
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": "switch.blink_proxy_driveway_motion_detection"},
+            blocking=True,
+        )
+    assert hass.states.get("switch.blink_proxy_driveway_motion_detection").state == "on"
+
+
 async def test_alarm_panel_reaches_blinkpy(hass: HomeAssistant, fake_proxy: Any) -> None:
     await _setup(hass, fake_proxy)
     await hass.services.async_call(
