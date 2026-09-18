@@ -215,7 +215,8 @@ jobs:
         # than Home Assistant does, and the proxy code under test only needs
         # its modules to import. Nothing here contacts Blink.
         run: |
-          pip install "${{ matrix.harness }}"
+          # PyTurboJPEG: Home Assistant's camera component imports it.
+          pip install "${{ matrix.harness }}" PyTurboJPEG
           pip install --no-deps blinkpy==0.25.9 aiofiles sortedcontainers python-slugify
 
       - name: Blink entity platform tests

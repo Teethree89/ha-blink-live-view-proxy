@@ -4,7 +4,7 @@ These need pytest-homeassistant-custom-component, which pins a Home Assistant
 release, plus blinkpy for the proxy side. The other tests in tests/ need
 neither. From the repo root:
 
-    pip install pytest-homeassistant-custom-component
+    pip install pytest-homeassistant-custom-component PyTurboJPEG
     pip install --no-deps blinkpy==0.25.9
     pytest tests/ha -o asyncio_mode=auto
 

@@ -75,7 +75,7 @@ The Blink entity platforms are tested inside real Home Assistant, which the
 tests above deliberately avoid. They need their own environment:
 
 ```bash
-pip install pytest-homeassistant-custom-component
+pip install pytest-homeassistant-custom-component PyTurboJPEG
 pip install --no-deps blinkpy==0.25.9 aiofiles sortedcontainers python-slugify
 pytest tests/ha -o asyncio_mode=auto
 ```
