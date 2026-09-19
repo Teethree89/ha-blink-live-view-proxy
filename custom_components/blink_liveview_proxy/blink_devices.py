@@ -44,13 +44,15 @@ def camera_unique_id(entry_id: str, camera: dict[str, Any], suffix: str) -> str:
     return f"{entry_id}_{camera_key(camera)}_{suffix}"
 
 
-def sync_object_id(sync: dict[str, Any]) -> str:
+def sync_object_id(sync: dict[str, Any], suffix: str = "") -> str:
+    """blink_proxy_<sync>[_<suffix>], the object id of a sync module's entity."""
     name = slugify(sync.get("name")) or slugify(sync.get("network_id")) or "sync"
-    return f"{OBJECT_ID_PREFIX}_{name}"
+    base = f"{OBJECT_ID_PREFIX}_{name}"
+    return f"{base}_{suffix}" if suffix else base
 
 
-def sync_unique_id(entry_id: str, sync: dict[str, Any]) -> str:
-    return f"{entry_id}_sync_{sync.get('network_id')}_arm"
+def sync_unique_id(entry_id: str, sync: dict[str, Any], suffix: str = "arm") -> str:
+    return f"{entry_id}_sync_{sync.get('network_id')}_{suffix}"
 
 
 def sync_device_key(sync: dict[str, Any]) -> str:
@@ -126,6 +128,21 @@ def alarm_state(sync: dict[str, Any] | None) -> str | None:
     if armed is False:
         return "disarmed"
     return None
+
+
+def sync_online(sync: dict[str, Any] | None) -> bool | None:
+    """Whether Blink can reach this sync module, or None when it has not said.
+
+    Blink goes on reporting the last arm state for a module that has dropped
+    off, so `alarm_state` above cannot tell a watching system from an absent
+    one. This is the field that can.
+    """
+    if not sync:
+        return None
+    status = sync.get("status")
+    if not isinstance(status, str) or not status:
+        return None
+    return status.lower() == "online"
 
 
 def battery_voltage(row: dict[str, Any] | None) -> float | None:

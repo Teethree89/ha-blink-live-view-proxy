@@ -65,6 +65,7 @@ needed.
 | `sensor.blink_proxy_<slug>_wifi_signal` | camera | diagnostic |
 | `sensor.blink_proxy_<slug>_battery_voltage` | camera | diagnostic |
 | `alarm_control_panel.blink_proxy_<sync>` | sync module | arm and disarm the system |
+| `binary_sensor.blink_proxy_<sync>_connection` | sync module | on while Blink can reach it |
 | `sensor.blink_liveview_proxy_last_blink_refresh` | proxy | when Blink was last refreshed, and why not |
 
 `<slug>` is the proxy's camera slug and `<sync>` the sync module's name, lower
@@ -80,6 +81,15 @@ interval: a clip recorded between two refreshes shows up at the second one.
 Switches, the alarm panel and the snapshot button update as soon as Blink
 confirms them, and report an error when Blink accepts a change but does not
 apply it.
+
+A sync module that has dropped off is worth a word. Blink keeps reporting the
+last arm state for one it can no longer reach, so the alarm panel goes on
+reading `armed_away` and a system that is not watching looks like one that is.
+`binary_sensor.blink_proxy_<sync>_connection` is what says otherwise, and the
+same word is on the panel as its `status` attribute. Condition anything that
+depends on the system really being armed on the connection sensor, not on the
+panel alone. The panel itself stays available either way, so arming is never
+blocked by a module that is briefly out of touch.
 
 The refresh never signs in. It renews the session with its refresh token and
 nothing else, and if that fails it stops, marks the entities unavailable and

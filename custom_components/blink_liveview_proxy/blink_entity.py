@@ -37,6 +37,8 @@ from .device_parent import parent_device_info
 LOGGER = logging.getLogger(__name__)
 
 SNAPSHOT_SUFFIX = "snapshot"
+# The sync module's first entity, so its ids carry no suffix.
+ARM_SUFFIX = "arm"
 
 
 def runtime_cameras(hass: HomeAssistant, entry: ConfigEntry) -> list[dict[str, Any]]:
@@ -143,14 +145,18 @@ class BlinkProxySyncEntity(CoordinatorEntity[BlinkLiveviewProxyCoordinator]):
         entry: ConfigEntry,
         sync: dict[str, Any],
         hub_device_id: str,
+        suffix: str = ARM_SUFFIX,
+        name_suffix: str = "",
     ) -> None:
         super().__init__(coordinator)
         self._client = client
         self._network_id = str(sync.get("network_id"))
         name = str(sync.get("name") or self._network_id)
-        self._attr_name = f"Blink {name}"
-        self._attr_unique_id = sync_unique_id(entry.entry_id, sync)
-        self.entity_id = f"{self._entity_domain}.{sync_object_id(sync)}"
+        self._attr_name = f"Blink {name} {name_suffix}".strip()
+        self._attr_unique_id = sync_unique_id(entry.entry_id, sync, suffix)
+        self.entity_id = f"{self._entity_domain}." + sync_object_id(
+            sync, "" if suffix == ARM_SUFFIX else suffix
+        )
         self._attr_device_info = {
             "identifiers": {(DOMAIN, sync_device_key(sync))},
             "name": f"Blink {name}",

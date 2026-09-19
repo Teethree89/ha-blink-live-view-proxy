@@ -5,6 +5,8 @@ Built from the proxy's own Blink session; see proxy/blink_proxy/devices.py.
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
     AlarmControlPanelEntityFeature,
@@ -56,6 +58,16 @@ class BlinkProxySyncAlarm(BlinkProxySyncEntity, AlarmControlPanelEntity):
     def alarm_state(self) -> AlarmControlPanelState | None:
         state = alarm_state(self.row)
         return None if state is None else AlarmControlPanelState(state)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Blink's word on the module itself, which the state cannot carry.
+
+        An unreachable module keeps its last arm state here, so anything that
+        needs to know the system is really watching reads this, or the
+        connection sensor beside it.
+        """
+        return {"status": (self.row or {}).get("status")}
 
     async def async_alarm_arm_away(self, code: str | None = None) -> None:
         await self._async_set(True)
