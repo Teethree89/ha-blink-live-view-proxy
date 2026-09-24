@@ -51,11 +51,13 @@ NEW_ENTITIES = {
     for template in PER_CAMERA
 } | {
     "alarm_control_panel.blink_proxy_114_cooper",
+    "binary_sensor.blink_proxy_114_cooper_connection",
     "sensor.blink_liveview_proxy_last_blink_refresh",
 }
 
 
-async def _setup(hass: HomeAssistant, proxy: Any, **options: Any) -> MockConfigEntry:
+def _entry(hass: HomeAssistant, proxy: Any, **options: Any) -> MockConfigEntry:
+    """An entry added to Home Assistant but not yet set up."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Blink Live View Proxy",
@@ -63,6 +65,17 @@ async def _setup(hass: HomeAssistant, proxy: Any, **options: Any) -> MockConfigE
         options=options,
     )
     entry.add_to_hass(hass)
+    return entry
+
+
+async def _setup(
+    hass: HomeAssistant,
+    proxy: Any,
+    entry: MockConfigEntry | None = None,
+    **options: Any,
+) -> MockConfigEntry:
+    if entry is None:
+        entry = _entry(hass, proxy, **options)
     # The Lovelace resource and the sidebar panel have nothing to do with
     # entities, and they need the whole frontend package installed. Both are
     # patched out, and their two dependencies marked as already loaded.

@@ -391,7 +391,9 @@ no password, so it has none of that.
 To switch over:
 
 1. Update both halves — the proxy and this integration — to the same release.
-2. Point any dashboards and automations at the `blink_proxy_*` entities.
+2. Point any dashboards and automations at the `blink_proxy_*` entities. The
+   old panel's `status` attribute is on the new one too, and there is now a
+   connection sensor per sync module beside it.
 3. Settings → Devices & services → Blink → Delete.
 
 ## 4. Add Lovelace Helper Resource

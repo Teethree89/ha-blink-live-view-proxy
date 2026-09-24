@@ -9,11 +9,18 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .blink_entity import BlinkProxyCameraEntity, runtime_cameras
+from .blink_devices import sync_online
+from .blink_entity import (
+    BlinkProxyCameraEntity,
+    BlinkProxySyncEntity,
+    runtime_cameras,
+    runtime_syncs,
+)
 from .const import DOMAIN
 from .coordinator import BlinkLiveviewProxyCoordinator
 
@@ -23,7 +30,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the proxy health sensor and each camera's motion and battery."""
+    """The proxy's health, each camera's motion and battery, each sync's connection."""
     runtime = hass.data[DOMAIN][entry.entry_id]
     coordinator: BlinkLiveviewProxyCoordinator = runtime["coordinator"]
     entities: list[BinarySensorEntity] = [
@@ -40,6 +47,16 @@ async def async_setup_entry(
                     runtime["hub_device_id"],
                 )
             )
+    for sync in runtime_syncs(hass, entry):
+        entities.append(
+            BlinkProxySyncConnectionSensor(
+                coordinator,
+                runtime["client"],
+                entry,
+                sync,
+                runtime["hub_device_id"],
+            )
+        )
     async_add_entities(entities)
 
 
@@ -132,3 +149,26 @@ class BlinkProxyBatterySensor(BlinkProxyCameraEntity, BinarySensorEntity):
             "battery_state": row.get("battery"),
             "battery_level": row.get("battery_level"),
         }
+
+
+class BlinkProxySyncConnectionSensor(BlinkProxySyncEntity, BinarySensorEntity):
+    """On while Blink can reach this sync module.
+
+    The alarm panel cannot say this. Blink keeps reporting the last arm state
+    for a module that has dropped off, so a system that is no longer watching
+    still reads as armed. This is the entity to condition an automation on.
+    """
+
+    _entity_domain = "binary_sensor"
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, client, entry, sync, hub_device_id) -> None:
+        super().__init__(
+            coordinator, client, entry, sync, hub_device_id, "connection", "Connection"
+        )
+
+    @property
+    def is_on(self) -> bool | None:
+        return sync_online(self.row)
