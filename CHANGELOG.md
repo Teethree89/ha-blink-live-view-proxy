@@ -8,6 +8,28 @@ While this is pre-1.0, the minor version moves for anything user-visible (new
 behaviour, a dropped architecture, a changed default) and the patch version for
 fixes that change nothing about how it is used.
 
+## [0.9.1] — 2026-09-24
+
+### Fixed
+
+- **An offline sync module can be seen again**, by @bbolinger ([#67], closes
+  [#66]). Blink keeps reporting the last arm state for a sync module it can no
+  longer reach, so the alarm panel goes on reading armed for a system that is
+  not watching. Home Assistant's own Blink integration exposed the module's
+  status as an attribute on its panel, so removing that integration, as 0.9.0
+  recommends, took the only warning with it. Each sync module now has
+  `binary_sensor.blink_proxy_<sync>_connection` (connectivity, diagnostic, on
+  while Blink can reach it), and the alarm panel carries the same value as its
+  `status` attribute, so a template that read the old panel's attribute can
+  be pointed straight at the new one. The panel stays available while the
+  module is unreachable, so a brief dropout never blocks arming. The panel's
+  entity and unique ids are unchanged.
+
+No proxy change is needed: 0.9.0 already sends each sync module's status.
+
+[#66]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/66
+[#67]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/67
+
 ## [0.9.0] — 2026-09-18
 
 Home Assistant's own Blink integration is no longer needed, and is better
