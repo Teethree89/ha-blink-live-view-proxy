@@ -569,6 +569,7 @@ class BlinkClient:
                     "network_id": str(camera.network_id),
                     "camera_type": camera.camera_type or "default",
                     "product_type": camera.product_type,
+                    "firmware": camera.version,
                     "ptt_supported": camera_ptt_supported(
                         camera, self.config, slug=slug
                     ),

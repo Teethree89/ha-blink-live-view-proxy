@@ -111,6 +111,7 @@ class BlinkLiveviewProxyCamera(
             "name": f"Blink {name}",
             "manufacturer": "Blink",
             "model": camera.get("product_type") or camera.get("camera_type"),
+            "sw_version": camera.get("firmware"),
             # `via_device` is deprecated and stops working in Home Assistant
             # 2027.8. Its replacement takes a device registry id, not an
             # identifier tuple, so __init__ registers the proxy device up front

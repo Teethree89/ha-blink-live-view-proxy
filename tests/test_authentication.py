@@ -384,6 +384,7 @@ async def test_existing_routes_unchanged() -> None:
             response = await client.get("/cameras?token=proxy-secret")
             payload = await response.json()
             check(response.status == 200 and payload["cameras"][0]["slug"] == "front_door", "camera inventory is unchanged once authenticated")
+            check(payload["cameras"][0]["firmware"] == "10.73", "the camera inventory carries the firmware version")
             status = await (await client.get("/status")).json()
             check(status["ready"] is True and status["cameras_discovered"] == 1, "/status keeps its existing liveness fields")
         finally:

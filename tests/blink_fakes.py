@@ -56,6 +56,7 @@ class FakeCamera:
         self.sync = sync
         self.camera_type = ""
         self.product_type = "catalina"
+        self.version = "10.73"
         self.status = "done"
         self.motion_enabled = True
         self.motion_detected = False
