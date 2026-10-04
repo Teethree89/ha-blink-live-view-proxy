@@ -56,6 +56,8 @@ class FakeCamera:
         self.sync = sync
         self.camera_type = ""
         self.product_type = "catalina"
+        # blinkpy reads this from the camera config as `fw_version`;
+        # list_cameras() passes it on as `firmware`.
         self.version = "10.73"
         self.status = "done"
         self.motion_enabled = True
