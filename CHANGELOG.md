@@ -4,9 +4,48 @@ What changed in each tagged release, and why. The full notes — including
 upgrade warnings and credits — are on the
 [releases page](https://github.com/Teethree89/ha-blink-live-view-proxy/releases).
 
-While this is pre-1.0, the minor version moves for anything user-visible (new
-behaviour, a dropped architecture, a changed default) and the patch version for
-fixes that change nothing about how it is used.
+Since 1.0.0 the versions follow semantic versioning: the major version moves
+for a breaking change, the minor for anything user-visible (new behaviour, a
+changed default), and the patch for fixes that change nothing about how it is
+used.
+
+## [1.0.0] — 2026-10-09
+
+The first stable release, and the version submitted to the HACS default store.
+Nothing about how it is used changes from 0.9.1; this ships two fixes and one
+small addition.
+
+### Fixed
+
+- **The alarm panel is right for networks without a Sync Module**, reported
+  and diagnosed by @patwill66 ([#70], fixed in [#71]). On a network made only
+  of Minis, Wired Floodlights or doorbells, blinkpy reports one camera's
+  motion-detection flag as the network's armed state. The panel showed that
+  flag, and disarming from Home Assistant failed with a false "Blink did not
+  disarm" error even though Blink had applied the change. The proxy now reads
+  the network's state from Blink's homescreen for those networks, and
+  refreshes it after an arm change before checking the result. Networks with a
+  Sync Module are unchanged.
+- **Cameras on one sync-less network no longer produce duplicate entities.**
+  Two Wired Floodlights on the same network gave the network's alarm panel and
+  connection sensor twice, and Home Assistant logged "does not generate unique
+  IDs" on every refresh. The proxy now lists each network once. This needs the
+  1.0.0 proxy: with an older proxy the log line stays.
+
+### Added
+
+- **Each camera's firmware version appears in its device page**, by
+  @fritzzetik ([#69]). Home Assistant showed no firmware for any camera since
+  0.9.0 removed the official integration. Home Assistant writes a changed
+  `sw_version` to the device registry only on a full core restart; reloading
+  the config entry is not enough.
+
+`MINIMUM_PROXY_VERSION` stays 0.9.0: an older proxy still works, it just does
+not send the firmware and still lists a sync-less network once per camera.
+
+[#69]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/69
+[#70]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/70
+[#71]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/71
 
 ## [0.9.1] — 2026-09-24
 

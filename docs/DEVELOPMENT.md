@@ -136,6 +136,6 @@ Steps:
 5. Publish a GitHub release on that tag. HACS only offers tagged releases, so
    an untagged commit reaches nobody, and a draft release reaches nobody either.
 
-While this is pre-1.0, bump the minor for anything user-visible — new
-behaviour, a dropped architecture, a changed default — and the patch for fixes
-that change nothing about how it is used.
+Since 1.0.0, bump the major for a breaking change, the minor for anything
+user-visible — new behaviour, a changed default — and the patch for fixes that
+change nothing about how it is used.
