@@ -531,10 +531,63 @@ async def test_module_never_calls_a_sign_in() -> None:
         check(name not in called, f"devices.py never calls .{name}()")
 
 
+class BlinkOwl:
+    """Named like blinkpy's stand-in for a network with no sync module."""
+
+    def __init__(self, network_id: str, enabled: bool, blink: Any) -> None:
+        self.network_id = network_id
+        self.sync_id = None
+        self.serial = None
+        self.status = enabled
+        self.blink = blink
+        self.network_info = {"network": {"armed": enabled}}
+
+    async def async_arm(self, _value: bool) -> dict[str, Any]:
+        return {"id": 1}
+
+    async def get_network_info(self) -> bool:
+        return True
+
+
+async def test_syncless_network_arm_state() -> None:
+    print("\nnetworks without a sync module")
+    with tempfile.TemporaryDirectory() as tmp:
+        client = BlinkClient({"auth_file": str(pathlib.Path(tmp) / "a.json")},
+                             pathlib.Path(tmp), None)
+        blink = FakeBlink()
+        blink.homescreen = {"networks": [{"id": 3001, "armed": False}]}
+        blink.sync = {
+            "Mini A": BlinkOwl("3001", True, blink),
+            "Mini B": BlinkOwl("3001", True, blink),
+        }
+        blink.cameras = {}
+        client.blink = blink
+        client.ready = True
+
+        rows = devices.devices_payload(client)["sync_modules"]
+        check(len(rows) == 1 and rows[0]["network_id"] == "3001",
+              "two cameras on one network make one network row")
+        check(rows[0]["armed"] is False,
+              "the network's armed state comes from the homescreen, not a camera's motion flag")
+
+        async def arm_applied() -> None:
+            blink.homescreen = {"networks": [{"id": 3001, "armed": True}]}
+
+        blink.get_homescreen = arm_applied
+        poller = DevicePoller(lambda: client)
+        row = await devices.set_sync_armed(client, poller, "3001", True)
+        check(row["armed"] is True, "arming re-reads the homescreen before verifying")
+
+        blink.homescreen = {}
+        check(devices.sync_armed(blink.sync["Mini A"]) is True,
+              "without a homescreen entry it falls back to network_info")
+
+
 async def main() -> int:
     await test_refresh_failure_never_signs_in()
     await test_backoff_and_pacing()
     await test_routes()
+    await test_syncless_network_arm_state()
     await test_camera_controls_share_the_lock()
     await test_module_never_calls_a_sign_in()
     if FAILURES:

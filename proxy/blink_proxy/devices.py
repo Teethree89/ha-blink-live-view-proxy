@@ -117,12 +117,35 @@ def _snapshot_id(camera: Any) -> str | None:
     return hashlib.sha1(image, usedforsecurity=False).hexdigest()[:12]
 
 
+# blinkpy's stand-ins for a network with no sync module (Minis, floodlights,
+# doorbells). Their network_info "armed" is one camera's motion-detection
+# `enabled` flag, not the network's arm state.
+SYNCLESS_TYPES = ("BlinkOwl", "BlinkLotus")
+
+
+def homescreen_network_armed(sync: Any) -> bool | None:
+    """The network's armed state from blinkpy's cached homescreen, if listed."""
+    homescreen = getattr(getattr(sync, "blink", None), "homescreen", None)
+    if not isinstance(homescreen, dict):
+        return None
+    for network in homescreen.get("networks") or []:
+        if isinstance(network, dict) and str(network.get("id")) == str(sync.network_id):
+            armed = network.get("armed")
+            return armed if isinstance(armed, bool) else None
+    return None
+
+
 def sync_armed(sync: Any) -> bool | None:
     """The sync module's armed state, read without blinkpy's side effects.
 
     BlinkSyncModule.arm marks the module unavailable when network_info is
-    missing, which is not something a read should do.
+    missing, which is not something a read should do. Networks without a sync
+    module report the network's state from the homescreen instead.
     """
+    if type(sync).__name__ in SYNCLESS_TYPES:
+        armed = homescreen_network_armed(sync)
+        if armed is not None:
+            return armed
     try:
         armed = sync.network_info["network"]["armed"]
     except (KeyError, TypeError):
@@ -189,7 +212,12 @@ def devices_payload(client: Any) -> dict[str, Any]:
         camera_row(client, name, camera) for name, camera in blink.cameras.items()
     ]
     cameras.sort(key=lambda row: row["slug"])
-    syncs = [sync_row(name, sync) for name, sync in blink.sync.items()]
+    # A sync-less network has one blinkpy entry per camera; the network's
+    # panel and connection sensor are the same for all of them.
+    by_network: dict[str, dict[str, Any]] = {}
+    for name, sync in blink.sync.items():
+        by_network.setdefault(str(sync.network_id), sync_row(name, sync))
+    syncs = list(by_network.values())
     syncs.sort(key=lambda row: row["network_id"])
     return {"cameras": cameras, "sync_modules": syncs}
 
@@ -474,6 +502,8 @@ async def set_sync_armed(client: Any, poller: DevicePoller, network_id: str, arm
         if not response:
             raise ActionError(f"Blink did not accept the arm change for {name}")
         await sync.get_network_info()
+        if type(sync).__name__ in SYNCLESS_TYPES:
+            await sync.blink.get_homescreen()
     if sync_armed(sync) is not bool(armed):
         raise ActionError(
             f"Blink accepted the arm change for {name} but did not apply it. "
