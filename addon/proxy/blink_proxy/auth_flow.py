@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from .config import resolve_path
+
 LOGGER = logging.getLogger("blink-liveview-proxy")
 
 # Matches PIN_WAIT_SECONDS in blink.py: the add-on's legacy option poller runs
@@ -35,6 +37,7 @@ PUBLIC_MESSAGES = {
     "credential_failure": "Blink rejected the login or could not start authentication.",
     "invalid_pin": "Blink rejected the PIN. Start a new login and use the newly issued PIN.",
     "failure": "Blink authentication failed. Start a new login and try again.",
+    "reset": "Blink authentication was cleared. Start a new login to reconnect.",
 }
 
 class AuthFlowError(RuntimeError):
@@ -81,6 +84,10 @@ class AuthenticationController:
 
         self.config = config
         self.config_base = config_base
+        self.auth_file = resolve_path(config["auth_file"], config_base)
+        # Persist a reset until a deliberate browser login succeeds: otherwise
+        # add-on username/password options would silently log back in on reboot.
+        self.reset_marker = self.auth_file.with_name(self.auth_file.name + ".reset")
         self.startup_pin = startup_pin
         self.client_factory = client_factory
         self.legacy_pin_waiter = legacy_pin_waiter
@@ -127,7 +134,10 @@ class AuthenticationController:
         }
 
     async def start_startup_login(self) -> dict[str, Any]:
-        """Start the cache/env/add-on-compatible login without blocking HTTP."""
+        """Start cached/legacy login unless the user deliberately reset it."""
+        if self.reset_marker.exists():
+            self.state = "idle"
+            return self.status()
         return await self._start_attempt(
             username=None,
             password=None,
@@ -329,6 +339,8 @@ class AuthenticationController:
             if previous is not None and previous is not candidate:
                 await previous.close()
             if self.challenge_id == challenge_id:
+                if fresh_login:
+                    self.reset_marker.unlink(missing_ok=True)
                 self.failure_code = None
                 self.state = "success"
         finally:
@@ -339,6 +351,55 @@ class AuthenticationController:
                 self._candidate = None
                 self._allow_legacy_pin = False
                 self._task = None
+
+    async def reset_authentication(self) -> dict[str, Any]:
+        """Clear Blink sessions and cache; block automatic login until manual sign-in.
+
+        This deliberately leaves the *proxy API token* and configuration alone.
+        The marker is written before cancellation so a failure or restart
+        cannot immediately sign back in using add-on startup credentials.
+        """
+        async with self._lock:
+            if self._closed:
+                raise RuntimeError("Authentication controller is closed")
+            self.reset_marker.parent.mkdir(parents=True, exist_ok=True)
+            self.reset_marker.touch(mode=0o600)
+
+            task = self._task
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            candidate = self._candidate
+            if candidate is not None and candidate is not self.client:
+                await candidate.close()
+            current = self.client
+            # Drop the proxy's live client before closing the Blink session.
+            self.client = None
+            if self.on_client is not None:
+                result = self.on_client(None)
+                if inspect.isawaitable(result):
+                    await result
+            if current is not None:
+                revoke = getattr(current, "revoke_auth", None)
+                if callable(revoke):
+                    revoke()
+                await current.close()
+            self.auth_file.unlink(missing_ok=True)
+
+            self.state = "idle"
+            self.failure_code = "reset"
+            self.challenge_id = None
+            self.started_at = None
+            self.deadline = None
+            self._candidate = None
+            self._task = None
+            self._pin_future = None
+            self._pin_submitted = False
+            self._allow_legacy_pin = False
+            LOGGER.info("Cleared Blink authentication; manual login required.")
+            return self.status()
 
     async def close(self) -> None:
         """Cancel an in-memory challenge and close all owned Blink sessions."""
