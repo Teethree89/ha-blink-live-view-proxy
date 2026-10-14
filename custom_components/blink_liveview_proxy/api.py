@@ -192,6 +192,14 @@ class BlinkLiveviewProxyClient:
             json_body={"challenge_id": challenge_id},
         )
 
+    async def async_reset_auth(self) -> dict[str, Any]:
+        """Discard the proxy's Blink session, with a required confirmation."""
+        return await self._request_json(
+            "/auth/reset",
+            method="POST",
+            json_body={"confirm": "RESET BLINK AUTH"},
+        )
+
     def stream_url(self, camera: dict[str, Any]) -> str | None:
         """Return the stream URL HA should give to ffmpeg/stream."""
         stream_url = camera.get("mpegts_url") or camera.get("hls_url")
