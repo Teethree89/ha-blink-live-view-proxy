@@ -125,6 +125,25 @@ removes the old exit-and-restart cycle that could text you a code per restart.
 One consequence: `serve` never prompts on a terminal any more. Use the panel, or
 the `list` command below, to answer a PIN.
 
+### Reset all Blink authentication (destructive)
+
+The Authentication tab offers **Reset all Blink authentication…**, with a
+typed `RESET BLINK AUTH` confirmation. Use it to deliberately start fresh
+after a failed login or corrupted saved session. It:
+
+- Cancels any open challenge/PIN, ends active HLS streams, closes the Blink
+  client and deletes the saved Blink OAuth session (`blink-auth.json`).
+- Prevents automatic startup login, even when the add-on still has a username
+  and password saved, until a **new manual browser login succeeds**.
+- Preserves the proxy API token, integration connection, cameras/configuration,
+  add-on credentials stored in Supervisor options, and recorded clips.
+
+This button **cannot fix an invalid proxy API token**, because Home Assistant
+must first authenticate to the proxy to invoke it. Repair the token through
+integration **Configure** or reauthentication first. Resetting Blink auth
+disables live views until a new Blink login succeeds; it does not clear an
+upstream Blink account lockout or rate limit.
+
 #### If the panel will not start a login
 
 The panel diagnoses this from what the proxy answered, and shows the fix. It
