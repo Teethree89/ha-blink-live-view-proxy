@@ -136,6 +136,9 @@ jobs:
       - name: Browser authentication tests
         run: python tests/test_authentication.py
 
+      - name: Authentication reset safety tests
+        run: python tests/test_auth_reset.py
+
       - name: Browser token refresh tests
         run: python tests/test_browser_token.py
 
