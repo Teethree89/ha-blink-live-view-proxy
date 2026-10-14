@@ -205,6 +205,29 @@ class BlinkProxyAuthPanel extends HTMLElement {
     }
   }
 
+  async _resetAuth() {
+    const confirmation = window.prompt(
+      "Reset all Blink authentication? This ends live streams, cancels the current PIN, deletes the saved Blink session, and disables automatic Blink login after restarts until you sign in again. The proxy API token and Home Assistant configuration are kept. Type RESET BLINK AUTH to confirm."
+    );
+    if (confirmation !== "RESET BLINK AUTH") return;
+    this._busy = true;
+    this._render();
+    try {
+      this._state = await this._api("POST", "reset", { confirm: confirmation });
+      this._showLogin = true;
+      this._notice = "Blink authentication cleared. Sign in again below.";
+      await this._refreshPanel();
+    } catch (error) {
+      this._notice = this._failureFrom(error, {
+        message: "Reset failed. Check the proxy connection and its API token.",
+      }).message;
+    } finally {
+      this._busy = false;
+      this._render();
+      this._schedule();
+    }
+  }
+
   async _submitPin(event) {
     event.preventDefault();
     const input = event.currentTarget.elements.pin;
@@ -620,6 +643,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
       ${active && !waiting ? `<p>Please wait. Do not restart the proxy while its OAuth session is open.</p><button type="button" class="secondary" id="cancel" ${this._busy ? "disabled" : ""}>Cancel</button>` : ""}
       ${showLogin ? `<form id="login-form"><h3>${this._state.authenticated ? "Reauthenticate deliberately" : "Start Blink login"}</h3><label for="username">Blink email</label><input id="username" name="username" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="320" required><label for="password">Blink password</label><input id="password" name="password" type="password" autocomplete="off" maxlength="1024" required><button type="submit" ${this._busy ? "disabled" : ""}>Start login</button></form>` : ""}
       ${state === "success" && !showLogin ? `<button type="button" id="reauth">Reauthenticate</button>` : ""}
+      <div class="auth-reset">
+        <h3>Reset Blink authentication</h3>
+        <p class="muted">Use this to start completely fresh: end active streams, cancel any PIN challenge, delete saved Blink login tokens, and prevent automatic sign-in on restart until a new manual login succeeds. The proxy API token, Home Assistant connection, and add-on username/password options are NOT erased.</p>
+        <button type="button" class="secondary" id="reset-auth" ${this._busy ? "disabled" : ""}>Reset all Blink authentication…</button>
+      </div>
     </ha-card>`;
   }
 
@@ -669,6 +697,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.getElementById("login-form")?.addEventListener("submit", (event) => this._startLogin(event));
     this.shadowRoot.getElementById("pin-form")?.addEventListener("submit", (event) => this._submitPin(event));
     this.shadowRoot.getElementById("cancel")?.addEventListener("click", () => this._cancel());
+    this.shadowRoot.getElementById("reset-auth")?.addEventListener("click", () => this._resetAuth());
     this.shadowRoot.getElementById("reauth")?.addEventListener("click", () => { this._showLogin = true; this._render(); });
     this.shadowRoot.getElementById("recheck")?.addEventListener("click", () => this._recheck());
     this.shadowRoot.getElementById("update")?.addEventListener("click", () => this._startUpdate());
