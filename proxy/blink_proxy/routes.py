@@ -158,6 +158,29 @@ async def auth_cancel_handler(request: web.Request) -> web.Response:
         ) from err
     return _auth_response(controller)
 
+async def auth_reset_handler(request: web.Request) -> web.Response:
+    """Permanently discard Blink auth while keeping the proxy access token.
+
+    The request must carry both a bearer token and an explicit confirmation
+    string, even when invoked without the Home Assistant admin dashboard.
+    """
+    check_auth_control_authorized(request)
+    body = await _auth_json_body(request)
+    if body != {"confirm": "RESET BLINK AUTH"}:
+        raise web.HTTPBadRequest(
+            text="Explicit Blink authentication reset confirmation required\n",
+            headers=AUTH_RESPONSE_HEADERS,
+        )
+    # Finish HLS sessions before closing Blink; future media requests will
+    # fail closed while the auth controller has no active client.
+    manager = request.app.get("hls_manager")
+    if manager is not None:
+        await manager.stop_all()
+    controller: AuthenticationController = request.app["auth_controller"]
+    await controller.reset_authentication()
+    return _auth_response(controller)
+
+
 async def index_handler(request: web.Request) -> web.Response:
     check_authorized(request)
     rows = _require_client(request).list_cameras()
@@ -1073,6 +1096,7 @@ async def make_app(
     app.router.add_post("/auth/login", auth_login_handler)
     app.router.add_post("/auth/pin", auth_pin_handler)
     app.router.add_post("/auth/cancel", auth_cancel_handler)
+    app.router.add_post("/auth/reset", auth_reset_handler)
     app.router.add_post("/update", update_handler)
     app.router.add_get("/update/log", update_log_handler)
     app.router.add_get("/cameras", cameras_handler)
