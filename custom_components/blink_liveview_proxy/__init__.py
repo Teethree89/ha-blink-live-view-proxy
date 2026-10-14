@@ -31,6 +31,7 @@ from .const import (
     LEGACY_FRONTEND_RESOURCE_URL,
     PLATFORMS,
 )
+from .config_flow import _async_verified_handoff_token
 from .coordinator import BlinkLiveviewProxyCoordinator
 from .lovelace import is_writable, resource_collection
 from .views import async_register_views
@@ -216,6 +217,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_auth_panel(hass)
     await _async_register_frontend_resource(hass)
     merged = {**entry.data, **entry.options}
+    # An add-on restart rewrites its token handoff, but HA config entries
+    # otherwise keep the old token forever. Reconcile only for the same
+    # internal add-on URL, and only when the new token passes /auth/status.
+    # This runs before the update listener is registered, avoiding a reload
+    # cycle while setting up a recovered entry.
+    shared_token = await _async_verified_handoff_token(
+        hass, merged[CONF_BASE_URL], merged.get(CONF_TOKEN)
+    )
+    if shared_token:
+        if CONF_TOKEN in entry.options:
+            hass.config_entries.async_update_entry(
+                entry, options={**entry.options, CONF_TOKEN: shared_token}
+            )
+        else:
+            hass.config_entries.async_update_entry(
+                entry, data={**entry.data, CONF_TOKEN: shared_token}
+            )
+        merged[CONF_TOKEN] = shared_token
+        LOGGER.info("Reconciled proxy API token with the running add-on.")
+
     client = BlinkLiveviewProxyClient(
         async_get_clientsession(hass),
         merged[CONF_BASE_URL],
