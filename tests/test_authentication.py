@@ -319,6 +319,16 @@ async def test_blink_client_persistence() -> None:
                 json.loads(auth_file.read_text()).get("refresh_token") == "rotated-refresh",
                 "later token refreshes still reach the auth cache",
             )
+            # A reset closes the active session and removes its persisted
+            # cache. A delayed BlinkPy refresh must never recreate it.
+            client.revoke_auth()
+            auth_file.unlink()
+            seen["auth"].login_attributes["refresh_token"] = "stale-after-reset"
+            seen["auth"].callback()
+            check(
+                not auth_file.exists(),
+                "revoked BlinkPy callbacks cannot recreate cleared auth cache",
+            )
             await client.close()
     finally:
         blink_module.Auth, blink_module.Blink, blink_module.create_client_session = original
