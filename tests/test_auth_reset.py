@@ -150,10 +150,17 @@ def test_ha_contract() -> None:
           "HA validates confirmation before forwarding")
     check('payload = await client.async_reset_auth()' in views,
           "HA forwards the reset through its authenticated proxy client")
-    check('"POST", "reset", { confirm: confirmation }' in frontend,
-          "dashboard sends reset confirmation in a POST body")
-    check('id="reset-auth"' in frontend and "window.prompt(" in frontend,
-          "dashboard requires typed confirmation")
+    check('const RESET_CONFIRMATION = "RESET BLINK AUTH"' in frontend,
+          "dashboard asks for the same words HA and the proxy insist on")
+    check('"POST", "reset", { confirm: RESET_CONFIRMATION }' in frontend,
+          "dashboard sends the confirmation in a POST body")
+    check("window.prompt(" not in frontend,
+          "the typed confirmation is on the page, not a native prompt a webview may drop")
+    check('id="reset-confirm"' in frontend and 'id="reset-go"' in frontend
+          and "go.disabled = this._busy || typed.value !== RESET_CONFIRMATION" in frontend,
+          "the reset button stays disabled until the exact words are typed")
+    check("this._resetOpen," in frontend,
+          "and opening the confirmation is part of what makes the panel repaint")
     check('"/auth/reset"' in api, "proxy reset client uses the protected auth endpoint")
 
 
