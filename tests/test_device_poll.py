@@ -22,7 +22,9 @@ import pathlib
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -33,6 +35,7 @@ sys.path.insert(0, str(ROOT / "proxy"))
 from blinkpy import api as blink_api  # noqa: E402
 from blinkpy.auth import Auth  # noqa: E402
 from blinkpy.blinkpy import Blink  # noqa: E402
+from blinkpy.camera import BlinkCamera  # noqa: E402
 
 from blink_proxy import devices  # noqa: E402
 from blink_proxy.blink import BlinkClient  # noqa: E402
@@ -43,7 +46,7 @@ from blink_proxy.devices import (  # noqa: E402
     clamp_interval,
 )
 sys.path.insert(0, str(ROOT / "tests"))
-from blink_fakes import FakeBlink  # noqa: E402
+from blink_fakes import FakeBlink, FakeMedia  # noqa: E402
 from blink_proxy.routes import (  # noqa: E402
     devices_handler,
     motion_detection_handler,
@@ -345,6 +348,8 @@ async def test_routes() -> None:
             check(driveway["snapshot_url"] == "/cameras/driveway/snapshot.jpg"
                   and driveway["snapshot_id"],
                   "each camera names its snapshot and its current id")
+            check(driveway["snapshot_taken"] == "1970-01-01T00:00:01+00:00",
+                  "and says when Blink took it, from the address's own timestamp")
             check(data["sync_modules"] == [{
                 "name": "114 Cooper", "network_id": "2001", "sync_id": "77",
                 "serial": "SYNC-SERIAL", "status": "online", "armed": True}],
@@ -391,6 +396,8 @@ async def test_routes() -> None:
             row = await resp.json()
             check(resp.status == 200 and camera.snaps == 1, "a new picture is taken")
             check(row["snapshot_id"] != before_id, "and the snapshot id moves")
+            check(row["snapshot_taken"] == "1970-01-01T00:00:02+00:00",
+                  "and so does the time it was taken")
             resp = await http.get("/cameras/driveway/snapshot.jpg", headers=bearer)
             check(await resp.read() == b"JPEG-2", "the new picture is what is served")
 
@@ -439,6 +446,11 @@ async def test_routes() -> None:
             same_id = [r for r in row["cameras"] if r["slug"] == "driveway"][0]["snapshot_id"]
             check(served == b"JPEG-3" and same_id == devices._snapshot_id(camera),
                   "and the snapshot id still names the image actually served")
+            taken = [r for r in row["cameras"] if r["slug"] == "driveway"][0]["snapshot_taken"]
+            check(camera.thumbnail.endswith("ts=4"),
+                  "Blink's address has moved on to a picture that never arrived")
+            check(taken == "1970-01-01T00:00:03+00:00",
+                  "and the time stays with the picture served, not with the address")
 
             sync = blink.sync["114 Cooper"]
             original = sync.get_network_info
@@ -531,6 +543,72 @@ async def test_module_never_calls_a_sign_in() -> None:
         check(name not in called, f"devices.py never calls .{name}()")
 
 
+def blink_camera(thumbnail: Any) -> tuple[BlinkCamera, dict[str, Any]]:
+    """A real blinkpy camera with just enough sync module to run update_images.
+
+    Only the download is faked. The address is built by blinkpy itself, so
+    this fails if a blinkpy upgrade changes what the proxy reads the time from.
+    """
+    sync = SimpleNamespace(
+        name="114 Cooper", network_id="7", motion={}, last_records={},
+        blink=SimpleNamespace(account_id=42),
+        urls=SimpleNamespace(base_url="https://rest-u011.immedia-semi.com"),
+    )
+    config = {"name": "Driveway", "id": 909058, "network_id": 7,
+              "type": "catalina", "thumbnail": thumbnail}
+    camera = BlinkCamera(sync)
+    camera.extract_config_info(config)
+    camera.get_media = AsyncMock(return_value=FakeMedia(200, b"JPEG"))
+    return camera, config
+
+
+async def test_snapshot_taken() -> None:
+    print("\nwhen the picture on offer was taken")
+    camera, config = blink_camera(1775306079)
+    await camera.update_images(config)
+    check("ts=1775306079" in camera.thumbnail,
+          f"blinkpy puts Blink's timestamp in the address: {camera.thumbnail}")
+    image_id = devices._snapshot_id(camera)
+    check(devices._snapshot_taken(camera, image_id) == "2026-04-04T12:34:39+00:00",
+          "and the time is read from it, in UTC")
+
+    older, older_config = blink_camera(
+        "/media/production/account/42/network/7/camera/909058/thumbnail/thumbnail"
+    )
+    await older.update_images(older_config)
+    check(devices._snapshot_id(older) is not None
+          and devices._snapshot_taken(older, devices._snapshot_id(older)) is None,
+          "an older answer has no timestamp, and says so instead of guessing")
+
+    for label, url in (
+        ("no address", None),
+        ("something that is not an address", 5),
+        ("an address without a query", "https://x/t.jpg"),
+        ("a ts that is not a number", "https://x/t.jpg?ts=soon"),
+        ("a ts of zero", "https://x/t.jpg?ts=0"),
+        ("a negative ts", "https://x/t.jpg?ts=-5"),
+        ("a ts beyond any calendar", "https://x/t.jpg?ts=99999999999999999999"),
+        ("an address that does not parse", "http://[::1/t.jpg?ts=5"),
+    ):
+        probe = SimpleNamespace(thumbnail=url)
+        try:
+            got = devices._snapshot_taken(probe, "id")
+        except Exception as err:  # noqa: BLE001 - the point is that nothing escapes
+            got = f"raised {type(err).__name__}"
+        check(got is None, f"{label} gives None and never an error ({got})")
+
+    probe = SimpleNamespace(thumbnail="https://x/t.jpg?ts=100")
+    first = devices._snapshot_taken(probe, "aaa")
+    probe.thumbnail = "https://x/t.jpg?ts=200"
+    check(first == "1970-01-01T00:01:40+00:00"
+          and devices._snapshot_taken(probe, "aaa") == first,
+          "a newer address with the same picture leaves the time where it was")
+    check(devices._snapshot_taken(probe, "bbb") == "1970-01-01T00:03:20+00:00",
+          "a new picture takes the time of the address it came with")
+    check(devices._snapshot_taken(probe, None) is None,
+          "with no picture there is nothing to date")
+
+
 class BlinkOwl:
     """Named like blinkpy's stand-in for a network with no sync module."""
 
@@ -588,6 +666,7 @@ async def main() -> int:
     await test_backoff_and_pacing()
     await test_routes()
     await test_syncless_network_arm_state()
+    await test_snapshot_taken()
     await test_camera_controls_share_the_lock()
     await test_module_never_calls_a_sign_in()
     if FAILURES:

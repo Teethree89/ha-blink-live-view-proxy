@@ -176,7 +176,7 @@ are built from.
 - `POST /sync/{network_id}/arm` with `{"armed": true|false}`
 
 `/devices` answers from memory — each camera's motion, battery, temperature,
-Wi-Fi and snapshot id, each sync module's armed state, and the poll's own
+Wi-Fi and snapshot, each sync module's armed state, and the poll's own
 state under `poll` — and never contacts Blink itself. Reading it is what keeps
 the proxy refreshing Blink, every `poll` seconds (clamped to `60-3600`); with
 nothing reading it for three intervals, and at least fifteen minutes, the
@@ -187,6 +187,21 @@ retried at double the wait each time, up to an hour. `/status` includes the
 same `device_poll` object for a caller with the token.
 
 `snapshot.jpg` is the camera's cached thumbnail, or `404` when there is none.
+A camera's row describes that picture in three fields:
+
+- `snapshot_id` changes whenever the picture does. It hashes the image, not
+  its address, because blinkpy records a new address even when the download
+  behind it fails.
+- `snapshot_taken` is when Blink says the picture was taken, as an ISO time in
+  UTC. Blink puts it in the thumbnail's address (`…/thumbnail.jpg?ts=…`) and
+  the proxy keeps it with the image that arrived with it, so a newer address
+  whose picture never downloaded does not make the old one look fresh. It is
+  `null` when there is no picture, when Blink's answer carried no time, and
+  from a proxy that predates it.
+- `last_record` is blinkpy's newest clip time since this proxy started. It is
+  `null` after every restart and for a camera that has recorded nothing since,
+  so it cannot tell a camera that is offline from one that is idle.
+
 The three `POST` routes send a command to Blink, wait for it to complete, and
 answer with the camera's or sync module's row as Blink then reports it. `409`
 means Blink called the camera busy, which it does for as long as any client

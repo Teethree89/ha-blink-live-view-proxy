@@ -75,6 +75,29 @@ Wi-Fi or voltage for Doorbells and Minis, so those three are not created for
 them. The live view's loading frame and the snapshot-refresh button use the
 snapshot camera.
 
+The snapshot camera also says how old its picture is. `snapshot_taken` is when
+Blink says the picture was taken, as an ISO time in UTC; `snapshot_id` only
+changes when the picture does, so anything built on it alone measures when Home
+Assistant noticed a new picture, not when the camera took it. A template sensor
+for the age:
+
+```yaml
+template:
+  - sensor:
+      - name: Driveway picture age
+        device_class: duration
+        unit_of_measurement: min
+        availability: "{{ state_attr('camera.blink_proxy_driveway', 'snapshot_taken') is string }}"
+        state: >
+          {{ ((now() - as_datetime(state_attr('camera.blink_proxy_driveway', 'snapshot_taken'))).total_seconds() / 60) | round(0) }}
+```
+
+`snapshot_taken` is empty while there is no picture, for a camera whose Blink
+answer carries no time, and with a proxy that predates it. `last_record`, on the
+same entity, is the newest clip the proxy has seen since it started: empty after
+every restart and for any camera that has recorded nothing since, so an empty
+one does not mean the camera is offline.
+
 `Blink refresh interval in seconds`, under Configure (default `300`, range
 `60-3600`), is how often the proxy refreshes Blink. Motion is as coarse as the
 interval: a clip recorded between two refreshes shows up at the second one.
