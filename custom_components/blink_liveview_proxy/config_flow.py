@@ -126,6 +126,54 @@ async def _async_handoff_url(hass: HomeAssistant) -> str:
         return ""
 
 
+
+def token_update(
+    entry: config_entries.ConfigEntry, token: str
+) -> dict[str, dict[str, Any]]:
+    """The `async_update_entry` argument that makes `token` the one in force.
+
+    Setup runs on {**entry.data, **entry.options}, so options win. Configure
+    saves every field into options, token included, and from then on a token
+    written to `data` alone is never read again: the update reports success,
+    the entry reloads on the old token, and the proxy refuses it again. Write
+    the new token to wherever the current one lives.
+    """
+    if CONF_TOKEN in entry.options:
+        return {"options": {**entry.options, CONF_TOKEN: token}}
+    return {"data": {**entry.data, CONF_TOKEN: token}}
+
+
+async def _async_verified_handoff_token(
+    hass: HomeAssistant, base_url: str, current_token: str | None
+) -> str:
+    """Use a rotated add-on token only for its own URL and after validation.
+
+    The handoff file is rewritten whenever the add-on starts, but existing
+    config entries keep the token captured during setup. Never take a handoff
+    token for a manually configured or unrelated proxy. Even when the URL
+    matches, validate against the live /auth/status route before using it.
+    """
+    try:
+        configured_url = normalize_base_url(base_url)
+    except ProxyConnectionError:
+        return ""
+    shared_url = await _async_handoff_url(hass)
+    if not shared_url or configured_url != shared_url:
+        return ""
+    shared_token = await _async_handoff_token(hass)
+    if not shared_token or shared_token == (current_token or "").strip():
+        return ""
+
+    client = BlinkLiveviewProxyClient(
+        async_get_clientsession(hass), configured_url, shared_token
+    )
+    try:
+        await client.async_get_auth_status()
+    except (ProxyAuthError, ProxyConnectionError):
+        return ""
+    return shared_token
+
+
 def _supervisor_addon_url(hass: HomeAssistant) -> str:
     """Derive the add-on's internal address by asking Supervisor for its slug.
 
@@ -271,11 +319,15 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if entry is None:
             return self.async_abort(reason="reauth_failed")
 
+        # What setup runs on, not what first setup stored: a URL or token
+        # changed in Configure lives in options, and that is the proxy this
+        # token has to be good for.
+        current = {**entry.data, **entry.options}
         errors: dict[str, str] = {}
         if user_input is not None:
-            data = {**entry.data, CONF_TOKEN: user_input.get(CONF_TOKEN, "").strip()}
+            token = user_input.get(CONF_TOKEN, "").strip()
             try:
-                await _validate_input(self.hass, data)
+                await _validate_input(self.hass, {**current, CONF_TOKEN: token})
             except ProxyAuthError:
                 errors["base"] = "invalid_auth"
             except ProxyConnectionError:
@@ -284,7 +336,9 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 LOGGER.exception("Unexpected Blink live-view proxy reauth error")
                 errors["base"] = "unknown"
             else:
-                self.hass.config_entries.async_update_entry(entry, data=data)
+                self.hass.config_entries.async_update_entry(
+                    entry, **token_update(entry, token)
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
@@ -295,7 +349,7 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(
                         CONF_TOKEN,
-                        default=shared or entry.data.get(CONF_TOKEN, ""),
+                        default=shared or current.get(CONF_TOKEN, ""),
                     ): str
                 }
             ),
@@ -345,8 +399,19 @@ class BlinkLiveviewProxyOptionsFlow(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title="", data=data)
 
+        defaults = user_input or current
+        if user_input is None:
+            # Configure previously displayed the saved (possibly obsolete)
+            # token instead of the token the add-on currently shared. Check
+            # that the new value really works before offering it in the form.
+            shared = await _async_verified_handoff_token(
+                self.hass, current[CONF_BASE_URL], current.get(CONF_TOKEN)
+            )
+            if shared:
+                defaults = {**current, CONF_TOKEN: shared}
+
         return self.async_show_form(
             step_id="init",
-            data_schema=_schema(user_input or current, blink_options=True),
+            data_schema=_schema(defaults, blink_options=True),
             errors=errors,
         )
