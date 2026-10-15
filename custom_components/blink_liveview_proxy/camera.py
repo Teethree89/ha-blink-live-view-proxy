@@ -212,6 +212,9 @@ class BlinkProxySnapshotCamera(BlinkProxyCameraEntity, Camera):
         return {
             "snapshot_of": self._slug,
             "snapshot_id": row.get("snapshot_id"),
+            # When Blink says this picture was taken, not when Home Assistant
+            # noticed it. An older proxy sends nothing, and this stays None.
+            "snapshot_taken": row.get("snapshot_taken"),
             "last_record": row.get("last_record"),
         }
 

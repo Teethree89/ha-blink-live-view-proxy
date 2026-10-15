@@ -233,6 +233,33 @@ async def test_snapshot_button_and_camera_image(
     assert image.content == b"JPEG-2", "a new picture replaces the cached one"
 
 
+async def test_snapshot_camera_says_when_blink_took_the_picture(
+    hass: HomeAssistant, fake_proxy: Any
+) -> None:
+    """The age of the picture on offer, which snapshot_id alone cannot give.
+
+    snapshot_id says that the picture changed. Only the time inside Blink's own
+    address says when it was taken, and without it anything built on the
+    entity can only measure when Home Assistant noticed (#75).
+    """
+    await _setup(hass, fake_proxy)
+    snapshot = "camera.blink_proxy_driveway"
+    assert hass.states.get(snapshot).attributes["snapshot_taken"] == (
+        "1970-01-01T00:00:01+00:00"
+    )
+
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.blink_proxy_driveway_refresh_snapshot"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert hass.states.get(snapshot).attributes["snapshot_taken"] == (
+        "1970-01-01T00:00:02+00:00"
+    ), "a new picture brings the time it was taken"
+
+
 async def test_live_view_loading_frame_uses_own_snapshot(
     hass: HomeAssistant, fake_proxy: Any
 ) -> None:

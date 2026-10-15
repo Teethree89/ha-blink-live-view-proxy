@@ -32,7 +32,9 @@ import asyncio
 import hashlib
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlsplit
 
 from blinkpy.auth import (
     BlinkTwoFARequiredError,
@@ -117,6 +119,52 @@ def _snapshot_id(camera: Any) -> str | None:
     return hashlib.sha1(image, usedforsecurity=False).hexdigest()[:12]
 
 
+def _thumbnail_time(camera: Any) -> datetime | None:
+    """The capture time Blink puts in a thumbnail's address, in UTC.
+
+    blinkpy builds the address from Blink's answer, and when Blink sends only
+    a timestamp the address carries it:
+
+        .../thumbnail/thumbnail.jpg?ts=1775306079&ext=
+
+    Blink's older answers have no ts, and give None here. So does anything
+    that is not a plausible time, because this runs for every camera on every
+    read of /devices and must never be the reason that answer fails.
+    """
+    url = getattr(camera, "thumbnail", None)
+    if not isinstance(url, str):
+        return None
+    try:
+        values = parse_qs(urlsplit(url).query).get("ts")
+        stamp = int(values[0]) if values else 0
+        return datetime.fromtimestamp(stamp, tz=timezone.utc) if stamp > 0 else None
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def _snapshot_taken(camera: Any, image_id: str | None) -> str | None:
+    """When Blink says the picture on offer was taken, as an ISO time in UTC.
+
+    The time is kept with the picture it arrived with, not read off the
+    address each time. blinkpy records a new address even when downloading
+    the image behind it fails (see _snapshot_id), so a time read straight from
+    the address would be younger than the picture being served - the one
+    mistake an age is no use with, and worst for a camera that is not
+    delivering pictures, which is when anyone asks.
+
+    Home Assistant reads this every thirty seconds and Blink is polled no more
+    than once a minute, so a new picture is seen alongside the address it came
+    from, before the next refresh can move the address on.
+    """
+    if image_id is None:
+        return None
+    seen = getattr(camera, "_proxy_snapshot_seen", None)
+    if seen is None or seen[0] != image_id:
+        seen = (image_id, _thumbnail_time(camera))
+        camera._proxy_snapshot_seen = seen
+    return seen[1].isoformat() if seen[1] is not None else None
+
+
 # blinkpy's stand-ins for a network with no sync module (Minis, floodlights,
 # doorbells). Their network_info "armed" is one camera's motion-detection
 # `enabled` flag, not the network's arm state.
@@ -161,6 +209,7 @@ def camera_row(client: Any, name: str, camera: Any) -> dict[str, Any]:
     if _number_or_none(temperature) is None:
         temperature = getattr(camera, "temperature", None)
     sync = getattr(camera, "sync", None)
+    image_id = _snapshot_id(camera)
     return {
         "slug": slug,
         "name": name,
@@ -184,8 +233,12 @@ def camera_row(client: Any, name: str, camera: Any) -> dict[str, Any]:
         "sync_signal_strength": _number_or_none(
             getattr(camera, "sync_signal_strength", None)
         ),
+        # blinkpy's newest clip seen since this proxy started. Empty after every
+        # restart and for a camera that has recorded nothing since, so it says
+        # nothing about whether a camera is alive.
         "last_record": getattr(camera, "last_record", None),
-        "snapshot_id": _snapshot_id(camera),
+        "snapshot_id": image_id,
+        "snapshot_taken": _snapshot_taken(camera, image_id),
         "snapshot_url": f"/cameras/{slug}/snapshot.jpg",
     }
 
