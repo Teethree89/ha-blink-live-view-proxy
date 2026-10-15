@@ -9,6 +9,88 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [1.1.0] — 2026-10-15
+
+A way out of a bad Blink sign-in, a time on every camera's picture, and a fix
+for an integration that kept a stale proxy token. Update the integration and
+the proxy together.
+
+### Added
+
+- **Reset all Blink authentication, from the Authentication tab** ([#77],
+  prompted by [#74]). When a saved Blink session went bad there was no way to
+  discard it and start clean from the browser. The admin-only panel now offers
+  **Reset all Blink authentication…**, with the confirmation typed on the page
+  (`RESET BLINK AUTH`) rather than in a native prompt, which some webviews
+  hand back as nothing. A reset ends live streams, cancels any open PIN
+  challenge, deletes the saved Blink session, and blocks automatic sign-in on
+  restart until a new manual login succeeds. It keeps the proxy API token, the
+  Home Assistant connection, the camera configuration, clips, and any add-on
+  username and password. It does not clear an upstream Blink lockout, and it
+  cannot get round a rejected proxy token, because Home Assistant has to
+  authenticate to the proxy to ask. Expect Blink to text a new 2FA code at the
+  next sign-in. The proxy route is `POST /auth/reset`: bearer token only, with
+  the exact confirmation in the body (`docs/API.md`). Exercised end to end on
+  a live account: reset, sign-in with a new code, and a restart that came back
+  on the new session. This needs the 1.1.0 proxy; an older one answers with
+  the panel's existing "outdated proxy" message.
+- **`snapshot_taken`: when Blink took the picture a camera is showing**
+  ([#78], reported by @fritzzetik in [#75]). Each camera's `/devices` row
+  carries the time, in UTC, and so does the snapshot camera as an attribute
+  beside `snapshot_id`, so a template sensor can show how old the picture is.
+  Blink records the capture time only in the thumbnail's address and nothing
+  read it, so anything built on `snapshot_id` could measure only when Home
+  Assistant noticed a new picture. The time is kept with the picture it
+  arrived with rather than read off the address each time: blinkpy records a
+  new address even when the download behind it fails, and reading it straight
+  off would make a stale picture look fresh. No extra Blink traffic; it comes
+  from the address blinkpy already holds. `docs/CONFIGURATION.md` has a
+  working template sensor. With an older proxy the attribute stays empty.
+
+### Fixed
+
+- **A stale proxy token after the add-on restarts, and re-authentication that
+  did not stick** (reported by @tkfjdfcrtb-ui in [#74], addressed in [#76]).
+  The add-on rewrites the token it shares on every start, but a configured
+  entry kept the token it was first given, and Configure went on offering the
+  saved one. Re-authentication wrote the new token where setup does not read
+  it, so after one visit to Configure it reported success, reloaded on the old
+  token, and asked again. It now validates against, and writes to, the
+  settings setup actually uses. Setup and Configure also pick up the add-on's
+  shared token, but only for the same add-on address and only once the proxy's
+  `/auth/status` accepts it; an unchanged, rejected or unreachable token
+  leaves the stored one alone. This fixes the stale-token paths that could be
+  reproduced, not every 401: a wrong target proxy or invalid Blink credentials
+  are different problems, and the Blink OAuth 401 in that report is upstream.
+  It still needs confirming on a real add-on, so [#74] stays open.
+
+### Documentation
+
+- **What `last_record` can and cannot tell you.** blinkpy sets it while
+  refreshing, from clips newer than the previous refresh, and never at start,
+  so it is empty after every proxy restart and for any camera that has
+  recorded nothing since. It cannot tell an offline camera from an idle one.
+- **A reset means a fresh 2FA code.** Said in `docs/OPERATIONS.md` and the
+  add-on's `DOCS.md`: the reset forgets the device identity Blink had
+  verified, so the next sign-in is a new device.
+
+### Not fixed in this release
+
+- **Why `thumbnail` was empty on every camera of one install** ([#75]).
+  blinkpy assigns it on each update and warns when Blink's camera
+  configuration has none, so this needs that install's `/devices` output. If
+  Blink sends no thumbnail there, `snapshot_taken` will be empty too.
+
+`MINIMUM_PROXY_VERSION` stays 0.9.0: an older proxy still works. It shows the
+"outdated proxy" message on the Reset button and sends no `snapshot_taken`,
+and the token fix lives in the integration.
+
+[#74]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/74
+[#75]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/75
+[#76]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/76
+[#77]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/77
+[#78]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/78
+
 ## [1.0.0] — 2026-10-09
 
 The first stable release, and the version submitted to the HACS default store.
