@@ -127,6 +127,22 @@ async def _async_handoff_url(hass: HomeAssistant) -> str:
 
 
 
+def token_update(
+    entry: config_entries.ConfigEntry, token: str
+) -> dict[str, dict[str, Any]]:
+    """The `async_update_entry` argument that makes `token` the one in force.
+
+    Setup runs on {**entry.data, **entry.options}, so options win. Configure
+    saves every field into options, token included, and from then on a token
+    written to `data` alone is never read again: the update reports success,
+    the entry reloads on the old token, and the proxy refuses it again. Write
+    the new token to wherever the current one lives.
+    """
+    if CONF_TOKEN in entry.options:
+        return {"options": {**entry.options, CONF_TOKEN: token}}
+    return {"data": {**entry.data, CONF_TOKEN: token}}
+
+
 async def _async_verified_handoff_token(
     hass: HomeAssistant, base_url: str, current_token: str | None
 ) -> str:
@@ -303,11 +319,15 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if entry is None:
             return self.async_abort(reason="reauth_failed")
 
+        # What setup runs on, not what first setup stored: a URL or token
+        # changed in Configure lives in options, and that is the proxy this
+        # token has to be good for.
+        current = {**entry.data, **entry.options}
         errors: dict[str, str] = {}
         if user_input is not None:
-            data = {**entry.data, CONF_TOKEN: user_input.get(CONF_TOKEN, "").strip()}
+            token = user_input.get(CONF_TOKEN, "").strip()
             try:
-                await _validate_input(self.hass, data)
+                await _validate_input(self.hass, {**current, CONF_TOKEN: token})
             except ProxyAuthError:
                 errors["base"] = "invalid_auth"
             except ProxyConnectionError:
@@ -316,7 +336,9 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 LOGGER.exception("Unexpected Blink live-view proxy reauth error")
                 errors["base"] = "unknown"
             else:
-                self.hass.config_entries.async_update_entry(entry, data=data)
+                self.hass.config_entries.async_update_entry(
+                    entry, **token_update(entry, token)
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
@@ -327,7 +349,7 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 {
                     vol.Optional(
                         CONF_TOKEN,
-                        default=shared or entry.data.get(CONF_TOKEN, ""),
+                        default=shared or current.get(CONF_TOKEN, ""),
                     ): str
                 }
             ),
