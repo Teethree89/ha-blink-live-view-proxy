@@ -123,7 +123,8 @@ to wipe the existing Blink OAuth session, cancel a pending PIN and start fresh.
 The reset prevents automatic login after a restart until a manual dashboard
 login succeeds; it does not remove the add-on username/password options or
 the proxy API token. Live streams stop, but clips and Home Assistant entities
-are not deleted. If the **proxy token** is rejected, first recover it in the
+are not deleted. Expect Blink to send a **new 2FA PIN** on the next login: the
+reset forgets the device identity Blink had verified. If the **proxy token** is rejected, first recover it in the
 integration's Configure/reauthentication flow: the reset action also requires
 a working proxy bearer token.
 
