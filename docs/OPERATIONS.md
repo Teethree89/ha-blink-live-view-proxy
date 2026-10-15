@@ -138,6 +138,11 @@ after a failed login or corrupted saved session. It:
 - Preserves the proxy API token, integration connection, cameras/configuration,
   add-on credentials stored in Supervisor options, and recorded clips.
 
+Expect Blink to send a **new 2FA code** when you sign in again. The reset
+forgets the saved session, including the device identity Blink had verified, so
+the next login is a new device to Blink. Have the phone or mailbox that
+receives the code to hand before you start.
+
 This button **cannot fix an invalid proxy API token**, because Home Assistant
 must first authenticate to the proxy to invoke it. Repair the token through
 integration **Configure** or reauthentication first. Resetting Blink auth
