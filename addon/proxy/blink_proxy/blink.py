@@ -348,6 +348,7 @@ class BlinkClient:
         self._state_callback = state_callback
         self._fresh_login = fresh_login
         self._persist_intermediate = persist_intermediate
+        self._auth_revoked = False
         self.auth_file = resolve_path(config["auth_file"], config_base)
         self.session: ClientSession | None = None
         self.blink: Blink | None = None
@@ -395,13 +396,15 @@ class BlinkClient:
             return auth_data
 
         def save_auth_callback() -> None:
-            if auth is not None:
+            if auth is not None and not self._auth_revoked:
                 pending_auth_data.clear()
                 pending_auth_data.update(auth_data_without_password())
                 if self._persist_intermediate:
                     save_json_file(self.auth_file, pending_auth_data)
 
         def commit_auth_cache() -> None:
+            if self._auth_revoked:
+                return
             pending_auth_data.clear()
             pending_auth_data.update(auth_data_without_password())
             save_json_file(self.auth_file, pending_auth_data)
@@ -495,6 +498,10 @@ class BlinkClient:
             self._password = None
             await self.close()
             raise
+
+    def revoke_auth(self) -> None:
+        """Prevent in-flight BlinkPy refresh callbacks restoring a reset cache."""
+        self._auth_revoked = True
 
     async def close(self) -> None:
         if self.session is not None:

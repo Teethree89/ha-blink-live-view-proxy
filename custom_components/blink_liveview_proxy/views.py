@@ -3761,7 +3761,7 @@ class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
     @require_admin
     async def post(self, request: web.Request, action: str) -> web.Response:
         """Run login, PIN submission, or cancellation without logging bodies."""
-        if action not in {"login", "pin", "cancel"}:
+        if action not in {"login", "pin", "cancel", "reset"}:
             raise web.HTTPNotFound()
         if request.content_length is not None and request.content_length > 4096:
             raise web.HTTPRequestEntityTooLarge(
@@ -3778,6 +3778,12 @@ class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
                 text="Invalid authentication request\n", headers=AUTH_VIEW_HEADERS
             )
 
+        if action == "reset" and body != {"confirm": "RESET BLINK AUTH"}:
+            raise web.HTTPBadRequest(
+                text="Explicit Blink authentication reset confirmation required\n",
+                headers=AUTH_VIEW_HEADERS,
+            )
+
         client = _auth_client(self.hass)
         try:
             if action == "login":
@@ -3790,6 +3796,8 @@ class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
                     str(body.get("challenge_id") or ""),
                     str(body.get("pin") or ""),
                 )
+            elif action == "reset":
+                payload = await client.async_reset_auth()
             else:
                 payload = await client.async_cancel_auth(
                     str(body.get("challenge_id") or "")

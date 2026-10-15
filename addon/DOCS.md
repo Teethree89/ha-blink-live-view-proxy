@@ -118,6 +118,15 @@ and preserves an existing working client until reauthentication succeeds.
 Cancel is explicit. A timeout shows **expired**. Restarting the add-on cancels
 the challenge and requires a new login/new PIN.
 
+Use **Reset all Blink authentication…** (typed confirmation) when you want
+to wipe the existing Blink OAuth session, cancel a pending PIN and start fresh.
+The reset prevents automatic login after a restart until a manual dashboard
+login succeeds; it does not remove the add-on username/password options or
+the proxy API token. Live streams stop, but clips and Home Assistant entities
+are not deleted. If the **proxy token** is rejected, first recover it in the
+integration's Configure/reauthentication flow: the reset action also requires
+a working proxy bearer token.
+
 The panel is an admin-only Home Assistant custom panel. The browser sends
 credentials/PINs only in authenticated no-store request bodies. It does not
 receive the proxy token or use cookies/localStorage/sessionStorage for these

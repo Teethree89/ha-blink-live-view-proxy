@@ -69,6 +69,11 @@ media routes.
 - `POST /auth/login` — body `{"username": "...", "password": "..."}`
 - `POST /auth/pin` — body `{"challenge_id": "...", "pin": "123456"}`
 - `POST /auth/cancel` — body `{"challenge_id": "..."}`
+- `POST /auth/reset` — body `{"confirm": "RESET BLINK AUTH"}`;
+  requires that exact JSON object, removes the Blink OAuth cache and live
+  client, and suppresses automatic login after restart until a new manual
+  browser login succeeds. It **does not** rotate or disclose the proxy token,
+  erase add-on Supervisor options or delete clips.
 
 Access control:
 

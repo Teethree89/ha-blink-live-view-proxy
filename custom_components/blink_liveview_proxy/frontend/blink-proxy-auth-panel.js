@@ -3,6 +3,11 @@
 // a deadline the bar would spin forever and read as progress.
 const UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 
+// The words that have to be typed before a reset is sent anywhere. Home
+// Assistant and the proxy each refuse anything else, so the same string lives
+// in three places; this page only keeps a stray tap from sending it.
+const RESET_CONFIRMATION = "RESET BLINK AUTH";
+
 class BlinkProxyAuthPanel extends HTMLElement {
   constructor() {
     super();
@@ -14,6 +19,10 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._notice = "";
     this._tab = "overview";
     this._showLogin = false;
+    // Whether the typed confirmation for a reset is on the page. Not a native
+    // prompt: a webview that does not implement window.prompt hands back null,
+    // and the button would then do nothing and say nothing.
+    this._resetOpen = false;
     this._busy = false;
     this._yaml = "";
     this._yamlFormat = "dashboard";
@@ -198,6 +207,41 @@ class BlinkProxyAuthPanel extends HTMLElement {
         state: "failure",
         message: "Blink login could not be started. Verify the credentials and that no other attempt is active.",
       });
+    } finally {
+      this._busy = false;
+      this._render();
+      this._schedule();
+    }
+  }
+
+  _openReset() {
+    this._resetOpen = true;
+    this._render();
+    this.shadowRoot.getElementById("reset-confirm")?.focus();
+  }
+
+  _closeReset() {
+    this._resetOpen = false;
+    this._render();
+  }
+
+  async _resetAuth(event) {
+    event.preventDefault();
+    // The button is disabled until this matches; Enter in the field and a
+    // programmatic submit are the other ways in, so check again here.
+    if (event.currentTarget.elements.confirm.value !== RESET_CONFIRMATION) return;
+    this._busy = true;
+    this._render();
+    try {
+      this._state = await this._api("POST", "reset", { confirm: RESET_CONFIRMATION });
+      this._resetOpen = false;
+      this._showLogin = true;
+      this._notice = "Blink authentication cleared. Sign in again below.";
+      await this._refreshPanel();
+    } catch (error) {
+      this._notice = this._failureFrom(error, {
+        message: "Reset failed. Check the proxy connection and its API token.",
+      }).message;
     } finally {
       this._busy = false;
       this._render();
@@ -620,6 +664,13 @@ class BlinkProxyAuthPanel extends HTMLElement {
       ${active && !waiting ? `<p>Please wait. Do not restart the proxy while its OAuth session is open.</p><button type="button" class="secondary" id="cancel" ${this._busy ? "disabled" : ""}>Cancel</button>` : ""}
       ${showLogin ? `<form id="login-form"><h3>${this._state.authenticated ? "Reauthenticate deliberately" : "Start Blink login"}</h3><label for="username">Blink email</label><input id="username" name="username" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="320" required><label for="password">Blink password</label><input id="password" name="password" type="password" autocomplete="off" maxlength="1024" required><button type="submit" ${this._busy ? "disabled" : ""}>Start login</button></form>` : ""}
       ${state === "success" && !showLogin ? `<button type="button" id="reauth">Reauthenticate</button>` : ""}
+      <div class="auth-reset">
+        <h3>Reset Blink authentication</h3>
+        <p class="muted">Use this to start completely fresh: end active streams, cancel any PIN challenge, delete saved Blink login tokens, and prevent automatic sign-in on restart until a new manual login succeeds. The proxy API token, Home Assistant connection, and add-on username/password options are NOT erased.</p>
+        ${this._resetOpen
+          ? `<form id="reset-form"><label for="reset-confirm">Type ${RESET_CONFIRMATION} to confirm</label><input id="reset-confirm" name="confirm" type="text" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" ${this._busy ? "disabled" : ""}><button type="submit" id="reset-go" disabled>Reset all Blink authentication</button><button type="button" class="secondary" id="reset-cancel" ${this._busy ? "disabled" : ""}>Cancel</button></form>`
+          : `<button type="button" class="secondary" id="reset-auth" ${this._busy ? "disabled" : ""}>Reset all Blink authentication…</button>`}
+      </div>
     </ha-card>`;
   }
 
@@ -648,6 +699,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
       this._tab === "auth" ? "" : this._panelError,
       this._notice,
       this._showLogin,
+      this._resetOpen,
       this._busy,
       this._yaml,
       this._yamlFormat,
@@ -669,6 +721,17 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.getElementById("login-form")?.addEventListener("submit", (event) => this._startLogin(event));
     this.shadowRoot.getElementById("pin-form")?.addEventListener("submit", (event) => this._submitPin(event));
     this.shadowRoot.getElementById("cancel")?.addEventListener("click", () => this._cancel());
+    this.shadowRoot.getElementById("reset-auth")?.addEventListener("click", () => this._openReset());
+    this.shadowRoot.getElementById("reset-cancel")?.addEventListener("click", () => this._closeReset());
+    const resetForm = this.shadowRoot.getElementById("reset-form");
+    if (resetForm) {
+      const typed = resetForm.elements.confirm;
+      const go = this.shadowRoot.getElementById("reset-go");
+      // Toggled in place. Rebuilding the form on every keystroke would throw
+      // away the field being typed in, which the render signature exists to avoid.
+      typed.addEventListener("input", () => { go.disabled = this._busy || typed.value !== RESET_CONFIRMATION; });
+      resetForm.addEventListener("submit", (event) => this._resetAuth(event));
+    }
     this.shadowRoot.getElementById("reauth")?.addEventListener("click", () => { this._showLogin = true; this._render(); });
     this.shadowRoot.getElementById("recheck")?.addEventListener("click", () => this._recheck());
     this.shadowRoot.getElementById("update")?.addEventListener("click", () => this._startUpdate());
