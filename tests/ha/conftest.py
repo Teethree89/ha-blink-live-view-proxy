@@ -19,11 +19,16 @@ from __future__ import annotations
 import pathlib
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 for path in (ROOT, ROOT / "proxy", ROOT / "tests"):
@@ -34,6 +39,7 @@ from blink_fakes import FakeBlink  # noqa: E402
 from blink_proxy.blink import BlinkClient  # noqa: E402
 from blink_proxy.devices import DevicePoller  # noqa: E402
 from blink_proxy.routes import (  # noqa: E402
+    auth_status_handler,
     cameras_handler,
     devices_handler,
     health_handler,
@@ -50,6 +56,33 @@ PROXY_TOKEN = "proxy-test-token"
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: Any) -> None:
     """Load custom_components/ from this repository."""
+
+
+async def stub_frontend_dependencies(hass: HomeAssistant) -> None:
+    """Mark the two frontend dependencies loaded before anything is set up.
+
+    The order matters: set up the other way round, Home Assistant tries to
+    import the real frontend package, which these tests deliberately do not
+    install. test_blink_entities._setup does the same first.
+    """
+    hass.config.components.update({"frontend", "panel_custom"})
+    assert await async_setup_component(hass, "homeassistant", {})
+
+
+@contextmanager
+def without_frontend() -> Iterator[None]:
+    """Set the integration up without its sidebar panel and Lovelace resource."""
+    with (
+        patch(
+            "custom_components.blink_liveview_proxy._async_register_auth_panel",
+            return_value=None,
+        ),
+        patch(
+            "custom_components.blink_liveview_proxy._async_register_frontend_resource",
+            return_value=None,
+        ),
+    ):
+        yield
 
 
 class FakeProxy:
@@ -84,9 +117,13 @@ class FakeProxy:
         class Controller:
             state = "success"
 
+            def status(self) -> dict[str, Any]:
+                return {"state": "success", "authenticated": True}
+
         app["auth_controller"] = Controller()
         app["device_poller"] = DevicePoller(lambda: app["client"])
         app.router.add_get("/health", health_handler)
+        app.router.add_get("/auth/status", auth_status_handler)
         app.router.add_get("/status", status_handler)
         app.router.add_get("/cameras", cameras_handler)
         app.router.add_get("/devices", devices_handler)

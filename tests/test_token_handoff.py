@@ -138,7 +138,9 @@ class TokenHandoffTest(unittest.TestCase):
         self.assertIn("defaults = {**current, CONF_TOKEN: shared}", config)
         self.assertIn("shared_token = await _async_verified_handoff_token(", setup)
         self.assertIn("merged[CONF_TOKEN] = shared_token", setup)
-        self.assertIn("CONF_TOKEN: shared_token", setup)
+        # Where the token is written (data or options) is decided in one place,
+        # which tests/ha/test_token_reauth.py exercises inside real Home Assistant.
+        self.assertIn("**token_update(entry, shared_token)", setup)
         self.assertNotIn("LOGGER.info(shared_token)", setup)
 
 
