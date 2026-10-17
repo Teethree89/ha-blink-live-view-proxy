@@ -144,9 +144,11 @@ proxy service or add-on described in the package example.
 | Fresh snapshot | `blink_snapshot_refresh` | `slug` |
 | Motion on/off | `switch.toggle` | `switch.blink_proxy_<slug>_motion_detection` |
 
-`entity_id` and `source_entity_id` are optional everywhere — they default to
-`camera.blink_live_<slug>` and `camera.blink_proxy_<slug>`. Pass them when your
-entities were renamed.
+`entity_id` and `source_entity_id` are optional everywhere. The dialog finds
+the live camera by the `proxy_slug` it carries and the snapshot camera by its
+`snapshot_of`, so a card that supplies only the `slug` works whatever the
+entities are called, renamed or not. A name you pass is used first, if it
+exists.
 
 Push-to-talk, **End** and **Save MP4** are inside the live-view dialog,
 not on the tile. PTT only appears for cameras the proxy reports as supporting
@@ -227,8 +229,9 @@ curl http://127.0.0.1:8088/cameras
 
 [`examples/lovelace-auto-populate.yaml`](../examples/lovelace-auto-populate.yaml)
 
-Builds a tile for every `camera.blink_live_*` entity as it appears. Add a camera
-in Blink, restart the proxy, and it shows up with no YAML edits.
+Builds a tile for every live camera entity as it appears: the ones that carry a
+`proxy_slug` attribute. Add a camera in Blink, restart the proxy, and it shows
+up with no YAML edits.
 
 Needs **auto-entities** and **button-card**.
 
@@ -249,7 +252,7 @@ ones that can talk back:
 
 ```jinja
 {%- for s in states.camera
-      if s.entity_id.startswith('camera.blink_live_')
+      if state_attr(s.entity_id, 'proxy_slug')
       and state_attr(s.entity_id, 'ptt_supported') -%}
 ```
 
@@ -259,6 +262,17 @@ Both come from this integration, and it sets their ids from the proxy slug:
 `camera.blink_proxy_<slug>` and `switch.blink_proxy_<slug>_motion_detection`.
 So the generator and the self-populating dashboard name them without guessing.
 If you rename one in Home Assistant, edit the dashboard to match.
+
+The live camera (`camera.blink_live_<slug>`) and the proxy health sensor
+(`binary_sensor.blink_liveview_proxy`) set their ids the same way. They did not
+until they were fixed: Home Assistant derived them, and from 2026.9 it derives
+them with the device's name in front, so an install set up on 2026.9 or later
+before that has `camera.blink_<device>_blink_live_<slug>` and
+`binary_sensor.blink_live_view_proxy_blink_liveview_proxy`. Home Assistant keeps
+the id an entity already has, so those installs keep theirs. The YAML tab in the
+panel names what your install actually holds, and the dialog finds cameras by
+`proxy_slug`, so neither cares. A hand-written tile that names the entity does:
+check **Settings → Devices & services → Entities** if its picture is blank.
 
 ## Status pills
 

@@ -9,6 +9,66 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [Unreleased]
+
+A live view that never started on a camera that announces audio and sends none,
+and generated dashboards that named entities Home Assistant no longer gives a
+fresh install. The first needs the proxy updated; the rest are in the
+integration.
+
+### Fixed
+
+- **A live view that never started on a camera that announces audio and sends
+  none** ([#80], reported by @amullr). Some cameras describe an audio stream in
+  the transport stream and then send nothing on it. mpegts.js, which plays the
+  dashboard's dialog on desktop and Android, will not show a frame until it has
+  the first of every announced track, so the dialog sat on "Waking camera and
+  waiting for video" with nothing logged, while Home Assistant's own more-info
+  stream, which shrugs it off, played the same camera. The proxy now holds the
+  start of a live view for up to two seconds (`liveview_audio_wait_seconds`) and,
+  if the camera announced audio and sent none, removes the announcement for that
+  live view. A stream that carries audio, or announces none, is forwarded
+  untouched and with no added delay. The same stream also made ffmpeg fail with
+  `sample rate not set`, so an iPhone's HLS and Save MP4 broke on it too; both
+  now work. `docs/CONFIGURATION.md` has the details and the log line to look
+  for. Reproduced with a synthetic camera in a real browser and against the
+  real ffmpeg commands; not yet confirmed on the reporter's own camera, so
+  [#80] stays open.
+- **A live view that could not start now says so.** The player waited on
+  `play()` before arming any timer, and `play()` does not settle until media is
+  playing, so a stream that never started never ended: the page spun for ever,
+  and the session limit that was meant to end it was never armed either. A
+  picture now has thirty seconds to appear, and the page says which kind of
+  failure it was: the camera sent nothing, or video is arriving and this browser
+  could not start it. The session-limit message no longer claims a live view
+  finished that never began.
+- **Refresh snapshot on a generated dashboard did nothing, silently, on a fresh
+  install of Home Assistant 2026.9 or later.** The dialog guessed the live
+  camera's entity id to find its token, and from 2026.9 Home Assistant puts the
+  device's name in front of an id it derives, so the guess found nothing and
+  the request went out without a token and was refused. The dialog now finds
+  the live camera by the `proxy_slug` it carries and the snapshot camera by
+  `snapshot_of`, the way the clips viewer already found its tokens, so a card
+  that supplies only a slug works whatever the entities are called.
+- **Fresh installs get the entity ids the documentation spells.** The live
+  camera and the proxy health sensor had their ids derived by Home Assistant,
+  which from 2026.9 gives `camera.blink_<device>_blink_live_<slug>` and
+  `binary_sensor.blink_live_view_proxy_blink_liveview_proxy`, so the Proxy pill
+  on every generated dashboard read an entity that did not exist. They now set
+  their ids outright, as the other Blink entities already did. **An install that
+  already has them keeps the ids it has**: Home Assistant never renames a
+  registered entity. The panel's YAML tab names the health sensor this install
+  actually holds, and the dialog does not care.
+- **The self-populating dashboard found no cameras on a fresh install of 2026.9
+  or later.** It selected live cameras by an entity id starting
+  `camera.blink_live_`; it now selects the ones that carry `proxy_slug`, which
+  is what makes a camera a live camera.
+
+`MINIMUM_PROXY_VERSION` stays 0.9.0: an older proxy still works with this
+integration, and keeps the audio behaviour above until it is updated.
+
+[#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
+
 ## [1.1.0] — 2026-10-15
 
 A way out of a bad Blink sign-in, a time on every camera's picture, and a fix

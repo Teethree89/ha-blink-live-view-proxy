@@ -84,6 +84,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from .constants import LOGGER_NAME
+from .tsguard import DEFAULT_AUDIO_WAIT_SECONDS, AudioGuard
 
 LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -106,9 +107,18 @@ class RtspError(RuntimeError):
 class BlinkRtspLiveStream:
     """Pulls a Blink live view over RTSP and republishes it as MPEG-TS."""
 
-    def __init__(self, camera: Any, response: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        camera: Any,
+        response: dict[str, Any],
+        audio_wait_seconds: float = DEFAULT_AUDIO_WAIT_SECONDS,
+    ) -> None:
         self.camera = camera
         self.response = response
+        # Same promise to keep as on the IMMI path; see tsguard.py.
+        self._audio_guard = AudioGuard(
+            str(getattr(camera, "name", "") or ""), audio_wait_seconds
+        )
         self.server_url = str(response.get("server", ""))
         self.server: asyncio.AbstractServer | None = None
         self.socket: socket.socket | None = None
@@ -172,9 +182,16 @@ class BlinkRtspLiveStream:
         if not payload:
             return
         self._packets += 1
-        self._bytes_out += len(payload)
         if self._packets == 1:
             LOGGER.info("RTSP: first video packet received")
+        # Nothing comes back while the guard is still finding out whether the
+        # audio the camera announced is coming.
+        payload = self._audio_guard.push(payload)
+        if payload:
+            self._send_to_consumers(payload)
+
+    def _send_to_consumers(self, payload: bytes) -> None:
+        self._bytes_out += len(payload)
         for writer in list(self._consumers):
             if writer.is_closing():
                 continue
@@ -342,6 +359,11 @@ class BlinkRtspLiveStream:
             raise
         except Exception as error:
             LOGGER.error("RTSP: data path aborted: %s", error)
+        # A stream that ends inside the guard's wait still owes its consumers
+        # what it sent.
+        tail = self._audio_guard.flush()
+        if tail:
+            self._send_to_consumers(tail)
 
     @staticmethod
     def _rtp_payload(packet: bytes) -> bytes:

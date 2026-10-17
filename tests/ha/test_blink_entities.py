@@ -28,9 +28,9 @@ from custom_components.blink_liveview_proxy.const import (
 from .conftest import PROXY_TOKEN
 
 # What every install has had since 0.8: a live camera per Blink camera and the
-# proxy's health sensor. Compared by unique id, because the entity ids Home
-# Assistant derives for these two changed shape in 2026.9 (it prefixes the
-# device name now).
+# proxy's health sensor. Compared by unique id, because an install from before
+# their ids were set outright may hold a different shape: Home Assistant
+# derived them, and from 2026.9 it derives them with the device name in front.
 BASELINE_SUFFIXES = {"_health", "_SERIAL-A_live", "_SERIAL-B_live"}
 
 # The new entities set their ids outright, so these hold on every release.
@@ -137,6 +137,17 @@ async def test_creates_every_entity(
     assert state("sensor.blink_proxy_driveway_wifi_signal").state == "-58"
     assert state("sensor.blink_proxy_driveway_battery_voltage").state == "1.65"
     assert state("alarm_control_panel.blink_proxy_114_cooper").state == "armed_away"
+    # The ids every dashboard, example and generator spells. Home Assistant
+    # derived these two until they were set outright, and from 2026.9 it derives
+    # them with the device name in front, so a fresh install did not get them.
+    assert _live_entity_id(hass, entry, "SERIAL-A") == "camera.blink_live_driveway"
+    assert _live_entity_id(hass, entry, "SERIAL-B") == "camera.blink_live_back_door"
+    assert (
+        er.async_get(hass).async_get_entity_id(
+            "binary_sensor", DOMAIN, f"{entry.entry_id}_health"
+        )
+        == "binary_sensor.blink_liveview_proxy"
+    )
     assert state("camera.blink_proxy_driveway").attributes["snapshot_of"] == "driveway"
     assert "proxy_slug" not in state("camera.blink_proxy_driveway").attributes, (
         "the live camera is the only one the dialog may find by proxy_slug"
@@ -150,6 +161,42 @@ async def test_creates_every_entity(
         registry.async_get("switch.blink_proxy_driveway_motion_detection").device_id
         == registry.async_get(_live_entity_id(hass, entry, "SERIAL-A")).device_id
     )
+
+
+async def test_registered_ids_are_left_alone(
+    hass: HomeAssistant, fake_proxy: Any
+) -> None:
+    """An install from before the ids were set outright keeps the ones it has.
+
+    Somebody on 2026.9 who set up 1.0.0 holds the prefixed shape, and every
+    automation and card of theirs names it. Setting the id must not move it.
+    """
+    entry = _entry(hass, fake_proxy)
+    registry = er.async_get(hass)
+    live = registry.async_get_or_create(
+        "camera",
+        DOMAIN,
+        f"{entry.entry_id}_SERIAL-A_live",
+        config_entry=entry,
+        suggested_object_id="blink_driveway_blink_live_driveway",
+    )
+    health = registry.async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        f"{entry.entry_id}_health",
+        config_entry=entry,
+        suggested_object_id="blink_live_view_proxy_blink_liveview_proxy",
+    )
+    await _setup(hass, fake_proxy, entry)
+
+    assert _live_entity_id(hass, entry, "SERIAL-A") == live.entity_id
+    assert live.entity_id == "camera.blink_driveway_blink_live_driveway"
+    assert hass.states.get(live.entity_id) is not None, "and it is the one that is live"
+    assert hass.states.get(health.entity_id) is not None
+    assert hass.states.get("camera.blink_live_driveway") is None, "no second entity appears"
+    assert hass.states.get("binary_sensor.blink_liveview_proxy") is None
+    # The camera that was not registered yet gets the documented id.
+    assert _live_entity_id(hass, entry, "SERIAL-B") == "camera.blink_live_back_door"
 
 
 async def test_motion_switch_reaches_blinkpy(
@@ -350,3 +397,29 @@ async def test_panel_and_dashboard_use_own_entities(
     assert "switch.blink_proxy_driveway_motion_detection" in card, (
         "the motion button toggles the switch, not the motion binary sensor"
     )
+
+
+async def test_generated_pill_names_the_sensor_the_install_holds(
+    hass: HomeAssistant, fake_proxy: Any, hass_client: Any, hass_admin_user: Any
+) -> None:
+    """The panel's YAML points the Proxy pill at the health sensor that exists.
+
+    A fresh install holds binary_sensor.blink_liveview_proxy. One set up on
+    2026.9 or later before the id was set outright holds it with the device's
+    name in front, and the registry keeps that, so the pill cannot assume.
+    """
+    entry = _entry(hass, fake_proxy)
+    er.async_get(hass).async_get_or_create(
+        "binary_sensor",
+        DOMAIN,
+        f"{entry.entry_id}_health",
+        config_entry=entry,
+        suggested_object_id="blink_live_view_proxy_blink_liveview_proxy",
+    )
+    await _setup(hass, fake_proxy, entry)
+    client = await hass_client()
+    resp = await client.get("/api/blink_liveview_proxy/panel/yaml?format=view")
+    assert resp.status == 200, await resp.text()
+    text = (await resp.json())["yaml"]
+    assert "entity: binary_sensor.blink_live_view_proxy_blink_liveview_proxy" in text
+    assert "entity: binary_sensor.blink_liveview_proxy\n" not in text

@@ -67,6 +67,20 @@ def test_yaml() -> None:
     single = yaml.safe_load(render_dashboard_yaml(cameras[:1], "card"))
     check(single["type"] == "picture-elements", "one-camera card output is a bare tile")
 
+    # The Proxy pill names the health sensor the install holds. A fresh install
+    # holds binary_sensor.blink_liveview_proxy; one set up on Home Assistant
+    # 2026.9 or later before that id was set outright holds it with the
+    # device's name in front, and the registry keeps what it has.
+    held = "binary_sensor.blink_live_view_proxy_blink_liveview_proxy"
+    default = render_dashboard_yaml(cameras, "view")
+    custom = render_dashboard_yaml(cameras, "view", held)
+    check("entity: binary_sensor.blink_liveview_proxy\n" in default, "the pill defaults to the documented sensor")
+    check(
+        f"entity: {held}\n" in custom and "entity: binary_sensor.blink_liveview_proxy\n" not in custom,
+        "and follows the sensor the install holds when told",
+    )
+    check(yaml.safe_load(custom)[0]["title"] == "Cameras", "the output still parses")
+
 
 def _decorators(node: ast.AsyncFunctionDef) -> set[str]:
     return {

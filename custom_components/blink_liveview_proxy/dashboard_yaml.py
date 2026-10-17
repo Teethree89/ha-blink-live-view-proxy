@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+# What a fresh install holds. An install that registered the sensor before its id
+# was set outright may hold another, which the caller passes in.
+HEALTH_ENTITY_ID = "binary_sensor.blink_liveview_proxy"
+
 
 def _scalar(value: Any) -> str:
     """Quote a YAML scalar conservatively without taking a PyYAML dependency."""
@@ -128,7 +132,7 @@ def _camera_card(camera: dict[str, Any], indent: int = 6) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _proxy_pill(indent: int) -> str:
+def _proxy_pill(indent: int, health_entity_id: str = HEALTH_ENTITY_ID) -> str:
     """The one status pill that works with the integration alone.
 
     The same mark in both states, coloured green or red rather than swapped for
@@ -141,7 +145,7 @@ def _proxy_pill(indent: int) -> str:
     pad = " " * indent
     lines = [
         f"{pad}- type: custom:button-card",
-        f"{pad}  entity: binary_sensor.blink_liveview_proxy",
+        f"{pad}  entity: {health_entity_id}",
         f"{pad}  name: Proxy",
         f"{pad}  show_state: true",
         f"{pad}  icon: blink:logo",
@@ -161,7 +165,9 @@ def _proxy_pill(indent: int) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _sections_view(cameras: list[dict[str, Any]]) -> str:
+def _sections_view(
+    cameras: list[dict[str, Any]], health_entity_id: str = HEALTH_ENTITY_ID
+) -> str:
     """One view in the sections layout: a section per camera.
 
     Sections lay themselves out by width - up to max_columns side by side on a
@@ -181,7 +187,7 @@ def _sections_view(cameras: list[dict[str, Any]]) -> str:
         "          - type: horizontal-stack\n"
         "            cards:\n"
     )
-    out += _proxy_pill(14)
+    out += _proxy_pill(14, health_entity_id)
     for camera in cameras:
         out += "      - type: grid\n        cards:\n"
         out += _camera_card(camera, 10)
@@ -189,9 +195,15 @@ def _sections_view(cameras: list[dict[str, Any]]) -> str:
 
 
 def render_dashboard_yaml(
-    cameras: list[dict[str, Any]], output_format: str = "dashboard"
+    cameras: list[dict[str, Any]],
+    output_format: str = "dashboard",
+    health_entity_id: str = HEALTH_ENTITY_ID,
 ) -> str:
-    """Render a dashboard, one view, or a card for the supplied cameras."""
+    """Render a dashboard, one view, or a card for the supplied cameras.
+
+    ``health_entity_id`` is the proxy health sensor as this install holds it,
+    which is only the documented id on an install that set it up recently.
+    """
     if output_format not in {"dashboard", "view", "card"}:
         raise ValueError("format must be dashboard, view, or card")
     cameras = sorted(cameras, key=lambda item: item.get("name") or item.get("slug"))
@@ -201,9 +213,9 @@ def render_dashboard_yaml(
         "storage-mode Lovelace.\n"
     )
     if output_format == "dashboard":
-        return header + "views:\n" + _sections_view(cameras)
+        return header + "views:\n" + _sections_view(cameras, health_entity_id)
     if output_format == "view":
-        return header + _sections_view(cameras)
+        return header + _sections_view(cameras, health_entity_id)
     if len(cameras) == 1:
         raw = _camera_card(cameras[0], 0).splitlines()
         raw[0] = raw[0].replace("- ", "", 1)

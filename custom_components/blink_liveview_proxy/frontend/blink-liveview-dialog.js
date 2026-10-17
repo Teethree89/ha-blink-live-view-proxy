@@ -497,20 +497,56 @@
     });
   }
 
+  // Home Assistant chooses entity ids, and not the same way on every release:
+  // from 2026.9 an id derived from a name is prefixed with the device's name,
+  // so camera.blink_live_driveway is camera.blink_driveway_blink_live_driveway
+  // on a fresh install. A card that guessed the id then found nothing, and
+  // nothing meant no token: the live view reported the token as not ready, and
+  // Refresh Snapshot was refused without a word. The cameras say which slug they
+  // serve in their own attributes, which is how the clips viewer already finds
+  // its tokens, so ask them, and guess only when that finds nothing.
+  function hasToken(state) {
+    return !!(state && state.attributes && state.attributes.access_token);
+  }
+
+  // The live camera for a slug: the one the card names, if it is a camera that
+  // can open a live view, otherwise whichever camera says it serves the slug.
+  function liveState(hass, slug, entityId) {
+    const states = hass && hass.states ? hass.states : {};
+    if (entityId && hasToken(states[entityId])) return states[entityId];
+    if (!slug) return null;
+    for (const state of Object.values(states)) {
+      if (hasToken(state) && state.attributes.proxy_slug === slug) return state;
+    }
+    const guess = states[`camera.blink_live_${slug}`];
+    return hasToken(guess) ? guess : null;
+  }
+
+  // The snapshot camera's id. It carries snapshot_of rather than proxy_slug:
+  // the live camera is the only one that carries that, so the player and this
+  // dialog never mistake one for the other.
+  function snapshotEntityId(hass, slug, entityId) {
+    const states = hass && hass.states ? hass.states : {};
+    if (entityId && states[entityId]) return entityId;
+    if (slug) {
+      for (const [id, state] of Object.entries(states)) {
+        if (state.attributes && state.attributes.snapshot_of === slug) return id;
+      }
+    }
+    return entityId || (slug ? `camera.blink_proxy_${slug}` : "");
+  }
+
   function openLiveDialog(config, hass) {
     const slug = config.slug;
-    // Same fallback the clips and snapshot handlers use, so a card only has to
-    // supply the slug. Generated dashboards rely on this.
-    const entityId =
-      config.entity_id || (slug ? `camera.blink_live_${slug}` : "");
-    const state = hass && entityId ? hass.states[entityId] : null;
-    const token = state && state.attributes ? state.attributes.access_token : "";
+    // A card only has to supply the slug. Generated dashboards rely on this.
+    const state = liveState(hass, slug, config.entity_id);
+    const token = state ? state.attributes.access_token : "";
     const title =
       config.title ||
       (state && state.attributes && state.attributes.friendly_name) ||
       `Live view ${slug}`;
     let src = "";
-    if (slug && entityId && token) {
+    if (slug && token) {
       src = `/api/blink_liveview_proxy/cameras/${encodeURIComponent(
         slug
       )}/player?token=${encodeURIComponent(token)}`;
@@ -564,15 +600,13 @@
   async function refreshSnapshot(config, hass) {
     if (!config || !config.slug) return;
     ensureStyle();
-    const entityId =
-      config.entity_id ||
-      (config.slug ? `camera.blink_live_${config.slug}` : "");
-    const sourceEntityId =
-      config.source_entity_id ||
-      config.camera_entity_id ||
-      (config.slug ? `camera.${config.slug}` : "");
-    const state = hass && entityId ? hass.states[entityId] : null;
-    const token = state && state.attributes ? state.attributes.access_token : "";
+    const state = liveState(hass, config.slug, config.entity_id);
+    const sourceEntityId = snapshotEntityId(
+      hass,
+      config.slug,
+      config.source_entity_id || config.camera_entity_id || ""
+    );
+    const token = state ? state.attributes.access_token : "";
     const params = new URLSearchParams();
     if (token) params.set("token", token);
     const query = params.toString();
