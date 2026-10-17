@@ -18,6 +18,7 @@ import re
 from typing import Any
 
 OBJECT_ID_PREFIX = "blink_proxy"
+LIVE_OBJECT_ID_PREFIX = "blink_live"
 
 
 def slugify(value: Any) -> str:
@@ -38,6 +39,19 @@ def camera_object_id(slug: str, suffix: str = "") -> str:
     """blink_proxy_<slug>[_<suffix>], the object id of a camera's entity."""
     base = f"{OBJECT_ID_PREFIX}_{slugify(slug)}"
     return f"{base}_{suffix}" if suffix else base
+
+
+def live_camera_object_id(slug: str) -> str:
+    """blink_live_<slug>, the object id of a camera's live view entity.
+
+    The two entities that existed before the rest keep their own prefixes, which
+    is what every dashboard, example and generator in this repository spells.
+    """
+    return f"{LIVE_OBJECT_ID_PREFIX}_{slugify(slug)}"
+
+
+# What the dashboards read: binary_sensor.blink_liveview_proxy.
+HEALTH_OBJECT_ID = "blink_liveview_proxy"
 
 
 def camera_unique_id(entry_id: str, camera: dict[str, Any], suffix: str) -> str:

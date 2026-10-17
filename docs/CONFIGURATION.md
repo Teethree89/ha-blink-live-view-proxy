@@ -155,6 +155,45 @@ channel, so the proxy raises `push-to-talk is not available over RTSP` rather
 than appearing to send audio nowhere. Everything else — the MSE player, HLS,
 "End", snapshots, motion controls — behaves the same on both.
 
+### A camera that announces audio and sends none
+
+Some cameras describe an audio stream in the transport stream and then send
+nothing on it. A camera with its microphone switched off in the Blink app is
+the likely reason; the proxy does not depend on why. Every consumer reads the
+description as a promise, and they break it differently:
+
+| Consumer | What happened |
+|---|---|
+| The dashboard's live-view dialog on a desktop or Android browser (mpegts.js) | waits for the first audio frame before showing any video, so it sat on "Waking camera and waiting for video" with nothing in any log |
+| HLS, which is what an iPhone or iPad plays | ffmpeg stopped with `sample rate not set … Could not write header`, and the live view failed |
+| Save MP4 | the same ffmpeg error |
+| Home Assistant's own more-info stream | worked, which made it look like a fault in the dialog |
+
+So the proxy makes the stream honest before any of them sees it. For the first
+`liveview_audio_wait_seconds` (default `2`) of a live view it holds the start of
+the stream. If audio turns up it forwards everything unchanged, and a camera
+that announces no audio is forwarded unchanged at once, so neither pays any
+delay. If the camera announced audio and sent none, the announcement is removed
+from the stream for the rest of that live view and the session is video only.
+The log says so:
+
+```text
+Camera Driveway announced audio (PID 0x101) but sent none for 2.0s; serving
+video only so players and ffmpeg do not wait for it. Check the camera's audio
+setting in the Blink app if sound is expected.
+```
+
+That line means the camera sent no sound, not that the proxy lost it. If sound
+is expected, look at the camera's audio setting in the Blink app. The decision
+is made once per live view and is not revisited: a browser cannot add a sound
+track to a picture that has started, so audio that arrives later is dropped
+rather than announced halfway through.
+
+Set `liveview_audio_wait_seconds` to `0` to turn this off and hand every
+consumer the camera's stream exactly as it sent it. Only the stream's table of
+streams is ever rewritten, and only when it fits in one transport packet; a
+stream the proxy cannot read is passed through untouched.
+
 Blink's RTSP server does not follow RFC 2326: it answers every request with
 `CSeq: 1` instead of echoing the sequence number, and omits both `Session` and
 `Transport` on `SETUP`. Any one of those is fatal to a strict client, which is

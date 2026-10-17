@@ -22,7 +22,7 @@ from homeassistant.helpers.http import KEY_AUTHENTICATED
 from . import prerequisites
 from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
 from .failures import failure_payload
-from .dashboard_yaml import render_dashboard_yaml
+from .dashboard_yaml import HEALTH_ENTITY_ID, render_dashboard_yaml
 from .lovelace import resource_collection, resource_mode
 from .playlist import tokenise_playlist
 from .const import (
@@ -168,6 +168,29 @@ def _runtime_entry(hass: HomeAssistant) -> tuple[str, dict[str, Any]]:
         if not str(key).startswith("_") and isinstance(value, dict):
             return str(key), value
     raise web.HTTPServiceUnavailable(text="Blink live-view proxy is not configured\n")
+
+
+def _health_entity_id(hass: HomeAssistant) -> str:
+    """The proxy health sensor's entity id, as this install holds it.
+
+    A fresh install gets binary_sensor.blink_liveview_proxy. One that registered
+    the sensor before its id was set outright, on 2026.9 or later, holds that id
+    with the device's name in front, and the registry keeps what it has. The
+    dashboard's Proxy pill has to name the one that exists.
+    """
+    # Imported here, not at the top, for the reason _snapshot_entity_id gives.
+    from homeassistant.helpers import entity_registry as er
+
+    try:
+        entry_id, _runtime_data = _runtime_entry(hass)
+    except web.HTTPServiceUnavailable:
+        return HEALTH_ENTITY_ID
+    return (
+        er.async_get(hass).async_get_entity_id(
+            "binary_sensor", DOMAIN, f"{entry_id}_health"
+        )
+        or HEALTH_ENTITY_ID
+    )
 
 
 def _client(hass: HomeAssistant) -> BlinkLiveviewProxyClient:
@@ -1357,6 +1380,11 @@ const sound = document.getElementById("sound");
 const endButton = document.getElementById("end");
 let player = null;
 let endTimer = null;
+let startTimer = null;
+// Whether any media has reached the browser, as the player reports it.
+let bytesArrived = false;
+// Set when the browser would not start the picture without a tap.
+let tapNeeded = false;
 let talkWs = null;
 let talkStream = null;
 let talkContext = null;
@@ -1420,6 +1448,7 @@ async function startPlayback() {{
   }} catch (err) {{
     if (video.muted) {{
       statusText.textContent = "Tap play to start live view";
+      tapNeeded = true;
       return;
     }}
   }}
@@ -1431,6 +1460,7 @@ async function startPlayback() {{
     await video.play();
   }} catch (err) {{
     statusText.textContent = "Tap play to start live view";
+    tapNeeded = true;
   }}
 }}
 
@@ -1861,6 +1891,7 @@ function setEnded(message) {{
 
 function stopPlayer() {{
   stopTalk();
+  disarmStartWatchdog();
   if (endTimer) {{
     clearTimeout(endTimer);
     endTimer = null;
@@ -1882,8 +1913,50 @@ function stopPlayer() {{
   video.load();
 }}
 
+// How long a live view may take to put a picture up. Blink waking a camera
+// takes a few seconds to a dozen, and the proxy gives the HLS path thirty
+// itself (hls_start_timeout). Past this the page used to say nothing at all
+// until the session limit ended it, and then said "60 second live view
+// finished", which reads as a stream that played. It never did: the camera was
+// silent, or sent something the browser could not start. Which of those it was
+// is worth telling, because the fix for each is different.
+const START_TIMEOUT_MS = 30000;
+const NO_VIDEO_MESSAGE =
+  "The camera did not start sending video. It may be offline, or asleep on a weak signal. Restart to try again.";
+const NO_PICTURE_MESSAGE =
+  "Video is arriving, but this browser could not start it. Restart to try again, and tell whoever looks after the proxy if it keeps happening.";
+
+function disarmStartWatchdog() {{
+  if (startTimer) {{
+    clearTimeout(startTimer);
+    startTimer = null;
+  }}
+}}
+
+function armStartWatchdog() {{
+  disarmStartWatchdog();
+  startTimer = setTimeout(() => {{
+    startTimer = null;
+    endSession(noPictureMessage());
+  }}, START_TIMEOUT_MS);
+}}
+
+function noPictureMessage() {{
+  return bytesArrived || video.buffered.length > 0 ? NO_PICTURE_MESSAGE : NO_VIDEO_MESSAGE;
+}}
+
+// What to say when the session limit arrives: that the live view finished, but
+// only if there was a live view.
+function sessionLimitMessage() {{
+  return video.classList.contains("ready")
+    ? `${{seconds}} second live view finished.`
+    : noPictureMessage();
+}}
+
 async function startPlayer() {{
   stopPlayer();
+  bytesArrived = false;
+  tapNeeded = false;
   setLoading("Waking camera and waiting for video");
 
   const canMse = !!(window.mpegts && mpegts.getFeatureList().mseLivePlayback);
@@ -1895,6 +1968,7 @@ async function startPlayer() {{
     // MPEG-TS player always dies with E-001b. They do play HLS natively, and
     // the proxy already produces an HLS rendition, so use it.
     video.onplaying = () => {{
+      disarmStartWatchdog();
       video.classList.add("ready");
       overlay.classList.add("hidden");
       actions.hidden = true;
@@ -1912,9 +1986,14 @@ async function startPlayer() {{
     }};
     video.src = hlsUrl();
     video.load();
+    // Before the await, not after: play() does not settle until media is
+    // playing, so on a stream that never starts nothing below it would ever run.
+    armStartWatchdog();
     await startPlayback();
+    // A browser that wants a tap is waiting for the viewer, not stalled.
+    if (tapNeeded) disarmStartWatchdog();
     endTimer = setTimeout(() => {{
-      endSession(`${{seconds}} second live view finished.`);
+      endSession(sessionLimitMessage());
     }}, (seconds + 5) * 1000);
     return;
   }}
@@ -1943,8 +2022,12 @@ async function startPlayer() {{
   player.on(mpegts.Events.ERROR, () => {{
     endSession("Live view ended or the camera stopped sending video.");
   }});
+  player.on(mpegts.Events.STATISTICS_INFO, (info) => {{
+    if (info && info.speed > 0) bytesArrived = true;
+  }});
 
   video.onplaying = () => {{
+    disarmStartWatchdog();
     video.classList.add("ready");
     overlay.classList.add("hidden");
     actions.hidden = true;
@@ -1962,10 +2045,15 @@ async function startPlayer() {{
   player.attachMediaElement(video);
   player.load();
 
+  // Before the await, not after: play() does not settle until media is
+  // playing, so on a stream that never starts nothing below it would ever run.
+  armStartWatchdog();
   await startPlayback();
+  // A browser that wants a tap is waiting for the viewer, not stalled.
+  if (tapNeeded) disarmStartWatchdog();
 
   endTimer = setTimeout(() => {{
-    endSession(`${{seconds}} second live view finished.`);
+    endSession(sessionLimitMessage());
   }}, (seconds + 5) * 1000);
 }}
 
@@ -4212,6 +4300,10 @@ class BlinkLiveviewProxyPanelYamlView(HomeAssistantView):
             if not cameras:
                 raise web.HTTPNotFound(text="Unknown camera slug\n")
         return web.json_response(
-            {"yaml": render_dashboard_yaml(cameras, output_format)},
+            {
+                "yaml": render_dashboard_yaml(
+                    cameras, output_format, _health_entity_id(self.hass)
+                )
+            },
             headers=AUTH_VIEW_HEADERS,
         )

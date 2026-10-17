@@ -121,9 +121,12 @@ views:
         card_param: cards
         filter:
           template: |
+            {#- The live cameras are the ones that carry proxy_slug. Not matched by
+                their entity id: Home Assistant derives that id, and from 2026.9 it
+                derives it with the device's name in front, so a prefix test finds
+                nothing on a fresh install. -#}
             {%- for s in states.camera
-                  if s.entity_id.startswith('camera.blink_live_')
-                  and state_attr(s.entity_id, 'proxy_slug') -%}
+                  if state_attr(s.entity_id, 'proxy_slug') -%}
               {%- set slug = state_attr(s.entity_id, 'proxy_slug') -%}
               {%- set live = s.entity_id -%}
               {%- set src  = 'camera.blink_proxy_' ~ slug -%}

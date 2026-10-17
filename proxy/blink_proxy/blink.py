@@ -41,6 +41,7 @@ from .constants import (
     MAX_IMMI_PAYLOAD_BYTES,
 )
 from .rtsp import BlinkRtspLiveStream
+from .tsguard import DEFAULT_AUDIO_WAIT_SECONDS, AudioGuard, audio_wait_from_config
 from .util import normalize_slug, redact_liveview_response
 
 LOGGER = logging.getLogger(LOGGER_NAME)
@@ -138,10 +139,21 @@ def camera_ptt_supported(
 class TokenAwareBlinkLiveStream(BlinkLiveStream):
     """BlinkPy stream with local protocol fixes for Blink IMMI live view."""
 
-    def __init__(self, camera: Any, response: dict[str, Any], send_token: bool):
+    def __init__(
+        self,
+        camera: Any,
+        response: dict[str, Any],
+        send_token: bool,
+        audio_wait_seconds: float = DEFAULT_AUDIO_WAIT_SECONDS,
+    ):
         super().__init__(camera, response)
         self.liveview_token = response.get("liveview_token", "") if send_token else ""
         self._write_lock = asyncio.Lock()
+        # Every consumer of this stream, from the browser's player to ffmpeg,
+        # believes what the camera announces about its audio. See tsguard.py.
+        self._audio_guard = AudioGuard(
+            str(getattr(camera, "name", "") or ""), audio_wait_seconds
+        )
         # What the camera last said about its lamp on the accessory channel,
         # None until it has said anything. A Wired Floodlight reports as the
         # session opens; a camera without a lamp never does.
@@ -267,6 +279,13 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
             return
         LOGGER.debug("Ignoring IMMI accessory message %d", sequence)
 
+    async def _write_to_clients(self, payload: bytes) -> None:
+        for writer in list(self.clients):
+            if writer.is_closing():
+                continue
+            writer.write(payload)
+            await writer.drain()
+
     async def recv(self) -> None:
         """Copy complete MPEG-TS payload frames from Blink to local clients."""
         if self.target_reader is None or self.target_writer is None:
@@ -305,14 +324,22 @@ class TokenAwareBlinkLiveStream(BlinkLiveStream):
                     )
                     continue
 
+                # Nothing comes back while the guard is still finding out
+                # whether the audio the camera announced is coming.
+                payload = self._audio_guard.push(payload)
+                if not payload:
+                    continue
+
                 LOGGER.debug("Sending %d MPEG-TS bytes to clients", len(payload))
-                for writer in list(self.clients):
-                    if writer.is_closing():
-                        continue
-                    writer.write(payload)
-                    await writer.drain()
+                await self._write_to_clients(payload)
 
                 await asyncio.sleep(0)
+
+            # A stream that ends inside the guard's wait still owes its clients
+            # what it sent.
+            tail = self._audio_guard.flush()
+            if tail:
+                await self._write_to_clients(tail)
         except ssl.SSLError as err:
             if err.reason != "APPLICATION_DATA_AFTER_CLOSE_NOTIFY":
                 LOGGER.exception("SSL error while receiving Blink IMMI data")
@@ -682,7 +709,11 @@ class BlinkStreamBroker:
         # Blink hands some cameras an rtsps:// URL instead of immis://; see
         # rtsp.py for why handing that URL to ffmpeg does not work.
         if server.startswith(("rtsp://", "rtsps://")):
-            rtsp_stream = BlinkRtspLiveStream(camera, response)
+            rtsp_stream = BlinkRtspLiveStream(
+                camera,
+                response,
+                audio_wait_seconds=audio_wait_from_config(self.client.config),
+            )
             await rtsp_stream.start(host="127.0.0.1", port=None)
             try:
                 await rtsp_stream.connect()
@@ -717,6 +748,7 @@ class BlinkStreamBroker:
             camera,
             response,
             send_token=bool(self.client.config.get("send_liveview_token", False)),
+            audio_wait_seconds=audio_wait_from_config(self.client.config),
         )
         await stream.start(host="127.0.0.1", port=None)
         feed_task = asyncio.create_task(stream.feed(), name=f"blink-feed-{slug}")

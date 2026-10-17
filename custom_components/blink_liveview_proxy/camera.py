@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import BlinkLiveviewProxyClient, ProxyError
+from .blink_devices import live_camera_object_id
 from .blink_entity import (
     SNAPSHOT_SUFFIX,
     BlinkProxyCameraEntity,
@@ -106,6 +107,14 @@ class BlinkLiveviewProxyCamera(
 
         self._attr_name = f"Blink Live {name}"
         self._attr_unique_id = f"{entry.entry_id}_{key}_live"
+        # Set outright, as the entities beside it are (see BlinkProxyCameraEntity).
+        # Left to Home Assistant this id is derived from the name, and from 2026.9
+        # it is derived with the device's name in front: a fresh install got
+        # camera.blink_driveway_blink_live_driveway, which nothing in the
+        # documentation, the examples or the generators spells, so a tile that
+        # guessed it found no camera. A camera that is already registered keeps
+        # the id it has.
+        self.entity_id = f"camera.{live_camera_object_id(slug)}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, key)},
             "name": f"Blink {name}",

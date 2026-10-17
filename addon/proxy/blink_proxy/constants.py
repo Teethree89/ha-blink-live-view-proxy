@@ -85,6 +85,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "clip_cache_max_mb": 512,
     "mpegts_session_seconds": 60,
     "mpegts_cooldown_seconds": 30,
+    # How long the start of a live view is held while the proxy finds out
+    # whether the audio the camera announced is coming. A camera that announces
+    # audio and sends none is then served as video only, because the browser's
+    # player waits for that audio for ever and ffmpeg cannot write it. A stream
+    # that does carry audio is never altered. 0 turns the check off. See
+    # tsguard.py.
+    "liveview_audio_wait_seconds": 2.0,
     "save_liveview_cache": True,
     "ptt_aac_bitrate": "40k",
     "ptt_strip_adts": False,

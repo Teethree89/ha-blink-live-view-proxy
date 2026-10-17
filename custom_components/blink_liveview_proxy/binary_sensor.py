@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .blink_devices import sync_online
+from .blink_devices import HEALTH_OBJECT_ID, sync_online
 from .blink_entity import (
     BlinkProxyCameraEntity,
     BlinkProxySyncEntity,
@@ -73,24 +73,25 @@ class BlinkLiveviewProxyHealthSensor(
     ) -> None:
         super().__init__(coordinator)
         self._attr_unique_id = f"{entry.entry_id}_health"
+        # Every example dashboard and the generators' proxy pill read
+        # binary_sensor.blink_liveview_proxy, and installs from before the
+        # rename keep that id in the entity registry regardless - so a fresh
+        # install must land on the same one, or the same YAML works for one
+        # group and not the other.
+        #
+        # Set outright, not suggested through the suggested_object_id property,
+        # which this used to be: from Home Assistant 2026.9 that is only a base
+        # and gets the device's name put in front of it, which made a fresh
+        # install's sensor binary_sensor.blink_live_view_proxy_blink_liveview_proxy
+        # and left every generated dashboard's pill reading nothing. An entity_id
+        # set before the entity is added is taken as it is, on every release
+        # this integration supports; see BlinkProxyCameraEntity.
+        self.entity_id = f"binary_sensor.{HEALTH_OBJECT_ID}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "Blink Live View Proxy",
             "manufacturer": "Local",
         }
-
-    @property
-    def suggested_object_id(self) -> str | None:
-        """Keep binary_sensor.blink_liveview_proxy through the rename.
-
-        Home Assistant derives a new entity's object id from its name, and the
-        name is now "Blink Live View Proxy". Every example dashboard and the
-        generator's proxy pill read binary_sensor.blink_liveview_proxy, and
-        installs from before the rename keep that id in the entity registry
-        regardless - so a fresh install must land on the same one, or the
-        same YAML works for one group and not the other.
-        """
-        return "blink_liveview_proxy"
 
     @property
     def is_on(self) -> bool:

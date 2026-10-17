@@ -181,12 +181,54 @@ def test_saving_state() -> None:
     )
 
 
+def test_start_watchdog() -> None:
+    """A live view that never puts a picture up must say so, and say which kind.
+
+    Issue #80: a camera announced audio it never sent, mpegts.js buffered the
+    video and never showed it, and the dialog sat on "Waking camera and waiting
+    for video" with no end. The cause was fixed in the proxy, but the page was
+    also at fault: play() does not settle until media is playing, so on a stream
+    that never starts nothing written after `await startPlayback()` ever ran -
+    not the session-limit timer either. A watchdog armed after that await would
+    be dead code, and this is the check that says so.
+    """
+    print("start watchdog")
+    page = player_page()
+    check("const START_TIMEOUT_MS = 30000" in page, "a picture has thirty seconds to appear")
+    arms = [m.start() for m in re.finditer(r"armStartWatchdog\(\);", page)]
+    awaits = [m.start() for m in re.finditer(r"await startPlayback\(\);", page)]
+    check(len(awaits) == 2, "both the MSE and the HLS start paths wait for playback")
+    check(
+        all(any(0 < wait - arm < 400 for arm in arms) for wait in awaits),
+        "the watchdog is armed before each await, not after it",
+    )
+    check(page.count("disarmStartWatchdog();\n      video.classList.add(\"ready\")") == 1
+          and page.count("disarmStartWatchdog();\n    video.classList.add(\"ready\")") == 1,
+          "a picture appearing disarms it on both paths")
+    check("  disarmStartWatchdog();\n  if (endTimer)" in page, "ending a session disarms it")
+    check(
+        page.count("if (tapNeeded) disarmStartWatchdog();") == 2 and page.count("tapNeeded = true;") == 2,
+        "a browser that wants a tap to start is waiting for the viewer, not stalled",
+    )
+    check("bytesArrived = true" in page and "mpegts.Events.STATISTICS_INFO" in page,
+          "it learns from the player whether any media arrived")
+    check("The camera did not start sending video" in page and "Video is arriving, but" in page,
+          "and says which of the two it was")
+    check(page.count("endSession(sessionLimitMessage())") == 2,
+          "the session limit no longer claims a live view finished that never began")
+    check(
+        len(re.findall(r"second live view finished", page)) == 1,
+        "that sentence is said in one place only, and only for a view that played",
+    )
+
+
 def main() -> int:
     test_javascript_parses()
     test_portrait()
     test_landscape()
     test_notch()
     test_saving_state()
+    test_start_watchdog()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

@@ -198,8 +198,18 @@ jobs:
       - name: Live-view command tests
         run: python tests/test_liveview_commands.py
 
+      - name: Live-view audio guard tests
+        # Hand-built transport streams, plus the real ffmpeg commands when the
+        # runner has an ffmpeg to run them with.
+        run: python tests/test_tsguard.py
+
       - name: Player layout tests
         run: python tests/test_player_layout.py
+
+      - name: Dialog entity resolution tests
+        # The dialog's own functions, run under node against both shapes of
+        # entity id Home Assistant has handed out.
+        run: python tests/test_dialog_entities.py
 
   home-assistant:
     name: Home Assistant (${{ matrix.label }})
