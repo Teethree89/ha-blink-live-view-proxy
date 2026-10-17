@@ -9,12 +9,21 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
-## [Unreleased]
+## [1.2.0-rc.1] — 2026-10-17
 
 A live view that never started on a camera that announces audio and sends none,
 and generated dashboards that named entities Home Assistant no longer gives a
 fresh install. The first needs the proxy updated; the rest are in the
 integration.
+
+**This is a release candidate**, cut so the first fix can be confirmed on the
+camera it was written for and on an iPhone before it is called 1.2.0. Everything
+below passes the test suite, including Home Assistant 2026.2 and 2026.9, but
+the two things it could not exercise are the reporter's own camera and iOS or
+WebKit. If you try it, the proxy log line to look for is `announced audio (PID
+0x…) but sent none for 2.0s; serving video only`; the full list of what to
+check is in the pull request, [#81]. The proxy and the integration need to be
+updated together.
 
 ### Fixed
 
@@ -68,6 +77,7 @@ integration.
 integration, and keeps the audio behaviour above until it is updated.
 
 [#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
+[#81]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/81
 
 ## [1.1.0] — 2026-10-15
 
