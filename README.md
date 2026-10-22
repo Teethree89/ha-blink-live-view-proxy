@@ -491,13 +491,22 @@ Blink account login, token refresh, camera discovery, and the live-view
 handshake this project extends all come from that library. Written and
 maintained by **Kevin Fronczak** ([@fronzbot](https://github.com/fronzbot)).
 
+The live-view dialog plays the stream with
+[**mpegts.js**](https://github.com/xqq/mpegts.js) 1.7.3 by **zheng qian**
+([@xqq](https://github.com/xqq)), itself based on Bilibili's
+[flv.js](https://github.com/bilibili/flv.js). It ships unmodified in
+[`custom_components/blink_liveview_proxy/frontend/`](custom_components/blink_liveview_proxy/frontend/)
+under the Apache License 2.0; its license and copyright notice are in
+[`mpegts.js.LICENSE`](custom_components/blink_liveview_proxy/frontend/mpegts.js.LICENSE).
+
 Everyone who has shipped a merged pull request to this repository, including
 this project's own maintainer, is tracked with a running count in
 [CONTRIBUTORS.md](CONTRIBUTORS.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). That covers this project's own code; the bundled
+mpegts.js is Apache 2.0, as credited above.
 
 Not affiliated with, endorsed by, or supported by Amazon or Blink. This is an
 interoperability project for cameras you already own.

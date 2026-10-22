@@ -126,7 +126,9 @@ class BlinkLiveviewProxyAssetView(HomeAssistantView):
             raise web.HTTPNotFound()
 
         path = self._roots.get(filename, STATIC_ROOT) / filename
-        if not path.exists():
+        # A stat on the event loop would stall every other integration on slow
+        # storage, and the dialog, icons and player are fetched on each load.
+        if not await self.hass.async_add_executor_job(path.exists):
             raise web.HTTPNotFound(text=f"Missing static asset: {filename}\n")
 
         return web.FileResponse(
