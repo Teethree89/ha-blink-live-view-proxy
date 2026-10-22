@@ -382,6 +382,32 @@ def test_first_cloud_thumbnails_are_free() -> None:
           "an auto tile still only fetches when it scrolls into view")
 
 
+def test_asset_view_stays_off_the_event_loop() -> None:
+    print("\nasset view")
+    tree = ast.parse((COMPONENT / "views.py").read_text())
+    view = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == "BlinkLiveviewProxyAssetView"
+    )
+    handler = next(
+        node for node in view.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "get"
+    )
+    # The dialog, icons and player library are fetched on every dashboard and
+    # player load, so a stat here is paid on the event loop that every other
+    # integration shares. HACS review asked for exactly this. Passing
+    # `path.exists` to the executor is an Attribute, not a Call, so it passes.
+    blocking = [
+        ast.unparse(node) for node in ast.walk(handler)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"exists", "is_file", "stat", "read_bytes", "read_text"}
+    ]
+    check(not blocking, f"the handler makes no filesystem call itself ({blocking})")
+    check("async_add_executor_job(path.exists)" in ast.unparse(handler),
+          "the existence check runs in the executor")
+
+
 def main() -> int:
     test_yaml()
     test_backend_contract()
@@ -390,6 +416,7 @@ def main() -> int:
     test_dialog_viewer_lists_every_camera()
     test_clip_source_select()
     test_first_cloud_thumbnails_are_free()
+    test_asset_view_stays_off_the_event_loop()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

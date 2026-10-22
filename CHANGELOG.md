@@ -9,6 +9,27 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [Unreleased]
+
+Two things the HACS default-repository review asked for. Nothing changes in how
+the proxy or the integration is used.
+
+### Fixed
+
+- **The asset view no longer touches the filesystem on Home Assistant's event
+  loop.** It checked that a requested file existed with a plain `stat` inside the
+  async handler, and the dialog, icon set and player library are fetched on every
+  dashboard and player load. On slow storage (an SD card, a network-mounted
+  config folder) that stalled every other integration for the length of the
+  read. The check now runs in the executor.
+
+### Added
+
+- **The mpegts.js license, beside the library** (`frontend/mpegts.js.LICENSE`).
+  The bundled player library is Apache 2.0, which the repository's MIT `LICENSE`
+  does not cover and which requires its license and copyright notice to travel
+  with a redistributed copy. The README now credits it.
+
 ## [1.2.0] — 2026-10-17
 
 A live view that never started on a camera that announces audio and sends none,

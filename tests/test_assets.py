@@ -1188,6 +1188,34 @@ def test_clips_toolbar_clears_the_status_bar() -> None:
     )
 
 
+def test_bundled_library_carries_its_license() -> None:
+    """mpegts.js is Apache 2.0; the MIT LICENSE here covers only our own code.
+
+    HACS review asked for the notice to sit beside the file and be credited in
+    the README. Apache 2.0 requires the license and copyright notice to travel
+    with a redistributed copy, so a refreshed mpegts.min.js must bring its own.
+    """
+    print("\nbundled mpegts.js ships with its license")
+    frontend = ROOT / "custom_components/blink_liveview_proxy/frontend"
+    library = (frontend / "mpegts.min.js").read_text()
+    notice = frontend / "mpegts.js.LICENSE"
+    check(notice.is_file(), "the license sits next to the library")
+    if not notice.is_file():
+        return
+    text = notice.read_text()
+    version = re.search(r"mpegts\.js@(\d+\.\d+\.\d+)/", library)
+    check(version is not None and f"mpegts.js {version.group(1)} " in text,
+          "and names the version that is bundled")
+    check("Apache License" in text and "Version 2.0, January 2004" in text,
+          "and carries the Apache 2.0 text")
+    check("TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION" in text
+          and "END OF TERMS AND CONDITIONS" in text, "in full")
+    check("Copyright (C)" in text, "with the upstream copyright notice")
+    readme = (ROOT / "README.md").read_text()
+    check("github.com/xqq/mpegts.js" in readme and "mpegts.js.LICENSE" in readme,
+          "and the README credits it and links the notice")
+
+
 def main() -> int:
     for test in (
         test_yaml_parses,
@@ -1216,6 +1244,7 @@ def main() -> int:
         test_secure_context_reaches_the_readout,
         test_push_to_talk_defaults_to_offered,
         test_clips_toolbar_clears_the_status_bar,
+        test_bundled_library_carries_its_license,
     ):
         test()
 
