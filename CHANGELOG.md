@@ -9,10 +9,11 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
-## [Unreleased]
+## [1.2.1] — 2026-10-21
 
-Two things the HACS default-repository review asked for. Nothing changes in how
-the proxy or the integration is used.
+Two things the HACS default-repository review asked for ([#82]). Nothing changes
+in how the proxy or the integration is used. Only the integration changed; the
+proxy's code is untouched, and its version moves only to stay in step.
 
 ### Fixed
 
@@ -95,6 +96,7 @@ integration, and keeps the audio behaviour above until it is updated.
 
 [#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
 [#81]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/81
+[#82]: https://github.com/Teethree89/ha-blink-live-view-proxy/pull/82
 
 ## [1.1.0] — 2026-10-15
 
