@@ -468,6 +468,9 @@ that file out of git. The authentication panel sends credentials and PINs only
 in no-store request bodies, does not use browser-persistent storage, and never
 receives the proxy token; Home Assistant adds it server-side.
 
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Please report it
+privately, not in a public issue.
+
 ## Frameo / Wall Panel Notes
 
 <img src="https://raw.githubusercontent.com/Teethree89/ha-blink-live-view-proxy/main/docs/images/ha-light-panel-cameras.jpg" alt="The HA Light Panel camera view: six Blink camera tiles, each with a snapshot, temperature, battery state, and Snapshot, Motion and Clips buttons" width="100%">
