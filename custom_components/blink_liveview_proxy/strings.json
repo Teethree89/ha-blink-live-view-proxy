@@ -17,8 +17,11 @@
         }
       },
       "proxy_setup": {
-        "title": "Install the Blink Live View Proxy add-on",
-        "description": "The HACS integration needs a companion proxy service. In Home Assistant, open Settings → Add-ons → Add-on Store → ⋮ → Repositories and add https://github.com/Teethree89/ha-blink-live-view-proxy . Then install and start the Blink Live View Proxy add-on, and follow its Configuration tab to sign in to Blink. Return here and select Submit to connect. The add-on automatically shares its proxy URL and token with this integration. This step does not install or start anything for you."
+        "title": "Companion proxy installation",
+        "menu_options": {
+          "install_companion": "Install the companion add-on automatically",
+          "connect": "I'll set up the proxy myself"
+        }
       },
       "connect": {
         "title": "Blink Live View Proxy",
@@ -31,12 +34,21 @@
         "data_description": {
           "stream_seconds": "Allowed range: 10-300 seconds. Longer sessions can use more Blink live-view quota and may run into camera or cloud-side limits."
         }
+      },
+      "install_companion": {
+        "title": "Confirm companion add-on installation",
+        "description": "By selecting Submit, you authorize Home Assistant Supervisor to add the project repository https://github.com/Teethree89/ha-blink-live-view-proxy if necessary, and install the Blink Live View Proxy add-on. Existing installations will not be replaced. This does not start the add-on or sign in to Blink. You can cancel to make no changes."
+      },
+      "companion_ready": {
+        "title": "Companion add-on installed",
+        "description": "The companion add-on is installed. Open Settings → Apps (or Add-ons), find Blink Live View Proxy, enter your Blink account settings in Configuration, and start it. Complete Blink's 2FA when prompted. Return here and select Submit to connect; the proxy URL and token will be detected automatically."
       }
     },
     "error": {
       "cannot_connect": "Could not connect to the proxy.",
       "invalid_auth": "The proxy token was rejected.",
-      "unknown": "Unexpected error."
+      "unknown": "Unexpected error.",
+      "addon_install_failed": "Could not install the companion add-on. Check Supervisor logs and try again, or choose manual setup."
     },
     "abort": {
       "already_configured": "This proxy is already configured.",
