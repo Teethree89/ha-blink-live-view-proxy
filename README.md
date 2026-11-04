@@ -68,9 +68,7 @@ If this saves you a little time, [buy me a coffee](https://paypal.me/ABPaintball
   local HTTPS origin.
 
 See the [roadmap](docs/ROADMAP.md) for what is planned, what is deliberately
-out of scope, and the rough edges worth knowing about, and the [HACS
-submission plan](docs/HACS_SUBMISSION.md) for what still stands between this
-and being listed in HACS by default.
+out of scope, and the rough edges worth knowing about.
 
 ## Known Limits
 
@@ -260,22 +258,33 @@ token on first start — read it with
 volume: it holds the Blink refresh token. A `docker-compose.example.yml` is in
 the repository root.
 
-## HACS Custom Repository
+## Install the Home Assistant Integration (HACS)
 
-Install the Home Assistant integration half through HACS:
+**Blink Live View Proxy is available in the default HACS catalog.** You no
+longer need to add a custom repository for a normal installation:
 
-1. In HACS open the three-dot menu → **Custom repositories**.
-2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
-3. Download it, restart Home Assistant, then add `Blink Live View Proxy` from
-   `Settings → Devices & services`.
+1. Open **HACS** in Home Assistant and search for **Blink Live View Proxy**.
+2. Select **Blink Live View Proxy** and choose **Download**.
+3. Restart Home Assistant.
+4. Go to **Settings → Devices & services → Add integration**, search for
+   **Blink Live View Proxy**, and complete setup.
 
 HACS installs only `custom_components/blink_liveview_proxy`. You still need
-either the add-on (Option A) or the Linux proxy service (Option B) running
-alongside it.
+the separate proxy running: use the Home Assistant add-on (Option A), Linux
+service (Option B), or Docker (Option C) described above.
 
-A default HACS listing — findable by typing "blink" into HACS, no URL to
-paste — is the next step. What it takes, and where it stands, is in
-[docs/HACS_SUBMISSION.md](docs/HACS_SUBMISSION.md).
+### Fallback — HACS Custom Repository
+
+If **Blink Live View Proxy** does not appear in HACS search, you can install it
+as a custom repository instead:
+
+1. In HACS, open the three-dot menu → **Custom repositories**.
+2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy` as an
+   **Integration** repository.
+3. Find **Blink Live View Proxy** in HACS, download it, restart Home Assistant,
+   then add it from **Settings → Devices & services**.
+
+The fallback installs the same integration and still requires a running proxy.
 
 ## Proxy API Layout
 
