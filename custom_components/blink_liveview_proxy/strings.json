@@ -3,6 +3,24 @@
   "config": {
     "step": {
       "user": {
+        "title": "Set up Blink Live View Proxy",
+        "menu_options": {
+          "proxy_setup": "Set up the companion add-on (Home Assistant OS / Supervised)",
+          "connect": "Connect to an existing proxy (Linux / Docker / already installed)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Blink Live View Proxy token",
+        "description": "The proxy rejected the stored token. Enter the current proxy token; if the add-on shared one, it is filled in for you.",
+        "data": {
+          "token": "Proxy token"
+        }
+      },
+      "proxy_setup": {
+        "title": "Install the Blink Live View Proxy add-on",
+        "description": "The HACS integration needs a companion proxy service. In Home Assistant, open Settings → Add-ons → Add-on Store → ⋮ → Repositories and add https://github.com/Teethree89/ha-blink-live-view-proxy . Then install and start the Blink Live View Proxy add-on, and follow its Configuration tab to sign in to Blink. Return here and select Submit to connect. The add-on automatically shares its proxy URL and token with this integration. This step does not install or start anything for you."
+      },
+      "connect": {
         "title": "Blink Live View Proxy",
         "description": "Connect Home Assistant to the local Blink live-view proxy. Live-view duration controls how long the direct player asks the proxy to keep each stream open; Blink may still end a session early.",
         "data": {
@@ -12,13 +30,6 @@
         },
         "data_description": {
           "stream_seconds": "Allowed range: 10-300 seconds. Longer sessions can use more Blink live-view quota and may run into camera or cloud-side limits."
-        }
-      },
-      "reauth_confirm": {
-        "title": "Blink Live View Proxy token",
-        "description": "The proxy rejected the stored token. Enter the current proxy token; if the add-on shared one, it is filled in for you.",
-        "data": {
-          "token": "Proxy token"
         }
       }
     },
@@ -59,7 +70,7 @@
   "issues": {
     "proxy_outdated": {
       "title": "The Blink proxy is older than this integration needs",
-      "description": "The proxy at {base_url} reports {proxy_version}. This integration needs {minimum_version} or newer.\n\nLive view, clips and push-to-talk keep working. What fails is anything the newer proxy added \u2014 browser authentication answers 404, because those routes have never existed in that build.\n\nThe two halves update independently: HACS moves the integration, and nothing moves the proxy. On a Linux service install, run this on the proxy host from a checkout of the repository:\n\n```\nsudo scripts/install-proxy.sh\n```\n\nIt keeps your token, config and Blink session, and restarts the service. Add-on installs update from the add-on store.\n\nThis notice clears itself once the proxy reports {minimum_version} or newer."
+      "description": "The proxy at {base_url} reports {proxy_version}. This integration needs {minimum_version} or newer.\n\nLive view, clips and push-to-talk keep working. What fails is anything the newer proxy added — browser authentication answers 404, because those routes have never existed in that build.\n\nThe two halves update independently: HACS moves the integration, and nothing moves the proxy. On a Linux service install, run this on the proxy host from a checkout of the repository:\n\n```\nsudo scripts/install-proxy.sh\n```\n\nIt keeps your token, config and Blink session, and restarts the service. Add-on installs update from the add-on store.\n\nThis notice clears itself once the proxy reports {minimum_version} or newer."
     },
     "proxy_outdated_fixable": {
       "title": "The Blink proxy is older than this integration needs",
@@ -73,7 +84,7 @@
         "abort": {
           "already_running": "An update is already running on the proxy. Give it a minute, then check whether this notice has cleared on its own.",
           "not_supported": "This proxy cannot update itself. Update it the way it was installed: re-run scripts/install-proxy.sh on the host, or pull the new image and recreate the container.",
-          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings \u2192 Add-ons.",
+          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings → Add-ons.",
           "entry_gone": "This proxy is no longer set up in Home Assistant, so there is nothing left to update.",
           "update_failed": "The proxy could not be asked to update. Check that it is reachable and that the token is still valid, then look at the proxy host's logs."
         }
@@ -91,7 +102,7 @@
         "abort": {
           "already_running": "An update is already running on the proxy. Give it a minute, then check whether this notice has cleared on its own.",
           "not_supported": "This proxy cannot update itself. Update it the way it was installed: re-run scripts/install-proxy.sh on the host, or pull the new image and recreate the container.",
-          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings \u2192 Add-ons.",
+          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings → Add-ons.",
           "entry_gone": "This proxy is no longer set up in Home Assistant, so there is nothing left to update.",
           "update_failed": "The proxy could not be asked to update. Check that it is reachable and that the token is still valid, then look at the proxy host's logs."
         }
