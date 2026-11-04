@@ -31,6 +31,15 @@ Then everyone continues from
 
 ## A — Home Assistant OS or Supervised
 
+On Home Assistant OS or Supervised, the integration's first-run setup now
+offers a **Set up the companion add-on** guide if it cannot find an add-on
+handoff token. It shows where to add this repository in the Add-on Store and
+how to install the proxy. After starting the add-on, return to the integration
+setup; its URL and generated token are filled in automatically. You can also
+choose **Connect to an existing proxy** to use Linux or Docker instead.
+
+The integration does not silently install or start an add-on.
+
 The add-on is the whole proxy. No Linux setup, no Python, no separate host.
 
 1. Go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
