@@ -31,14 +31,18 @@ Then everyone continues from
 
 ## A — Home Assistant OS or Supervised
 
-On Home Assistant OS or Supervised, the integration's first-run setup now
-offers a **Set up the companion add-on** guide if it cannot find an add-on
-handoff token. It shows where to add this repository in the Add-on Store and
-how to install the proxy. After starting the add-on, return to the integration
-setup; its URL and generated token are filled in automatically. You can also
-choose **Connect to an existing proxy** to use Linux or Docker instead.
+On Home Assistant OS or Supervised, first-run integration setup offers
+**Set up the companion add-on** if it cannot find an add-on handoff token.
+Choose **Install the companion add-on automatically** and explicitly confirm
+to let Home Assistant Supervisor add this project's repository (if needed)
+and install the add-on. This does not start the add-on or enter Blink
+credentials. Configure and start the add-on under **Settings → Apps** (called
+**Add-ons** on older Home Assistant versions), then return to the integration
+setup; its URL and generated token are filled in automatically.
 
-The integration does not silently install or start an add-on.
+You can instead choose **I'll set up the proxy myself** for manual installation
+or a Linux/Docker proxy. If Supervisor cannot install the add-on, use the
+manual steps below. No repository or add-on changes happen until confirmation.
 
 The add-on is the whole proxy. No Linux setup, no Python, no separate host.
 
