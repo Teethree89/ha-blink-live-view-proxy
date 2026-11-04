@@ -10,6 +10,9 @@ from typing import Any
 
 import voluptuous as vol
 
+from aiohasupervisor import SupervisorError
+from aiohasupervisor.models.addons import StoreAddRepository
+
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
@@ -47,6 +50,7 @@ LOGGER = logging.getLogger(__name__)
 # something swallows the packets, and nobody should wait on the API's full
 # ten seconds per candidate to be shown a form they can edit.
 PROBE_TIMEOUT = 4
+ADDON_REPOSITORY = "https://github.com/Teethree89/ha-blink-live-view-proxy"
 
 
 def _schema(defaults: dict[str, Any], *, blink_options: bool = False) -> vol.Schema:
@@ -274,12 +278,68 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_proxy_setup(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Explain add-on installation; do not install software implicitly."""
+        """Offer an explicit opt-in to install the companion add-on."""
+        if user_input is None:
+            return self.async_show_menu(
+                step_id="proxy_setup",
+                menu_options=["install_companion", "connect"],
+            )
+        return await self.async_step_connect()
+
+    async def async_step_install_companion(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Install only after confirmation; never change existing add-ons."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="install_companion", data_schema=vol.Schema({})
+            )
+
+        from homeassistant.components.hassio import get_supervisor_client
+
+        store = get_supervisor_client(self.hass).store
+        try:
+            repositories = await store.repositories_list()
+            repository = next(
+                (repo for repo in repositories
+                 if repo.source.rstrip("/").removesuffix(".git") == ADDON_REPOSITORY),
+                None,
+            )
+            if repository is None:
+                await store.add_repository(
+                    StoreAddRepository(repository=ADDON_REPOSITORY)
+                )
+                repositories = await store.repositories_list()
+                repository = next(
+                    (repo for repo in repositories
+                     if repo.source.rstrip("/").removesuffix(".git") == ADDON_REPOSITORY),
+                    None,
+                )
+            if repository is None:
+                raise ValueError("The companion repository was not found after adding it")
+
+            addon = f"{repository.slug}_{DOMAIN}"
+            info = await store.addon_info(addon)
+            if not info.installed:
+                await store.addon_availability(addon)
+                await store.install_addon(addon)
+        except (SupervisorError, ValueError):
+            LOGGER.exception("Could not install Blink companion add-on")
+            return self.async_show_form(
+                step_id="install_companion",
+                data_schema=vol.Schema({}),
+                errors={"base": "addon_install_failed"},
+            )
+        return await self.async_step_companion_ready()
+
+    async def async_step_companion_ready(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask the user to configure/start the installed add-on first."""
         if user_input is not None:
             return await self.async_step_connect()
         return self.async_show_form(
-            step_id="proxy_setup",
-            data_schema=vol.Schema({}),
+            step_id="companion_ready", data_schema=vol.Schema({})
         )
 
     async def async_step_connect(
