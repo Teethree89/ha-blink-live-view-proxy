@@ -257,7 +257,35 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial setup step."""
+        """Offer Supervisor users add-on guidance before connection setup."""
+        if user_input is not None:
+            return await self.async_step_connect(user_input)
+        # Only show this first-run guidance when the add-on has not handed
+        # over its token. Existing add-on installs keep their one-click flow.
+        if "hassio" in self.hass.config.components:
+            token = await _async_handoff_token(self.hass)
+            if not token:
+                return self.async_show_menu(
+                    step_id="user",
+                    menu_options=["proxy_setup", "connect"],
+                )
+        return await self.async_step_connect()
+
+    async def async_step_proxy_setup(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Explain add-on installation; do not install software implicitly."""
+        if user_input is not None:
+            return await self.async_step_connect()
+        return self.async_show_form(
+            step_id="proxy_setup",
+            data_schema=vol.Schema({}),
+        )
+
+    async def async_step_connect(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Connect to a running proxy, including external Linux/Docker hosts."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -302,7 +330,7 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
 
         return self.async_show_form(
-            step_id="user",
+            step_id="connect",
             data_schema=_schema(defaults),
             errors=errors,
         )
