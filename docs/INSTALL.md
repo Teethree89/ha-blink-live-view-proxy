@@ -33,6 +33,22 @@ Then everyone continues from
 
 The add-on is the whole proxy. No Linux setup, no Python, no separate host.
 
+**The quick way: let setup install it.** Install the integration first
+([Step 3](#3-add-the-ha-integration)). On a Supervisor install with no add-on
+yet, the first screen of **Add integration → Blink Live View Proxy** offers
+**Install the companion add-on**. Nothing is changed until you confirm the next
+screen, which says exactly what will happen: Home Assistant asks the Supervisor
+to add this project's repository to the add-on store, if it is not already
+there, and to install the add-on. It then stops. It does not start the add-on,
+does not replace one you already have, and does not use your Blink account.
+When the install finishes, carry on from step 3 below. If it fails, the flow
+says so and offers a retry or the manual route.
+
+Choose **Connect to a proxy I already run** instead if you would rather do it
+yourself, or if your proxy is on Linux or Docker.
+
+**The manual way.**
+
 1. Go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
@@ -319,9 +335,13 @@ The proxy reads it within seconds and deletes the file.
 
 **Via HACS (recommended):**
 
-1. Open HACS → three-dot menu → **Custom repositories**.
-2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy`, category `Integration`.
-3. Download it and restart Home Assistant.
+1. Open HACS and search for **Blink Live View Proxy**.
+2. Download it and restart Home Assistant.
+
+If it does not show up in the search, add it as a custom repository instead:
+HACS → three-dot menu → **Custom repositories**, add
+`https://github.com/Teethree89/ha-blink-live-view-proxy`, category
+`Integration`, then download it and restart.
 
 To install a release candidate, turn on **Show beta versions** for this
 repository first — HACS's three-dot menu, then Redownload. Without it the
@@ -341,6 +361,11 @@ After restarting:
 ```text
 Settings → Devices & services → Add integration → Blink Live View Proxy
 ```
+
+On a Home Assistant OS or Supervised install that has no add-on yet, the first
+screen asks whether to install the companion add-on or connect to a proxy you
+already run (see [A](#a--home-assistant-os-or-supervised)). Everyone else goes
+straight to the connection form.
 
 The URL depends on where the proxy runs:
 

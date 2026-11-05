@@ -162,6 +162,19 @@ the result — see the [Dashboard Guide](docs/DASHBOARD.md#requirements-at-a-gla
 If you run Home Assistant OS or Supervised, install the proxy as an add-on
 directly from the add-on store. No separate Linux host or Python setup required.
 
+**The quick way.** Install the integration from HACS, restart, and add
+**Blink Live View Proxy** under **Settings → Devices & services**. On a
+Supervisor install with no add-on yet, the first screen offers **Install the
+companion add-on**. If you confirm, Home Assistant asks the Supervisor to add
+this repository to the add-on store (when it is not already there) and install
+the add-on. That is all it does: it never starts the add-on, never touches an
+add-on you already have, and never uses your Blink account. Choose **Connect to
+a proxy I already run** instead and nothing is changed. Then continue from step
+3 below. If the install fails, the flow says so and you can retry or follow the
+manual steps.
+
+**The manual way.**
+
 1. In HA go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
