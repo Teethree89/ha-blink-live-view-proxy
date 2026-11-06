@@ -82,6 +82,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyAuthStatusView(hass))
     hass.http.register_view(BlinkLiveviewProxyAuthActionView(hass))
     hass.http.register_view(BlinkLiveviewProxyPanelView(hass))
+    hass.http.register_view(BlinkLiveviewProxyInstallationTestView(hass))
     hass.http.register_view(BlinkLiveviewProxyPanelUpdateView(hass))
     hass.http.register_view(BlinkLiveviewProxyPanelUpdateLogView(hass))
     hass.http.register_view(BlinkLiveviewProxyPanelYamlView(hass))
@@ -103,6 +104,7 @@ class BlinkLiveviewProxyAssetView(HomeAssistantView):
     _content_types: ClassVar[dict[str, str]] = {
         "blink-liveview-dialog.js": "application/javascript",
         "blink-proxy-auth-panel.js": "application/javascript",
+        "blink-installation-test.js": "application/javascript",
         "blink-liveview-icons.js": "application/javascript",
         "mpegts.min.js": "application/javascript",
         "logo.png": "image/png",
@@ -4183,6 +4185,93 @@ class BlinkLiveviewProxyPanelView(HomeAssistantView):
             await _panel_payload(self.hass, secure_context),
             headers=AUTH_VIEW_HEADERS,
         )
+
+
+class BlinkLiveviewProxyInstallationTestView(HomeAssistantView):
+    """Drive a real temporary proxy without creating or changing a HA entry."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel/installation-test"
+    name = "api:blink_liveview_proxy:installation_test"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def get(self, _request: web.Request) -> web.Response:
+        from homeassistant.helpers.system_info import async_get_system_info
+
+        info = await async_get_system_info(self.hass)
+        payload: dict[str, Any] = {
+            "home_assistant_installation": info.get("installation_type", "unknown"),
+            "supported": False,
+        }
+        try:
+            client = _auth_client(self.hass)
+            test = await client.async_get_installation_test()
+            payload.update({"supported": True, "test": test})
+            if test.get("phase") == "ready":
+                isolated = client.installation_test_client(test["id"])
+                payload["auth"] = await isolated.async_get_auth_status()
+                if payload["auth"].get("authenticated"):
+                    cameras = await isolated.async_get_cameras()
+                    payload["camera_count"] = len(cameras)
+        except (ProxyConnectionError, ProxyAuthError, web.HTTPServiceUnavailable):
+            payload["message"] = "Connect to a proxy with installation-test support to run a temporary install."
+        return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
+
+    @require_admin
+    async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception as err:  # noqa: BLE001
+            raise web.HTTPBadRequest(text="Invalid installation-test request\n") from err
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="Invalid installation-test request\n")
+        action = body.get("action")
+        if action not in {"start", "discard", "check", "login", "pin"}:
+            raise web.HTTPBadRequest(text="Unknown installation-test action\n")
+        client = _auth_client(self.hass)
+        try:
+            if action == "start":
+                reuse = body.get("reuse_settings", False)
+                if not isinstance(reuse, bool):
+                    raise web.HTTPBadRequest(text="Choose whether to reuse settings\n")
+                result = await client.async_start_installation_test(reuse)
+            else:
+                test = await client.async_get_installation_test()
+                test_id = body.get("id")
+                if not isinstance(test_id, str) or not test_id or test_id != test.get("id"):
+                    raise web.HTTPConflict(text="The installation test has changed\n")
+                if action == "discard":
+                    result = await client.async_discard_installation_test(test_id)
+                else:
+                    if test.get("phase") != "ready":
+                        raise web.HTTPConflict(text="The temporary installation is not ready\n")
+                    isolated = client.installation_test_client(test_id)
+                    if action == "check":
+                        # This is the same validation first-time setup uses,
+                        # deliberately stopping before async_create_entry.
+                        from .config_flow import _validate_input
+
+                        await _validate_input(self.hass, {
+                            "base_url": isolated.base_url, "token": isolated.token,
+                        })
+                        result = {"connection_verified": True}
+                    elif action == "login":
+                        result = await isolated.async_start_auth(
+                            str(body.get("username") or ""), str(body.get("password") or "")
+                        )
+                    else:
+                        result = await isolated.async_submit_auth_pin(
+                            str(body.get("challenge_id") or ""), str(body.get("pin") or "")
+                        )
+        except (ProxyConnectionError, ProxyAuthError) as err:
+            raise web.HTTPBadGateway(
+                text="The temporary installation request failed. Check its status or discard it.\n",
+                headers=AUTH_VIEW_HEADERS,
+            ) from err
+        return web.json_response(result, headers=AUTH_VIEW_HEADERS)
 
 
 class BlinkLiveviewProxyPanelUpdateLogView(HomeAssistantView):

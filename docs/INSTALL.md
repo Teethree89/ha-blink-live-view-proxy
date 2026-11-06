@@ -27,6 +27,24 @@ advance. You will type it once, into the page or option that is waiting for it.
 Then everyone continues from
 [Step 3 — Add the HA Integration](#3-add-the-ha-integration).
 
+### Rehearse the install without touching yours
+
+Once the proxy and integration are running, the **Test installation** button in
+the Blink Live View Proxy sidebar panel runs a real, temporary second proxy next
+to your working one and discards it afterwards. It builds a fresh Python
+environment, installs the dependencies from scratch, starts the proxy with its
+own generated token and data folder, and walks the same connection check the
+setup flow uses. Tick **Use current installation settings** to carry over your
+camera mappings and playback settings; leave it unticked to start from defaults.
+Your working proxy, token and Blink session are never used or changed.
+
+The Blink login step is optional and starts a separate Blink session, so Blink
+sends a new PIN. The temporary install removes itself when you discard it or
+after it expires, and the report states what was and was not exercised. It
+tests a fresh proxy runtime on the proxy's own host; it does not provision a
+second add-on, Docker container or systemd service, so those paths still need a
+real fresh install.
+
 ---
 
 ## A — Home Assistant OS or Supervised
