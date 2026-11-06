@@ -37,7 +37,8 @@ from .const import (
     TOKEN_HANDOFF_FILE,
     URL_HANDOFF_FILE,
 )
-from .supervisor import addon_internal_url, addon_slug
+from .companion import CompanionInstallError, async_install_companion
+from .supervisor import ADDON_REPOSITORY_URL, addon_internal_url, addon_slug
 
 LOGGER = logging.getLogger(__name__)
 
@@ -174,6 +175,16 @@ async def _async_verified_handoff_token(
     return shared_token
 
 
+def _installed_addon_slug(hass: HomeAssistant) -> str | None:
+    """Return this add-on's slug if Supervisor lists it as installed."""
+    try:
+        from homeassistant.components.hassio import get_addons_info
+
+        return addon_slug(get_addons_info(hass) or {}, DOMAIN)
+    except Exception:  # noqa: BLE001 - no Supervisor here, or it moved this helper
+        return None
+
+
 def _supervisor_addon_url(hass: HomeAssistant) -> str:
     """Derive the add-on's internal address by asking Supervisor for its slug.
 
@@ -254,10 +265,101 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Hold the background install while its progress screen is showing."""
+        self._install_task: asyncio.Task[str] | None = None
+        self._install_error = ""
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial setup step."""
+        """Route first-time setup: offer the add-on only where it can help.
+
+        The menu appears on a Supervisor install that has neither the add-on's
+        shared token nor the add-on itself. Everyone else — an existing add-on
+        install, or a Container, Core or remote proxy — goes straight to the
+        connection form they always had.
+        """
+        if "hassio" in self.hass.config.components:
+            if not await _async_handoff_token(self.hass):
+                if _installed_addon_slug(self.hass):
+                    # Installed but never started: nothing to offer to install.
+                    return await self.async_step_companion_ready()
+                return self.async_show_menu(
+                    step_id="user",
+                    menu_options=["install_companion", "connect"],
+                )
+        return await self.async_step_connect()
+
+    async def async_step_install_companion(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask first. Nothing is added or installed until this is submitted."""
+        if user_input is None:
+            return self.async_show_form(
+                step_id="install_companion",
+                data_schema=vol.Schema({}),
+                description_placeholders={"repository": ADDON_REPOSITORY_URL},
+            )
+        return await self.async_step_installing()
+
+    async def async_step_installing(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Install in the background; pulling the add-on image can take minutes."""
+        if self._install_task is None:
+            self._install_task = self.hass.async_create_task(
+                async_install_companion(self.hass)
+            )
+        task = self._install_task
+        if not task.done():
+            return self.async_show_progress(
+                step_id="installing",
+                progress_action="install_companion",
+                progress_task=task,
+            )
+
+        self._install_task = None
+        try:
+            await task
+        except CompanionInstallError as err:
+            self._install_error = err.reason
+            return self.async_show_progress_done(next_step_id="install_failed")
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Unexpected error installing the companion add-on")
+            self._install_error = "failed"
+            return self.async_show_progress_done(next_step_id="install_failed")
+        return self.async_show_progress_done(next_step_id="companion_ready")
+
+    async def async_step_install_failed(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Say why, and offer a retry or the manual route; never dead-end."""
+        return self.async_show_menu(
+            step_id="install_failed",
+            menu_options=["install_companion", "connect"],
+            description_placeholders={"reason": self._install_error},
+        )
+
+    async def async_step_companion_ready(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Send the user to configure and start the add-on, then carry on.
+
+        A menu rather than a form on purpose. When the install finishes at once
+        (the add-on was already there) Home Assistant hands this step the
+        confirmation's own empty submit, and a form with nothing in it cannot
+        tell that from the user pressing Submit: the guidance would flash past.
+        A menu only moves on for a real choice.
+        """
+        return self.async_show_menu(
+            step_id="companion_ready", menu_options=["connect"]
+        )
+
+    async def async_step_connect(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Connect to a running proxy: the add-on, or one on Linux or Docker."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -302,7 +404,7 @@ class BlinkLiveviewProxyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
 
         return self.async_show_form(
-            step_id="user",
+            step_id="connect",
             data_schema=_schema(defaults),
             errors=errors,
         )

@@ -3,6 +3,33 @@
   "config": {
     "step": {
       "user": {
+        "title": "Set up Blink Live View Proxy",
+        "description": "Blink Live View Proxy needs a companion proxy that signs in to Blink. On Home Assistant OS or Supervised, Home Assistant can install it for you as an add-on, after you confirm.",
+        "menu_options": {
+          "install_companion": "Install the companion add-on (recommended)",
+          "connect": "Connect to a proxy I already run (add-on, Linux or Docker)"
+        }
+      },
+      "install_companion": {
+        "title": "Install the companion add-on?",
+        "description": "If you continue, Home Assistant will ask the Supervisor to add the project's add-on repository ({repository}) when it is not already there, and to install the Blink Live View Proxy add-on from it.\n\nNothing else changes: an add-on you already have is left alone, the add-on is not started, and no Blink account is used. You will set up and start it yourself on the next screen. Close this dialog to make no changes."
+      },
+      "install_failed": {
+        "title": "The add-on was not installed",
+        "description": "Home Assistant could not install the companion add-on ({reason}). Nothing was started and no Blink account was used. The Supervisor log has the details. You can try again, or set the proxy up yourself.",
+        "menu_options": {
+          "install_companion": "Try again",
+          "connect": "I'll set up the proxy myself"
+        }
+      },
+      "companion_ready": {
+        "title": "Finish setting up the add-on",
+        "description": "The companion add-on is installed but still needs you. Open Settings \u2192 Apps (Add-ons on older versions), open Blink Live View Proxy, enter your Blink username and password under Configuration, and start it. When its log says Blink sent a PIN, enter that PIN in the blink_2fa_code option and save, without restarting.\n\nThen come back here and continue. The proxy address and token are filled in for you.",
+        "menu_options": {
+          "connect": "The add-on is running \u2014 continue"
+        }
+      },
+      "connect": {
         "title": "Blink Live View Proxy",
         "description": "Connect Home Assistant to the local Blink live-view proxy. Live-view duration controls how long the direct player asks the proxy to keep each stream open; Blink may still end a session early.",
         "data": {
@@ -31,6 +58,9 @@
       "already_configured": "This proxy is already configured.",
       "reauth_successful": "The proxy token was updated.",
       "reauth_failed": "The config entry is no longer available."
+    },
+    "progress": {
+      "install_companion": "Installing the companion add-on. Pulling its image can take a few minutes; you can leave this page open."
     }
   },
   "options": {

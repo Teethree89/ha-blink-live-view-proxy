@@ -63,6 +63,27 @@ class BlinkLiveviewProxyClient:
         """Fetch proxy health."""
         return await self._request_json("/health")
 
+    async def async_get_installation_test(self) -> dict[str, Any]:
+        return await self._request_json("/installation-test")
+
+    async def async_start_installation_test(self, reuse_settings: bool) -> dict[str, Any]:
+        return await self._request_json(
+            "/installation-test", method="POST", json_body={"reuse_settings": reuse_settings}
+        )
+
+    async def async_discard_installation_test(self, test_id: str) -> dict[str, Any]:
+        return await self._request_json(
+            "/installation-test?id=" + quote(test_id, safe=""), method="DELETE"
+        )
+
+    def installation_test_client(self, test_id: str) -> BlinkLiveviewProxyClient:
+        """Use the parent's authenticated gateway, with no child token in HA."""
+        return BlinkLiveviewProxyClient(
+            self._session,
+            self.base_url + "/installation-test/" + quote(test_id, safe="") + "/proxy",
+            self.token,
+        )
+
     async def async_get_cameras(self) -> list[dict[str, Any]]:
         """Fetch camera metadata from the proxy."""
         data = await self._request_json("/cameras")
