@@ -168,6 +168,24 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         await self.test.discard()
         self.assertFalse(root.exists())
 
+    async def test_failure_kills_a_partial_build_process_and_removes_data(self):
+        processes = []
+
+        async def broken_build(*args):
+            await self.test._spawn(sys.executable, "-c", "import time; time.sleep(30)", start_new_session=True)
+            processes.append(self.test._process)
+            raise RuntimeError("private build diagnostic")
+
+        with patch.object(self.test, "_command", side_effect=broken_build):
+            await self.test.start(False)
+            root = self.test.root
+            await self.test._build_task
+        self.assertEqual(self.test.phase, "failed")
+        self.assertIsNotNone(processes[0].returncode)
+        self.assertFalse(root.exists())
+        self.assertEqual(self.test._token, "")
+        self.assertNotIn("private build diagnostic", json.dumps(self.test.status()))
+
 
 class GatewayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
