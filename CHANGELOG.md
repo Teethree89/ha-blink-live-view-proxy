@@ -9,6 +9,30 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [1.3.1] — 2026-11-10
+
+Fix the installation rehearsal's login and PIN fields losing focus while
+status is polled. The integration changed; the proxy version moves only to
+stay aligned. A running 1.3.0 proxy remains compatible with this fix.
+
+### Fixed
+
+- Countdown polls update their text without replacing the credential/PIN
+  inputs. The parent dashboard's production-proxy refresh also leaves the
+  active rehearsal panel connected, preserving focus, typed values and cursor
+  selection while a PIN is entered.
+- Chromium and WebKit regression coverage types through the two-second and
+  fifteen-second polling intervals, crosses an expiry minute boundary and
+  verifies a single successful PIN submission and tab navigation. These tests
+  use local fixtures and do not contact Blink.
+
+After updating, restart Home Assistant and refresh the dashboard/browser to
+load the corrected JavaScript. No Blink reauthentication or credential reset
+is needed to apply this update. The real 1.3.0 Container/systemd rehearsal
+report, including successful independent Blink login, six discovered cameras
+and cleanup, is recorded in
+[#88](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/88#issuecomment-6770793168).
+
 ## [1.3.0] — 2026-11-10
 
 Guided companion installation, a disposable installation rehearsal, and current

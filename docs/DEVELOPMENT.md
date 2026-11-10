@@ -83,6 +83,19 @@ pytest tests/ha -o asyncio_mode=auto
 CI runs them against two Home Assistant releases, one either side of
 `via_device_id`.
 
+The installation form also has a real-browser regression test. It serves local
+fixtures to Chromium and WebKit and never contacts Home Assistant or Blink:
+
+```bash
+pip install playwright==1.55.0
+python -m playwright install chromium webkit
+python tests/test_installation_focus.py
+```
+
+The browser job in CI installs the browser system dependencies as well. The
+test types credentials and a PIN across both polling intervals, checks cursor
+selection and expiry updates, submits once, and checks tab navigation.
+
 CI runs every script in `tests/` on every pull request, alongside a compile
 pass over every tracked Python file and a syntax check on the shell scripts.
 

@@ -63,6 +63,17 @@ release, these remain useful real-device follow-ups:
 - Fresh Docker Blink login and saved-session reuse after container recreation.
 - The two-camera snapshot problem, with its own sanitized diagnostics.
 
+### Post-release Container/systemd report
+
+On November 10, the maintainer completed the released 1.3.0 rehearsal on Home
+Assistant Container / Core 2026.11.0 with a systemd proxy, reusing nonsecret
+settings. Runtime and HA connection checks passed, an independent Blink login
+succeeded, six cameras were discovered, and cleanup reported `discarded`.
+The [full report](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/88#issuecomment-6770793168)
+also identified PIN focus loss during polling, addressed in 1.3.1. This adds
+Container/systemd independent-login coverage; native provisioning and live
+video were not exercised, and the corresponding HAOS follow-ups remain open.
+
 ## Rollout and recovery
 
 Update the integration and companion proxy to 1.3.0 for Test installation.

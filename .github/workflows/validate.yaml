@@ -214,6 +214,21 @@ jobs:
         # entity id Home Assistant has handed out.
         run: python tests/test_dialog_entities.py
 
+  browser:
+    name: Installation form (Chromium and WebKit)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install browser test dependencies
+        run: |
+          pip install playwright==1.55.0
+          python -m playwright install --with-deps chromium webkit
+      - name: Keep credentials and PIN focused through status polls
+        run: python tests/test_installation_focus.py
+
   home-assistant:
     name: Home Assistant (${{ matrix.label }})
     runs-on: ubuntu-latest

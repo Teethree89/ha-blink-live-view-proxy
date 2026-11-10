@@ -692,6 +692,12 @@ class BlinkProxyAuthPanel extends HTMLElement {
   }
 
   _render() {
+    // The rehearsal owns its status polling. Refreshing the production proxy
+    // must not disconnect its active form (even if we reattach the same child).
+    if (this._tab === "installation" && this._installationTest?.isConnected) {
+      this.shadowRoot.querySelector("header h1").innerHTML = this._wordmark();
+      return;
+    }
     const signature = JSON.stringify([
       this._tab,
       this._state.state,
