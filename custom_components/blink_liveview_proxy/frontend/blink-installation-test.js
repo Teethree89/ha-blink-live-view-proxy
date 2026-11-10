@@ -107,8 +107,20 @@ class BlinkInstallationTest extends HTMLElement {
   }
 
   _render() {
-    const signature = JSON.stringify([this._data, this._busy, this._error, this._connectionVerified, this._report]);
-    if (signature === this._signature) return;
+    // Countdown ticks are text updates, not changes to the form. Replacing
+    // a focused input also interrupts caret position and IME/mobile typing.
+    const visible = this._data ? {
+      ...this._data, test: { ...this._data.test }, auth: { ...this._data.auth },
+    } : null;
+    if (visible) {
+      delete visible.test.expires_in;
+      delete visible.auth.expires_in;
+    }
+    const signature = JSON.stringify([visible, this._busy, this._error, this._connectionVerified, this._report]);
+    if (signature === this._signature) {
+      this._renderExpiry();
+      return;
+    }
     this._signature = signature;
     // Polls preserve typed credentials and focus when no visible state changed.
     const active = this.shadowRoot.activeElement;
@@ -142,7 +154,7 @@ class BlinkInstallationTest extends HTMLElement {
       ${data && !data.supported ? `<p>${escapeHtml(data.message)}</p><button id="refresh">Check again</button>` : ""}
       ${!exists && test.cleanup_reason ? `<p role="status">${escapeHtml(phaseLabel)}</p>` : ""}
       ${data?.supported && !exists ? `<label><input type="checkbox" id="reuse" checked>Use current installation settings</label><p class="muted">Reuse camera mappings and playback settings, or leave unchecked for the default configuration.</p><button id="start" ${disabled}>Start temporary installation</button>` : ""}
-      ${exists ? `<h3 role="status">${escapeHtml(phaseLabel)}</h3><p class="muted">Expires in ${Math.ceil((test.expires_in || 0) / 60)} minutes. Closing this page leaves automatic cleanup active.</p><ol>${(test.checks || []).map((key) => `<li>${escapeHtml(CHECK_LABELS[key] || key)}</li>`).join("")}</ol>${test.error ? `<p class="error">${escapeHtml(test.error)}. Discard this run before retrying.</p>` : ""}` : ""}
+      ${exists ? `<h3 role="status">${escapeHtml(phaseLabel)}</h3><p class="muted">Expires in <span id="test-expiry">${Math.ceil((test.expires_in || 0) / 60)}</span> minutes. Closing this page leaves automatic cleanup active.</p><ol>${(test.checks || []).map((key) => `<li>${escapeHtml(CHECK_LABELS[key] || key)}</li>`).join("")}</ol>${test.error ? `<p class="error">${escapeHtml(test.error)}. Discard this run before retrying.</p>` : ""}` : ""}
       ${ready ? `<h3>Connect Home Assistant</h3><p>Run the same URL/token validation as Add integration, targeting the temporary proxy and stopping before saving a connection.</p><button id="check" ${disabled}>${this._connectionVerified ? "Connection verified — check again" : "Test connection"}</button>
         ${this._connectionVerified ? `<h3>Blink login (optional)</h3><p class="muted">You can finish now, or verify a separate login and camera discovery. This creates a new Blink session; it does not reuse the working session.</p><p role="status">${escapeHtml(auth.message || "Not started")}</p>
           ${auth.state === "waiting_for_pin" ? `<form id="test-pin"><label for="test-pin-input">New Blink PIN</label><input id="test-pin-input" name="pin" type="password" inputmode="numeric" autocomplete="off" required><button ${disabled}>Verify PIN</button></form>`
@@ -181,6 +193,11 @@ class BlinkInstallationTest extends HTMLElement {
       event.currentTarget.reset();
       this._action("pin", { pin, challenge_id: this._data.auth.challenge_id });
     });
+  }
+
+  _renderExpiry() {
+    const expiry = this.shadowRoot.getElementById("test-expiry");
+    if (expiry) expiry.textContent = String(Math.ceil((this._data?.test?.expires_in || 0) / 60));
   }
 }
 
