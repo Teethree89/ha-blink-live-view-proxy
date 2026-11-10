@@ -318,7 +318,7 @@ class AuthenticationController:
             if self.challenge_id == challenge_id:
                 self.failure_code = err.code
                 self.state = "expired" if err.code == "expired" else "failure"
-            LOGGER.warning("Blink authentication ended with %s", err.code)
+            LOGGER.warning("%s", PUBLIC_MESSAGES.get(err.code, PUBLIC_MESSAGES["failure"]))
         except Exception as err:  # noqa: BLE001 - upstream errors must be redacted
             await candidate.close()
             if self.challenge_id == challenge_id:
@@ -326,7 +326,8 @@ class AuthenticationController:
                 self.state = "failure"
             # Exception text can contain request data in upstream libraries.
             LOGGER.warning(
-                "Blink authentication failed (%s); details redacted",
+                "%s (%s; upstream details redacted)",
+                PUBLIC_MESSAGES["invalid_pin" if self._pin_submitted else "credential_failure"],
                 type(err).__name__,
             )
         else:

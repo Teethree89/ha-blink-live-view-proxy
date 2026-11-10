@@ -1,3 +1,5 @@
+import "./blink-installation-test.js";
+
 // How long to watch a proxy update before saying it did not finish. An update
 // that fails leaves the proxy on its old version and says nothing, so without
 // a deadline the bar would spin forever and read as progress.
@@ -44,6 +46,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     // Polling runs while the PIN is being typed. Only rebuild when something
     // visible changed, or the focused credential field would be erased.
     this._signature = null;
+    this._installationTest = null;
   }
 
   set hass(value) {
@@ -479,7 +482,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     if (method === "supervisor") {
       return {
         title: "Update this proxy by hand (add-on)",
-        steps: ["Settings \u2192 Add-ons \u2192 Blink Live View Proxy \u2192 Update"],
+        steps: ["Settings \u2192 Apps (Add-ons on older versions) \u2192 Blink Live View Proxy \u2192 Update"],
         note: "Supervisor owns the add-on's version, so the update comes from the add-on store rather than from this panel.",
       };
     }
@@ -596,11 +599,12 @@ class BlinkProxyAuthPanel extends HTMLElement {
       <h2>Two halves, and only one is here yet</h2>
       <p class="muted">This integration is installed, but it is a client: the proxy is what signs in to Blink and streams the cameras, and none is connected. Run the proxy first, then add the integration and point it at the proxy. The checks below already say what else this Home Assistant needs.</p>
       <ol class="paths">
-        <li><strong>Home Assistant OS or Supervised</strong> — install the <em>Blink Live View Proxy</em> add-on from this repository under Settings → Add-ons → Add-on Store → ⋮ → Repositories, start it, and complete the Blink login in its log. It shares its token with this integration, so the form below arrives filled in. <a href="${docs}#a--home-assistant-os-or-supervised" target="_blank" rel="noreferrer noopener">Steps</a></li>
+        <li><strong>Home Assistant OS or Supervised</strong> — install the <em>Blink Live View Proxy</em> add-on from this repository under Settings → Apps → Install app → ⋮ → Repositories (Add-ons → Add-on Store on older versions), start it, and complete the Blink login in its log. It shares its token with this integration, so the form below arrives filled in. <a href="${docs}#a--home-assistant-os-or-supervised" target="_blank" rel="noreferrer noopener">Steps</a></li>
         <li><strong>A Linux host with systemd</strong> — one command on that host installs the service and prints the URL and token to use. <a href="${docs}#b--linux-host-with-systemd" target="_blank" rel="noreferrer noopener">Steps</a></li>
         <li><strong>Docker, a NAS, anything else</strong> — run the published image with <code>/data</code> on a volume. <a href="${docs}#c--docker-anywhere" target="_blank" rel="noreferrer noopener">Steps</a></li>
       </ol>
       <button type="button" id="add-integration">Add the integration</button>
+      <button type="button" class="secondary" id="test-installation">Test installation</button>
       <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Check again</button>
     </ha-card>`;
   }
@@ -625,6 +629,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
         ${behind && data.update.available ? `<button id="update" ${this._busy ? "disabled" : ""}>Update proxy</button>` : !data.update.available ? `<p class="muted">Updates are manual for this installation${data.update.blocker ? `: ${this._escape(data.update.blocker)}` : "."}</p>` : ""}
         ${behind || !data.update.available ? this._manualUpdateHtml(data.update.method || "manual") : ""}
         <button type="button" class="secondary" id="recheck" ${this._busy ? "disabled" : ""}>Refresh details</button>
+        <button type="button" class="secondary" id="test-installation">Test installation</button>
       </ha-card>
       ${this._updateBannerHtml()}
       ${this._prerequisitesHtml()}`;
@@ -712,11 +717,20 @@ class BlinkProxyAuthPanel extends HTMLElement {
     ]);
     if (signature === this._signature) { this._renderExpiry(); return; }
     this._signature = signature;
-    const content = { overview: this._overviewHtml(), cameras: this._camerasHtml(), auth: this._authHtml(), yaml: this._yamlHtml() }[this._tab];
+    const content = { overview: this._overviewHtml(), cameras: this._camerasHtml(), auth: this._authHtml(), yaml: this._yamlHtml(), installation: '<div id="installation-test-host"></div>' }[this._tab];
     this.shadowRoot.innerHTML = `<style>
       :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h1 .wordmark{display:block;height:40px;width:auto} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin:18px 0 0;padding:0}.check{padding:14px 16px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-left:4px solid var(--secondary-text-color);border-radius:6px}.check.ok{border-left-color:var(--success-color,#2e7d32)}.check.missing.required{border-left-color:var(--error-color,#c62828)}.check.missing.optional{border-left-color:var(--warning-color,#e68a00)}.check-head{display:flex;align-items:flex-start;gap:12px}.check-text{flex:1 1 auto;min-width:0}.check h3{margin:0;font-size:15px}.check .detail{margin:4px 0 0;font-size:14px;line-height:1.5}.check .muted{margin:4px 0 0;font-size:13px}.dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--secondary-text-color)}.check.ok .dot{background:var(--success-color,#2e7d32)}.check.missing.required .dot{background:var(--error-color,#c62828)}.check.missing.optional .dot{background:var(--warning-color,#e68a00)}.badge.status{white-space:nowrap}.check details{margin-top:10px}.check summary{padding:4px 0;font-size:13px;color:var(--secondary-text-color);cursor:pointer}.check details ul{margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--secondary-text-color)}.check details li{margin-bottom:6px}.check details a{color:var(--primary-color)}.setup .paths{margin:4px 0 6px;padding-left:22px;line-height:1.55}.setup .paths li{margin-bottom:10px}.setup .paths a{color:var(--primary-color);white-space:nowrap}.setup code{font-size:13px}.update-banner .bar{position:relative;height:6px;margin:4px 0 0;border-radius:999px;background:var(--divider-color);overflow:hidden}.update-banner .bar span{position:absolute;top:0;bottom:0;left:0;width:100%;border-radius:999px;background:var(--primary-color)}.update-banner .bar.busy span{width:40%;animation:blink-proxy-slide 1.4s ease-in-out infinite}.update-banner.done .bar span{background:var(--success-color,#2e7d32)}.update-banner.timeout .bar span{background:var(--warning-color,#e68a00)}.update-banner .detail{margin:12px 0 0;font-size:14px;line-height:1.5}pre.update-log{max-height:320px;margin:14px 0 0;white-space:pre;font-size:12px;line-height:1.5}details.manual-update{margin:16px 0 0;padding:12px 14px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-radius:6px}details.manual-update summary{font-size:14px;cursor:pointer;color:var(--primary-text-color)}details.manual-update ol{margin:12px 0 0;padding-left:22px;line-height:1.9}details.manual-update code{font-size:13px;overflow-wrap:anywhere}details.manual-update .muted{margin:10px 0 0}@keyframes blink-proxy-slide{0%{left:-40%}100%{left:100%}}@media(prefers-reduced-motion:reduce){.update-banner .bar.busy span{width:100%;animation:none;opacity:.6}}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}.check-head{flex-wrap:wrap}h1 .wordmark{height:32px}}
-    </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>${this._wordmark()}</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
+    </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>${this._wordmark()}</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"],["installation","Test installation"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
     this._renderExpiry();
+    const testHost = this.shadowRoot.getElementById("installation-test-host");
+    if (testHost) {
+      if (!this._installationTest) {
+        this._installationTest = document.createElement("blink-installation-test");
+        this._installationTest.api = (method, body) => this._panelApi(method, "/installation-test", body);
+      }
+      testHost.appendChild(this._installationTest);
+    }
+    this.shadowRoot.getElementById("test-installation")?.addEventListener("click", () => { this._tab = "installation"; this._render(); });
     this.shadowRoot.querySelectorAll("[data-tab]").forEach((node) => node.addEventListener("click", () => { this._tab = node.dataset.tab; this._notice = ""; this._render(); }));
     this.shadowRoot.getElementById("login-form")?.addEventListener("submit", (event) => this._startLogin(event));
     this.shadowRoot.getElementById("pin-form")?.addEventListener("submit", (event) => this._submitPin(event));

@@ -1042,6 +1042,47 @@ def clip_cache_dir(config: dict[str, Any], config_base: Path) -> Path:
         return resolve_path(configured, config_base)
     return resolve_path(config["liveview_cache_dir"], config_base).parent / "clips"
 
+async def installation_test_handler(request: web.Request) -> web.Response:
+    """Manage a temporary install using the existing header-authenticated API."""
+    check_header_authorized(request, "Installation test")
+    manager = request.app.get("installation_test")
+    if manager is None:
+        raise web.HTTPNotFound()
+    if request.method == "POST":
+        body = await _auth_json_body(request)
+        if set(body) != {"reuse_settings"} or not isinstance(body["reuse_settings"], bool):
+            raise web.HTTPBadRequest(text="Choose whether to reuse settings\n")
+        try:
+            result = await manager.start(body["reuse_settings"])
+        except RuntimeError as err:
+            raise web.HTTPConflict(text="Discard the current test first\n") from err
+    elif request.method == "DELETE":
+        if request.query.get("id") != manager.test_id:
+            raise web.HTTPConflict(text="The installation test has changed\n")
+        result = await manager.discard()
+    else:
+        result = manager.status()
+    return web.json_response(result, headers=AUTH_RESPONSE_HEADERS)
+
+
+async def installation_test_proxy_handler(request: web.Request) -> web.Response:
+    """Reach only the temporary proxy; never fall back to the working client."""
+    check_header_authorized(request, "Installation test")
+    manager = request.app.get("installation_test")
+    if manager is None or request.match_info["test_id"] != manager.test_id:
+        raise web.HTTPNotFound()
+    if manager.phase != "ready":
+        raise web.HTTPConflict(text="The temporary installation is not ready\n")
+    body = await _auth_json_body(request) if request.method == "POST" else None
+    try:
+        payload = await manager.request(request.method, request.match_info["tail"], body)
+    except ValueError as err:
+        raise web.HTTPNotFound() from err
+    except Exception as err:  # noqa: BLE001 - credentials and child errors stay private
+        raise web.HTTPBadGateway(text="The temporary proxy request failed\n") from err
+    return web.json_response(payload, headers=AUTH_RESPONSE_HEADERS)
+
+
 async def make_app(
     config: dict[str, Any], config_base: Path, pin: str | None
 ) -> web.Application:
@@ -1089,6 +1130,18 @@ async def make_app(
     )
     app["auth_controller"] = auth_controller
 
+    if not config.get("_installation_test"):
+        from .installation_test import InstallationTest
+
+        app["installation_test"] = InstallationTest(config)
+        app.router.add_get("/installation-test", installation_test_handler)
+        app.router.add_post("/installation-test", installation_test_handler)
+        app.router.add_delete("/installation-test", installation_test_handler)
+        app.router.add_route(
+            "*", "/installation-test/{test_id}/proxy/{tail:.*}",
+            installation_test_proxy_handler,
+        )
+
     app.router.add_get("/", index_handler)
     app.router.add_get("/health", health_handler)
     app.router.add_get("/status", status_handler)
@@ -1127,10 +1180,13 @@ async def make_app(
         cleanup_task = asyncio.create_task(hls_manager.cleanup_loop())
         # Whatever a previous run left behind, trimmed before the first request.
         app["clip_cache"].prune()
-        await auth_controller.start_startup_login()
+        if not config.get("_installation_test"):
+            await auth_controller.start_startup_login()
         try:
             yield
         finally:
+            if app.get("installation_test") is not None:
+                await app["installation_test"].discard()
             cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await cleanup_task

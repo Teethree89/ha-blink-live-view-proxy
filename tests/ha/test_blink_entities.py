@@ -16,7 +16,10 @@ from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+try:
+    from pytest_homeassistant.common import MockConfigEntry
+except ImportError:  # Home Assistant before 2026.11
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blink_liveview_proxy.const import (
     CONF_BASE_URL,

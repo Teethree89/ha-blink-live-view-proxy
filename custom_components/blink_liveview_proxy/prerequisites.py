@@ -69,6 +69,11 @@ def _row(
     }
 
 
+def _store_name(facts: dict[str, Any]) -> str:
+    version = parse_version(str(facts.get("ha_version") or ""))
+    return "Marketplace" if version and version >= parse_version("2026.11.0") else "HACS"
+
+
 def _home_assistant(facts: dict[str, Any]) -> dict[str, Any]:
     """Whether the core is new enough for what HACS agreed to install."""
     floor = str(facts.get("minimum_ha") or "")
@@ -98,7 +103,7 @@ def _home_assistant(facts: dict[str, Any]) -> dict[str, Any]:
         "Everything",
         True,
         [
-            f"{floor} is the floor hacs.json enforces, so HACS refuses to "
+            f"{floor} is the floor hacs.json enforces, so {_store_name(facts)} refuses to "
             "install this integration below it.",
             "Settings → System → Updates installs core updates.",
         ],
@@ -290,9 +295,9 @@ def _frontend_card(facts: dict[str, Any], name: str) -> dict[str, Any]:
         ),
         False,
         [
-            f"HACS → Frontend → search {name} → Download, then reload the "
+            f"Settings → Marketplace → Dashboard cards (HACS → Frontend on older versions): search {name}, install, then reload the "
             "browser with a hard refresh.",
-            "HACS adds the Lovelace resource for you; this check reads that "
+            "Marketplace/HACS adds the Lovelace resource for you; this check reads that "
             "same list, so a card installed another way may not show up here "
             "even though it works.",
         ],
@@ -312,22 +317,23 @@ def _integration_update(facts: dict[str, Any]) -> dict[str, Any]:
     A copy installed by hand into custom_components/ has no such entity. That
     is unknown, not out of date.
     """
+    store = _store_name(facts)
     hacs = facts.get("hacs_update") or {}
     installed = str(facts.get("integration_version") or "")
 
     if not hacs.get("found"):
         state, detail = UNKNOWN, (
-            f"{installed or 'This release'} is installed. HACS is not tracking "
+            f"{installed or 'This release'} is installed. {store} is not tracking "
             "this integration here, so there is nothing to compare against."
         )
     elif hacs.get("update_available"):
         state, detail = MISSING, (
-            f"HACS has {hacs.get('latest') or 'a newer release'}; "
+            f"{store} has {hacs.get('latest') or 'a newer release'}; "
             f"{hacs.get('installed') or installed} is installed."
         )
     else:
         state, detail = OK, (
-            f"{hacs.get('installed') or installed} is the newest release HACS "
+            f"{hacs.get('installed') or installed} is the newest release {store} "
             "offers."
         )
 
@@ -339,12 +345,12 @@ def _integration_update(facts: dict[str, Any]) -> dict[str, Any]:
         "Fixes and new checks in this panel",
         False,
         [
-            "HACS → Integrations → Blink Live View Proxy → Update, then "
+            f"{'Settings → Marketplace' if store == 'Marketplace' else 'HACS → Integrations'} → Blink Live View Proxy → Update, then "
             "restart Home Assistant.",
-            "The two halves move separately: HACS updates the integration, and "
+            f"The two halves move separately: {store} updates the integration, and "
             "nothing updates the proxy. Use the Update proxy action above "
             "where this install supports it.",
-            "This reads the update entity HACS publishes. An integration "
+            f"This reads the update entity {store} publishes. An integration "
             "copied into custom_components/ by hand has no such entity, and "
             "this row says so rather than guessing.",
         ],

@@ -42,7 +42,7 @@ resources on a Lovelace dashboard and nowhere else, so it is never loaded on
 the panel itself — the panel loads its own copy instead.
 
 The custom frontend cards below are dependencies, not optional enhancements.
-Install them from **HACS → Frontend** before pasting the matching dashboard:
+Install them from **Settings → Marketplace → Dashboard cards** (**HACS → Frontend** on older versions) before pasting the matching dashboard:
 
 | Option | Required frontend cards | Updates when cameras change? |
 |---|---|---|

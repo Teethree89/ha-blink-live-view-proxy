@@ -229,11 +229,53 @@ def test_addon_publishes_its_address() -> None:
     )
 
 
+def test_repository_rules() -> None:
+    print("\nWhich Supervisor repository is ours")
+
+    url = supervisor.ADDON_REPOSITORY_URL
+    for spelling in (url, url + "/", url + ".git", url.upper(), "http://" + url[8:]):
+        check(
+            supervisor.is_addon_repository(spelling),
+            f"{spelling!r} is recognised as this project's repository",
+        )
+    for other in (
+        "",
+        None,
+        "https://github.com/Teethree89/some-other-repo",
+        "https://github.com/someone-else/ha-blink-live-view-proxy",
+        "https://github.com/Teethree89/ha-blink-live-view-proxy-fork",
+        "https://example.org/Teethree89/ha-blink-live-view-proxy",
+    ):
+        check(
+            not supervisor.is_addon_repository(other),
+            f"{other!r} is not mistaken for it",
+        )
+    check(
+        supervisor.store_addon_slug("a1b2c3d4", "blink_liveview_proxy")
+        == "a1b2c3d4_blink_liveview_proxy",
+        "a store add-on slug is the repository slug, an underscore, the add-on",
+    )
+
+    # The consent screen names this URL and the installer adds it, so it has
+    # to be the repository the add-on really ships from.
+    repository_yaml = (ROOT / "repository.yaml").read_text()
+    addon_yaml = (ROOT / "addon/config.yaml").read_text()
+    check(
+        f'url: "{url}"' in repository_yaml,
+        "repository.yaml declares the repository the installer adds",
+    )
+    check(
+        f'url: "{url}"' in addon_yaml,
+        "the add-on's own config names the same repository",
+    )
+
+
 def main() -> int:
     print("the address an add-on install is given")
     test_supervisor_rules()
     test_candidate_order()
     test_addon_publishes_its_address()
+    test_repository_rules()
 
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:

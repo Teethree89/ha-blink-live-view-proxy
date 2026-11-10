@@ -9,6 +9,54 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [1.3.0] — 2026-11-10
+
+Guided companion installation, a disposable installation rehearsal, and current
+Home Assistant Marketplace/Apps guidance. Update the integration and proxy
+for the new rehearsal; existing camera connections keep working with older
+supported proxies. Thanks to @bbolinger and @fritzzetik for the installation
+reports in [#88](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/88).
+
+### Added
+
+- On HAOS/Supervisor, first-run setup can add the companion repository and
+  install the app after explicit confirmation. It preserves an existing app,
+  never starts/configures it, and leaves Blink login and PIN entry to the user.
+- The admin panel can rehearse a proxy installation in a separate temporary
+  Python environment with its own token and data. Connection checks do not
+  save another HA entry; an independent Blink login is optional. Cancel,
+  discard, failure, expiry and shutdown remove the temporary process/data.
+  This does not provision a second native app, container or service.
+- CI exercises HA 2026.2, 2026.9 and 2026.11, installation lifecycle regressions,
+  native amd64/aarch64 app and standalone images, and empty-volume Docker
+  provisioning/recreation without contacting Blink.
+
+### Fixed
+
+- A slow Supervisor build is followed as a background job. A timeout or an
+  overlapping setup flow does not blindly submit another installation.
+- Overview shows the effective proxy URL after Configure changes it.
+- Authentication requests retain actionable 400/409 errors, PIN failures log
+  a safe explanation, and recovery advice reflects the proxy installation.
+- Expired installation rehearsals explain why their temporary data was removed.
+
+### Installation and upgrade notes
+
+- HA 2026.11+ uses Settings → Marketplace; older releases use HACS. Current
+  Supervisor navigation uses Apps. The Python `hassio` integration and
+  `hassio_api` setting remain in use.
+- The deprecated `addon/build.yaml` is removed; the pinned base image lives
+  in the Dockerfile. Supervisor continues building this app on the device.
+- Example proxy configuration is now `proxy/example-config.json` so Supervisor
+  does not mistake it for an app definition. Existing installed `config.json`
+  files are unchanged.
+- The add-on guide includes required empty credential fields and migration
+  using the existing integration entry to preserve entity IDs. Reauthentication
+  can require a new Blink PIN even without resetting all authentication.
+- The minimum proxy version remains 0.9.0. Installation rehearsal specifically
+  needs proxy 1.3.0+. See [release validation](docs/RELEASE_1.3.0.md) for the
+  exact automated coverage and remaining real-device checks.
+
 ## [1.2.1] — 2026-10-21
 
 Two things the HACS default-repository review asked for ([#82]). Nothing changes

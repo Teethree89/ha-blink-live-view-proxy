@@ -52,7 +52,7 @@ PROXY_PORT="${PROXY_PORT:-8088}"
 # below; BIND_HOST=127.0.0.1 keeps it loopback-only.
 if [ ! -f "$ETC_DIR/config.json" ]; then
   ( umask 077
-    python3 - "$ROOT/proxy/config.example.json" "${BIND_HOST:-0.0.0.0}" "$PROXY_PORT" \
+    python3 - "$ROOT/proxy/example-config.json" "${BIND_HOST:-0.0.0.0}" "$PROXY_PORT" \
       > "$ETC_DIR/config.json" <<'PYCONF'
 import json
 import sys
