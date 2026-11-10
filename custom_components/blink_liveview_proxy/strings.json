@@ -15,10 +15,10 @@
         "description": "If you continue, Home Assistant will ask the Supervisor to add the project's add-on repository ({repository}) when it is not already there, and to install the Blink Live View Proxy add-on from it.\n\nNothing else changes: an add-on you already have is left alone, the add-on is not started, and no Blink account is used. You will set up and start it yourself on the next screen. Close this dialog to make no changes."
       },
       "install_failed": {
-        "title": "The add-on was not installed",
-        "description": "Home Assistant could not install the companion add-on ({reason}). Nothing was started and no Blink account was used. The Supervisor log has the details. You can try again, or set the proxy up yourself.",
+        "title": "Check companion installation",
+        "description": "Supervisor could not confirm the installation ({reason}). A build may still be running; checking again waits for that build instead of starting another. You can also connect to a proxy you already run.",
         "menu_options": {
-          "install_companion": "Try again",
+          "install_companion": "Check installation / try again",
           "connect": "I'll set up the proxy myself"
         }
       },
@@ -89,7 +89,7 @@
   "issues": {
     "proxy_outdated": {
       "title": "The Blink proxy is older than this integration needs",
-      "description": "The proxy at {base_url} reports {proxy_version}. This integration needs {minimum_version} or newer.\n\nLive view, clips and push-to-talk keep working. What fails is anything the newer proxy added \u2014 browser authentication answers 404, because those routes have never existed in that build.\n\nThe two halves update independently: HACS moves the integration, and nothing moves the proxy. On a Linux service install, run this on the proxy host from a checkout of the repository:\n\n```\nsudo scripts/install-proxy.sh\n```\n\nIt keeps your token, config and Blink session, and restarts the service. Add-on installs update from the add-on store.\n\nThis notice clears itself once the proxy reports {minimum_version} or newer."
+      "description": "The proxy at {base_url} reports {proxy_version}. This integration needs {minimum_version} or newer.\n\nLive view, clips and push-to-talk keep working. What fails is anything the newer proxy added \u2014 browser authentication answers 404, because those routes have never existed in that build.\n\nThe two halves update independently: Marketplace (HACS on older versions) updates the integration, and nothing moves the proxy. On a Linux service install, run this on the proxy host from a checkout of the repository:\n\n```\nsudo scripts/install-proxy.sh\n```\n\nIt keeps your token, config and Blink session, and restarts the service. Add-on installs update from the add-on store.\n\nThis notice clears itself once the proxy reports {minimum_version} or newer."
     },
     "proxy_outdated_fixable": {
       "title": "The Blink proxy is older than this integration needs",
@@ -103,7 +103,7 @@
         "abort": {
           "already_running": "An update is already running on the proxy. Give it a minute, then check whether this notice has cleared on its own.",
           "not_supported": "This proxy cannot update itself. Update it the way it was installed: re-run scripts/install-proxy.sh on the host, or pull the new image and recreate the container.",
-          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings \u2192 Add-ons.",
+          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings \u2192 Apps (Add-ons on older versions).",
           "entry_gone": "This proxy is no longer set up in Home Assistant, so there is nothing left to update.",
           "update_failed": "The proxy could not be asked to update. Check that it is reachable and that the token is still valid, then look at the proxy host's logs."
         }
@@ -121,7 +121,7 @@
         "abort": {
           "already_running": "An update is already running on the proxy. Give it a minute, then check whether this notice has cleared on its own.",
           "not_supported": "This proxy cannot update itself. Update it the way it was installed: re-run scripts/install-proxy.sh on the host, or pull the new image and recreate the container.",
-          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings \u2192 Add-ons.",
+          "no_addon": "Supervisor does not list a Blink Live View Proxy add-on, so there is nothing here to update. Update it from Settings \u2192 Apps (Add-ons on older versions).",
           "entry_gone": "This proxy is no longer set up in Home Assistant, so there is nothing left to update.",
           "update_failed": "The proxy could not be asked to update. Check that it is reachable and that the token is still valid, then look at the proxy host's logs."
         }

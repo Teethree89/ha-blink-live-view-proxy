@@ -126,6 +126,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
             root = self.test.root
             await asyncio.sleep(0.2)
         self.assertEqual(self.test.phase, "discarded")
+        self.assertEqual(self.test.status()["cleanup_reason"], "expired")
         self.assertFalse(root.exists())
 
     async def test_cancel_kills_an_installation_subprocess(self):
@@ -149,13 +150,21 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_installation_failure_is_reported_and_can_be_discarded(self):
         with patch.object(self.test, "_command", side_effect=RuntimeError("private error")):
             await self.test.start(False)
+            root = self.test.root
             for _ in range(100):
                 if self.test.phase == "failed":
                     break
                 await asyncio.sleep(0.01)
         self.assertEqual(self.test.phase, "failed")
         self.assertNotIn("private error", json.dumps(self.test.status()))
-        root = self.test.root
+        for _ in range(100):
+            if self.test.root is None:
+                break
+            await asyncio.sleep(0.01)
+        self.assertIsNone(self.test.root)
+        self.assertFalse(root.exists())
+        self.assertEqual(self.test._token, "")
+        self.assertEqual(self.test.status()["cleanup_reason"], "failed")
         await self.test.discard()
         self.assertFalse(root.exists())
 

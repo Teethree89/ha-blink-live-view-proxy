@@ -124,6 +124,9 @@ jobs:
             bash -n "$script"
           done
 
+      - name: Installation rehearsal lifecycle and isolation tests
+        run: python tests/test_installation_test.py
+
       - name: HLS playlist tests
         run: python tests/test_playlist.py
 
@@ -226,6 +229,9 @@ jobs:
           - label: "2026.9"
             python: "3.14"
             harness: "pytest-homeassistant-custom-component==0.13.365"
+          - label: "2026.11"
+            python: "3.14"
+            harness: "pytest-homeassistant==2026.11.1 homeassistant==2026.11.1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4

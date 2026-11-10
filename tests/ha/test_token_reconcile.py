@@ -22,7 +22,10 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+try:
+    from pytest_homeassistant.common import MockConfigEntry
+except ImportError:  # Home Assistant before 2026.11
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.blink_liveview_proxy.const import (
     CONF_BASE_URL,

@@ -34,8 +34,8 @@ Blink. It is an interoperability layer for cameras you own.
 | A running proxy, **0.3.0 or newer** | This integration is only a client. Older proxies work for live view but have no `/auth` routes, and the integration says so rather than failing quietly |
 | A proxy API token | Required for **Blink Proxy → Authentication**, and for any proxy not bound to loopback. Both installers generate one |
 | Matching proxy and integration releases | A newer integration raises a repair issue and offers **Fix** when systemd or Supervisor can perform the update |
-| `button-card` (HACS → Frontend) | Every example dashboard fires `fire-dom-event` through it |
-| `auto-entities` (HACS → Frontend) | Only for the self-populating dashboard |
+| `button-card` (Marketplace → Dashboard cards; HACS → Frontend on older versions) | Every example dashboard fires `fire-dom-event` through it |
+| `auto-entities` (Marketplace → Dashboard cards; HACS → Frontend on older versions) | Only for the self-populating dashboard |
 | The official Blink integration | Not needed. Snapshots, motion switches, battery, temperature and the alarm panel come from the proxy's session |
 
 This integration installs no Python dependencies of its own — it uses Home
@@ -74,7 +74,7 @@ the browser instead — see **Blink Live View Proxy panel** below.
 
 ## Home Assistant Setup
 
-With HACS, add
+With Marketplace (HACS on older versions), add
 [Blink Live View Proxy](https://github.com/Teethree89/ha-blink-live-view-proxy)
 as a custom repository of type `Integration`, download it, and restart Home
 Assistant.

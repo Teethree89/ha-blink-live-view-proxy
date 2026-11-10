@@ -25,7 +25,7 @@ node --check custom_components/blink_liveview_proxy/frontend/blink-liveview-dial
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r proxy/requirements.txt
-cp proxy/config.example.json proxy/config.json
+cp proxy/example-config.json proxy/config.json
 python proxy/blink_liveview_proxy.py --config proxy/config.json list
 python proxy/blink_liveview_proxy.py --config proxy/config.json serve
 ```

@@ -482,7 +482,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     if (method === "supervisor") {
       return {
         title: "Update this proxy by hand (add-on)",
-        steps: ["Settings \u2192 Add-ons \u2192 Blink Live View Proxy \u2192 Update"],
+        steps: ["Settings \u2192 Apps (Add-ons on older versions) \u2192 Blink Live View Proxy \u2192 Update"],
         note: "Supervisor owns the add-on's version, so the update comes from the add-on store rather than from this panel.",
       };
     }
@@ -599,7 +599,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
       <h2>Two halves, and only one is here yet</h2>
       <p class="muted">This integration is installed, but it is a client: the proxy is what signs in to Blink and streams the cameras, and none is connected. Run the proxy first, then add the integration and point it at the proxy. The checks below already say what else this Home Assistant needs.</p>
       <ol class="paths">
-        <li><strong>Home Assistant OS or Supervised</strong> — install the <em>Blink Live View Proxy</em> add-on from this repository under Settings → Add-ons → Add-on Store → ⋮ → Repositories, start it, and complete the Blink login in its log. It shares its token with this integration, so the form below arrives filled in. <a href="${docs}#a--home-assistant-os-or-supervised" target="_blank" rel="noreferrer noopener">Steps</a></li>
+        <li><strong>Home Assistant OS or Supervised</strong> — install the <em>Blink Live View Proxy</em> add-on from this repository under Settings → Apps → Install app → ⋮ → Repositories (Add-ons → Add-on Store on older versions), start it, and complete the Blink login in its log. It shares its token with this integration, so the form below arrives filled in. <a href="${docs}#a--home-assistant-os-or-supervised" target="_blank" rel="noreferrer noopener">Steps</a></li>
         <li><strong>A Linux host with systemd</strong> — one command on that host installs the service and prints the URL and token to use. <a href="${docs}#b--linux-host-with-systemd" target="_blank" rel="noreferrer noopener">Steps</a></li>
         <li><strong>Docker, a NAS, anything else</strong> — run the published image with <code>/data</code> on a volume. <a href="${docs}#c--docker-anywhere" target="_blank" rel="noreferrer noopener">Steps</a></li>
       </ol>

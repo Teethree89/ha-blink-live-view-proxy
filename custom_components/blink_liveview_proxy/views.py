@@ -212,7 +212,7 @@ def _auth_client(hass: HomeAssistant) -> BlinkLiveviewProxyClient:
         raise
 
 
-def _auth_failure_payload(err: Exception) -> dict[str, Any]:
+def _auth_failure_payload(err: Exception, hass: HomeAssistant | None = None) -> dict[str, Any]:
     """Describe a failure by what the proxy answered, never by its error text.
 
     A reachable, correctly configured proxy can still refuse these routes — it
@@ -230,7 +230,23 @@ def _auth_failure_payload(err: Exception) -> dict[str, Any]:
         type(err).__name__,
         status,
     )
-    return failure_payload(status)
+    method = None
+    if hass is not None:
+        try:
+            _, runtime = _runtime_entry(hass)
+        except web.HTTPServiceUnavailable:
+            runtime = None
+        data = getattr((runtime or {}).get("coordinator"), "data", None) or {}
+        method = ((data.get("status") or {}).get("update") or {}).get("method")
+        if not method:
+            method = "manual"
+            if "hassio" in hass.config.components:
+                try:
+                    if "-blink-liveview-proxy:" in _auth_client(hass).base_url:
+                        method = "supervisor"
+                except web.HTTPServiceUnavailable:
+                    pass
+    return failure_payload(status, method=method)
 
 
 def _stream_seconds(hass: HomeAssistant) -> int:
@@ -3836,7 +3852,7 @@ class BlinkLiveviewProxyAuthStatusView(HomeAssistantView):
         try:
             payload = await _auth_client(self.hass).async_get_auth_status()
         except Exception as err:  # noqa: BLE001 - redact all upstream details
-            payload = _auth_failure_payload(err)
+            payload = _auth_failure_payload(err, self.hass)
         return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
 
 
@@ -3897,11 +3913,12 @@ class BlinkLiveviewProxyAuthActionView(HomeAssistantView):
         except Exception as err:  # noqa: BLE001 - redact all upstream details
             # The body carries the classified reason even though the status is
             # an error, so a panel that reads it can be specific either way.
-            raise web.HTTPBadGateway(
-                text=json.dumps(_auth_failure_payload(err)),
-                content_type="application/json",
+            status = err.status if isinstance(err, ProxyConnectionError) else None
+            return web.json_response(
+                _auth_failure_payload(err, self.hass),
+                status=status if status in (400, 409) else 502,
                 headers=AUTH_VIEW_HEADERS,
-            ) from err
+            )
         return web.json_response(payload, status=202, headers=AUTH_VIEW_HEADERS)
 
 
@@ -4130,7 +4147,7 @@ async def _panel_payload(
         "configured": True,
         "entry_id": entry_id,
         "title": entry.title if entry else "Blink Live View Proxy",
-        "base_url": str(entry.data.get(CONF_BASE_URL, "")) if entry else "",
+        "base_url": str(entry.options.get(CONF_BASE_URL, entry.data.get(CONF_BASE_URL, ""))) if entry else "",
         "health": data.get("health") or {},
         "status": status,
         "versions": {
@@ -4217,7 +4234,7 @@ class BlinkLiveviewProxyInstallationTestView(HomeAssistantView):
                     cameras = await isolated.async_get_cameras()
                     payload["camera_count"] = len(cameras)
         except (ProxyConnectionError, ProxyAuthError, web.HTTPServiceUnavailable):
-            payload["message"] = "Connect to a proxy with installation-test support to run a temporary install."
+            payload["message"] = "Installation rehearsal needs proxy 1.3.0 or newer. Update the proxy as well as the integration; older proxies can still serve cameras and live view."
         return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
 
     @require_admin

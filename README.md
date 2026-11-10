@@ -97,7 +97,7 @@ addon/proxy/                             Proxy source bundled for the add-on con
 custom_components/blink_liveview_proxy/  Home Assistant custom integration
 proxy/blink_liveview_proxy.py            Compatibility CLI entrypoint
 proxy/blink_proxy/                       Modular proxy implementation
-proxy/config.example.json                Generic proxy config template
+proxy/example-config.json                Generic proxy config template
 systemd/blink-liveview-proxy.service     Example Linux service unit
 systemd/blink-liveview-proxy-watchdog.*  Optional stuck-token-refresh watchdog
 scripts/install-proxy.sh                 Linux install helper
@@ -127,14 +127,14 @@ current 2FA challenge, and an older one fails login while still texting you
 a code.
 
 **The integration**: Home Assistant **2024.11.0 or newer**, installed through
-HACS or copied into `custom_components/`. It adds no Python dependencies of its
+Marketplace/HACS or copied into `custom_components/`. It adds no Python dependencies of its
 own — it uses Home Assistant's `aiohttp` — and depends only on built-in
 `http`, `frontend` and `panel_custom`.
 
 **Dashboards**: [button-card](https://github.com/custom-cards/button-card) for
 every example, plus
 [auto-entities](https://github.com/thomasloven/lovelace-auto-entities) for the
-self-populating one. Both from HACS → Frontend. The player and clip viewer need
+self-populating one. Both from Settings → Marketplace → Dashboard cards (HACS → Frontend on older versions). The player and clip viewer need
 neither.
 
 **Account and hardware**: a Blink account with cameras; for clips, either a
@@ -162,7 +162,7 @@ the result — see the [Dashboard Guide](docs/DASHBOARD.md#requirements-at-a-gla
 If you run Home Assistant OS or Supervised, install the proxy as an add-on
 directly from the add-on store. No separate Linux host or Python setup required.
 
-**The quick way.** Install the integration from HACS, restart, and add
+**The quick way.** Install the integration from Marketplace/HACS and add
 **Blink Live View Proxy** under **Settings → Devices & services**. On a
 Supervisor install with no add-on yet, the first screen offers **Install the
 companion add-on**. If you confirm, Home Assistant asks the Supervisor to add
@@ -175,7 +175,7 @@ manual steps.
 
 **The manual way.**
 
-1. In HA go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
+1. In HA go to `Settings → Apps → Install app → ⋮ → Repositories (Add-ons → Add-on Store on older versions)` and add:
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
@@ -189,7 +189,7 @@ manual steps.
    Do not restart: the PIN belongs to the OAuth session in that process.
 5. After the log reports success, clear `blink_2fa_code` so it cannot be reused
    accidentally. The auth cache at `/data/blink-auth.json` handles later starts.
-6. Install the HA integration (via HACS or manually — see below) and add it.
+6. Install the HA integration (via Marketplace/HACS or manually — see below) and add it.
    The URL and the generated token are pre-filled from what the add-on shared,
    so setup is a click.
 
@@ -218,7 +218,7 @@ never downgrade an installed version. From a checkout you already have,
 It prints the URL to give Home Assistant and the one command that reads the
 token back. Then, in Home Assistant:
 
-1. Install the integration through HACS (see below) and restart HA.
+1. Install the integration through Marketplace/HACS (see below), following its restart instructions.
 2. Add `Blink Live View Proxy` from `Settings → Devices & services`, using the
    printed URL and token.
 3. Open **Blink Live View Proxy** in the sidebar, select **Authentication**, and sign in.
@@ -271,33 +271,35 @@ token on first start — read it with
 volume: it holds the Blink refresh token. A `docker-compose.example.yml` is in
 the repository root.
 
-## Install the Home Assistant Integration (HACS)
+## Install the Home Assistant Integration (Marketplace / HACS)
 
-**Blink Live View Proxy is available in the default HACS catalog.** You no
-longer need to add a custom repository for a normal installation:
+**Blink Live View Proxy is in the default community catalog.** A custom
+repository is only a fallback. The listing may appear as **Ha Blink Live View
+Proxy** on the catalog card and **Blink Live View Proxy** on its detail page.
 
-1. Open **HACS** in Home Assistant and search for **Blink Live View Proxy**.
-2. Select **Blink Live View Proxy** and choose **Download**.
-3. Restart Home Assistant.
-4. Go to **Settings → Devices & services → Add integration**, search for
-   **Blink Live View Proxy**, and complete setup.
+**Home Assistant 2026.11 and newer:** open **Settings → Marketplace**, search
+for the integration and select **Install**. Marketplace opens its setup flow;
+if it does not appear, restart Home Assistant and use **Settings → Devices &
+services → Add integration**. Integration updates still need a restart.
 
-HACS installs only `custom_components/blink_liveview_proxy`. You still need
-the separate proxy running: use the Home Assistant add-on (Option A), Linux
-service (Option B), or Docker (Option C) described above.
+**Older Home Assistant:** open **HACS → Integrations**, search for **Blink Live
+View Proxy**, download it, restart Home Assistant and add the integration from
+**Settings → Devices & services**.
 
-### Fallback — HACS Custom Repository
+The store installs only `custom_components/blink_liveview_proxy`. You also
+need the companion proxy: use the Home Assistant app (called an add-on on
+older versions), Linux service or Docker path above.
 
-If **Blink Live View Proxy** does not appear in HACS search, you can install it
-as a custom repository instead:
+### Fallback — custom repository
 
-1. In HACS, open the three-dot menu → **Custom repositories**.
-2. Add `https://github.com/Teethree89/ha-blink-live-view-proxy` as an
-   **Integration** repository.
-3. Find **Blink Live View Proxy** in HACS, download it, restart Home Assistant,
-   then add it from **Settings → Devices & services**.
+In Marketplace use **Add from link** and enter
+`https://github.com/Teethree89/ha-blink-live-view-proxy`. In older HACS, use the
+three-dot menu → **Custom repositories**, add that URL as **Integration**, then
+download, restart and add the integration.
 
-The fallback installs the same integration and still requires a running proxy.
+A hand-copied integration may appear uninstalled in the store. Installing the
+same project through Marketplace/HACS adopts it for updates; keep the existing
+integration entry and its URL/token. Do not add a second connection.
 
 ## Proxy API Layout
 
@@ -418,7 +420,7 @@ features.
 
 > [!IMPORTANT]
 > The self-populating dashboard is **not standalone**. Install
-> **auto-entities** and **button-card** from HACS → Frontend before using it.
+> **auto-entities** and **button-card** from Marketplace → Dashboard cards (HACS → Frontend on older versions) before using it.
 > The hand-edited and generated options need **button-card**, but do not need
 > auto-entities. Use the generator if you want automatic camera discovery
 > without installing auto-entities.

@@ -94,9 +94,10 @@ class FakeStore:
     async def addon_availability(self, slug: str) -> None:
         self._maybe_fail("addon_availability")
 
-    async def install_addon(self, slug: str) -> None:
+    async def install_addon(self, slug: str, options=None) -> None:
         self._maybe_fail("install_addon")
         assert slug == ADDON_SLUG
+        assert options.background is True
         self.addon_installed = True
 
 
@@ -107,7 +108,9 @@ def supervisor_install(hass: HomeAssistant):
     holder: dict[str, Any] = {"store": FakeStore(), "addons": {}}
 
     def client(_hass: HomeAssistant) -> MagicMock:
-        return MagicMock(store=holder["store"])
+        from unittest.mock import AsyncMock
+
+        return MagicMock(store=holder["store"], jobs=SimpleNamespace(info=AsyncMock(return_value=SimpleNamespace(jobs=[]))))
 
     with (
         patch("homeassistant.components.hassio.get_supervisor_client", client),

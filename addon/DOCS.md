@@ -4,17 +4,22 @@ Runs the Blink Live View Proxy as a Home Assistant add-on. No separate Linux hos
 
 ## Prerequisites
 
-- The **Blink Live View Proxy** custom integration installed via HACS (or copied from `custom_components/` in this repo).
+- The **Blink Live View Proxy** custom integration installed via Marketplace (HACS on older versions) (or copied from `custom_components/` in this repo).
 
 ## Installation
 
 1. Add this repository as a custom add-on repository:
-   `Settings → Add-ons → Add-on Store → ⋮ → Repositories`
+   `Settings → Apps → Install app → ⋮ → Repositories`
+   (older versions: **Settings → Add-ons → Add-on Store**). Use the Settings
+   navigation rather than old `/hassio/...` bookmarks, which may return 404.
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
 
-2. Install **Blink Live View Proxy** from the add-on store and open its **Configuration** tab.
+2. Install **Blink Live View Proxy** and open its **Configuration** tab.
+   On aarch64 this builds on the device and can take several minutes. An API
+   timeout can occur while the build continues: check Apps and Supervisor jobs
+   before retrying. The guided installer waits for the existing build.
 
 ## Requirements
 
@@ -73,6 +78,36 @@ cameras:
     name: Back Door
 ```
 
+### Required credential keys
+
+When saving options through the API or editing a complete options document,
+all four credential keys must be present. Empty strings are valid; omitting a
+key is not. Merge this fragment with the other options rather than replacing
+all options with it:
+
+```yaml
+blink_username: ""
+blink_password: ""
+blink_2fa_code: ""
+proxy_api_token: ""
+```
+
+## Moving from a local add-on to the repository app
+
+Keep one Home Assistant integration entry to preserve entity IDs, dashboards
+and automations. Before stopping the old proxy, install the repository app,
+configure a different listening port, and start it. It has separate data and
+may require a new Blink login and newly issued PIN. In the existing integration's
+**Configure** dialog, enter the new app's internal URL and generated token.
+Verify its cameras, snapshots and live view, then stop the old app.
+
+If the old entry is already in `setup_retry` and Configure is unavailable,
+start the old proxy temporarily so the entry loads, then follow the same
+sequence. Do not create a second integration entry as a workaround: that
+creates duplicate entities with `_2` suffixes. If duplicates already exist,
+back up Home Assistant and check entity IDs referenced by dashboards and
+automations before removing either entry.
+
 ## First-Time Login (One Running Process)
 
 Blink sends a 2FA PIN to your phone or email **in response to your credentials** — you
@@ -105,6 +140,9 @@ nothing to copy. Upgrading from a version that ran without a token is handled
 the same way: the proxy starts requiring one, Home Assistant notices the
 rejected requests and asks you to confirm the new token, already filled in. Once that integration is added, Home Assistant shows **Blink Live View
 Proxy** in the sidebar for administrators; its **Authentication** tab is the login page:
+
+Reauthenticate can also issue a **new 2FA PIN**, even without a full reset.
+Keep access to the Blink phone/email while doing either action.
 
 1. Open the panel and select **Reauthenticate** (or use the login form shown for
    an idle/failed proxy).

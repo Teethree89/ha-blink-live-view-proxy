@@ -99,9 +99,11 @@ class BlinkInstallationTest extends HTMLElement {
       `Separate Blink login: ${data.auth?.authenticated ? "PASS" : "not completed"}`,
       `Camera discovery: ${Number.isInteger(data.camera_count) ? data.camera_count : "not checked"}`,
       `Coverage: ${test.coverage || "unknown"}`,
-      "HACS download, native provisioning and live video: not tested by this run.",
+      "Marketplace/HACS download, native provisioning and live video: not tested by this run.",
     ].join("\n");
     await this._action("discard");
+    this._report += `\nCleanup: ${this._data?.test?.cleanup_reason || "pending"}`;
+    this._render();
   }
 
   _render() {
@@ -122,6 +124,9 @@ class BlinkInstallationTest extends HTMLElement {
     const ready = phase === "ready";
     const auth = data?.auth || {};
     const disabled = this._busy ? "disabled" : "";
+    const phaseLabel = test.cleanup_reason === "expired"
+      ? "Temporary installation expired and was removed"
+      : PHASE_LABELS[phase] || phase;
     this.shadowRoot.innerHTML = `<style>
       :host{display:block}ha-card{display:block;padding:22px;margin-bottom:18px}
       h2{margin:0 0 12px;font-size:19px}h3{font-size:16px}p,li{line-height:1.5}
@@ -135,8 +140,9 @@ class BlinkInstallationTest extends HTMLElement {
       ${data ? `<p><strong>Home Assistant:</strong> ${escapeHtml(data.home_assistant_installation)}<br><strong>Proxy:</strong> ${escapeHtml(test.proxy_installation || "not detected")}</p>` : `<p>Detecting installation…</p>`}
       ${this._error ? `<p role="alert" class="error">${escapeHtml(this._error)}</p>` : ""}
       ${data && !data.supported ? `<p>${escapeHtml(data.message)}</p><button id="refresh">Check again</button>` : ""}
+      ${!exists && test.cleanup_reason ? `<p role="status">${escapeHtml(phaseLabel)}</p>` : ""}
       ${data?.supported && !exists ? `<label><input type="checkbox" id="reuse" checked>Use current installation settings</label><p class="muted">Reuse camera mappings and playback settings, or leave unchecked for the default configuration.</p><button id="start" ${disabled}>Start temporary installation</button>` : ""}
-      ${exists ? `<h3 role="status">${escapeHtml(PHASE_LABELS[phase] || phase)}</h3><p class="muted">Expires in ${Math.ceil((test.expires_in || 0) / 60)} minutes. Closing this page leaves automatic cleanup active.</p><ol>${(test.checks || []).map((key) => `<li>${escapeHtml(CHECK_LABELS[key] || key)}</li>`).join("")}</ol>${test.error ? `<p class="error">${escapeHtml(test.error)}. Discard this run before retrying.</p>` : ""}` : ""}
+      ${exists ? `<h3 role="status">${escapeHtml(phaseLabel)}</h3><p class="muted">Expires in ${Math.ceil((test.expires_in || 0) / 60)} minutes. Closing this page leaves automatic cleanup active.</p><ol>${(test.checks || []).map((key) => `<li>${escapeHtml(CHECK_LABELS[key] || key)}</li>`).join("")}</ol>${test.error ? `<p class="error">${escapeHtml(test.error)}. Discard this run before retrying.</p>` : ""}` : ""}
       ${ready ? `<h3>Connect Home Assistant</h3><p>Run the same URL/token validation as Add integration, targeting the temporary proxy and stopping before saving a connection.</p><button id="check" ${disabled}>${this._connectionVerified ? "Connection verified — check again" : "Test connection"}</button>
         ${this._connectionVerified ? `<h3>Blink login (optional)</h3><p class="muted">You can finish now, or verify a separate login and camera discovery. This creates a new Blink session; it does not reuse the working session.</p><p role="status">${escapeHtml(auth.message || "Not started")}</p>
           ${auth.state === "waiting_for_pin" ? `<form id="test-pin"><label for="test-pin-input">New Blink PIN</label><input id="test-pin-input" name="pin" type="password" inputmode="numeric" autocomplete="off" required><button ${disabled}>Verify PIN</button></form>`

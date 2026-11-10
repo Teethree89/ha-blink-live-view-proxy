@@ -84,6 +84,7 @@ class InstallationTest:
         self.phase = "idle"
         self.checks: list[str] = []
         self.error: str | None = None
+        self.cleanup_reason: str | None = None
         self.reuse = False
         self.deadline = 0.0
         self._token = ""
@@ -98,7 +99,8 @@ class InstallationTest:
             "id": self.test_id, "phase": self.phase, "error": self.error,
             "checks": list(self.checks), "reuse_settings": self.reuse,
             "proxy_installation": detect_method(), "source_version": PROXY_VERSION,
-            "expires_in": max(0, int(self.deadline - time.monotonic())),
+            "expires_in": max(0, int(self.deadline - time.monotonic())) if self.root else 0,
+            "cleanup_reason": self.cleanup_reason,
             "coverage": "Fresh Python environment and proxy runtime; native add-on/container/service provisioning is not exercised.",
         }
 
@@ -110,6 +112,7 @@ class InstallationTest:
             self.test_id = secrets.token_urlsafe(24)
             self._token = secrets.token_hex(32)
             self.phase, self.error, self.checks = "preparing", None, []
+            self.cleanup_reason = None
             self.reuse = reuse
             self.deadline = time.monotonic() + self.ttl
             self._build_task = asyncio.create_task(self._build())
@@ -199,6 +202,10 @@ class InstallationTest:
             self.error = f"{failed_phase}_failed"
             self.phase = "failed"
             await self._stop_process()
+            await self._remove_data()
+            self.cleanup_reason = "failed"
+            if self._expiry_task is not None:
+                self._expiry_task.cancel()
 
     async def request(self, method: str, path: str, body: dict | None = None) -> dict:
         if (method, path) not in ALLOWED_REQUESTS or not self._url:
@@ -223,7 +230,21 @@ class InstallationTest:
             await process.wait()
         self._process = None
 
-    async def discard(self) -> dict[str, Any]:
+    async def _remove_data(self) -> None:
+        if self.root is not None:
+            removal = asyncio.create_task(asyncio.to_thread(shutil.rmtree, self.root))
+            try:
+                await asyncio.shield(removal)
+            except asyncio.CancelledError:
+                # Finish the filesystem operation before another cleanup or run.
+                await removal
+                self.root = None
+                self._token, self._url = "", ""
+                raise
+            self.root = None
+        self._token, self._url = "", ""
+
+    async def discard(self, *, reason: str = "discarded") -> dict[str, Any]:
         async with self._lock:
             if self._expiry_task is not None and self._expiry_task is not asyncio.current_task():
                 self._expiry_task.cancel()
@@ -232,13 +253,11 @@ class InstallationTest:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self._build_task
             await self._stop_process()
-            if self.root is not None:
-                await asyncio.to_thread(shutil.rmtree, self.root)
-            self.root = None
-            self._token, self._url = "", ""
+            await self._remove_data()
             self.phase = "discarded"
+            self.cleanup_reason = reason
             return self.status()
 
     async def _expire(self) -> None:
         await asyncio.sleep(self.ttl)
-        await self.discard()
+        await self.discard(reason="expired")

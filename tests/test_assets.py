@@ -59,7 +59,7 @@ def tracked(*patterns: str) -> list[pathlib.Path]:
         ["git", "ls-files", *patterns],
         cwd=ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
-    return [ROOT / name for name in out]
+    return [ROOT / name for name in out if (ROOT / name).is_file()]
 
 
 def walk(node, path=""):
@@ -285,11 +285,11 @@ def test_proxy_copies_match() -> None:
 
     # Same for the two example configs, which drifted once already.
     same = filecmp.cmp(
-        ROOT / "proxy/config.example.json",
-        ROOT / "addon/proxy/config.example.json",
+        ROOT / "proxy/example-config.json",
+        ROOT / "addon/proxy/example-config.json",
         shallow=False,
     )
-    check(same, "the two config.example.json files match")
+    check(same, "the two example-config.json files match")
 
 
 def _token_block() -> str:

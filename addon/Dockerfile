@@ -1,4 +1,4 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=ghcr.io/hassio-addons/base:14.3.3
 FROM ${BUILD_FROM}
 
 RUN apk add --no-cache python3 py3-pip ffmpeg

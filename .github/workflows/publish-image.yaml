@@ -12,6 +12,7 @@ permissions: {}
 jobs:
   build:
     name: Build standalone image
+    needs: runtime
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,3 +100,51 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  runtime:
+    name: Runtime (${{ matrix.arch }}, ${{ matrix.kind }})
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            kind: addon
+            context: addon
+            python: /opt/venv/bin/python
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            kind: addon
+            context: addon
+            python: /opt/venv/bin/python
+          - arch: amd64
+            runner: ubuntu-24.04
+            kind: standalone
+            context: .
+            python: python3
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+            kind: standalone
+            context: .
+            python: python3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the actual runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          load: true
+          tags: blink-runtime:test
+          cache-from: type=gha,scope=${{ matrix.kind }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.kind }}-${{ matrix.arch }}
+      - name: Fresh runtime rehearsal and cleanup
+        env:
+          IMAGE_PYTHON: ${{ matrix.python }}
+        run: docker run --rm --entrypoint "$IMAGE_PYTHON" -v "$PWD/scripts/smoke-image.py:/smoke.py:ro" blink-runtime:test /smoke.py
+      - name: Empty-volume provisioning and recreation
+        if: matrix.kind == 'standalone'
+        run: bash scripts/smoke-container.sh blink-runtime:test

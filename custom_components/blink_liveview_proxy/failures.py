@@ -19,12 +19,22 @@ OUTDATED = "proxy_outdated"
 NO_TOKEN = "proxy_token_missing"
 BAD_TOKEN = "proxy_token_mismatch"
 UNKNOWN = "proxy_error"
+INVALID_REQUEST = "invalid_request"
+CONFLICT = "auth_conflict"
 
 # What the proxy answered, what that means, and the command that fixes it.
 # Remedies are shown as text for a human to run: Home Assistant cannot reach a
 # systemd unit on the host, and pretending otherwise would be a button that
 # silently does nothing.
 _FAILURES: dict[str, dict[str, str]] = {
+    INVALID_REQUEST: {
+        "message": "The authentication request is incomplete or invalid.",
+        "remedy": "Login requires username/password. PIN submission requires challenge_id/pin.",
+    },
+    CONFLICT: {
+        "message": "The authentication challenge changed or another login is already active.",
+        "remedy": "Refresh authentication status. Use the current challenge and its newly issued PIN.",
+    },
     UNREACHABLE: {
         "message": (
             "Home Assistant could not reach the proxy at all. Check that the "
@@ -85,6 +95,10 @@ def classify(status: int | None) -> str:
     """
     if status is None:
         return UNREACHABLE
+    if status == 400:
+        return INVALID_REQUEST
+    if status == 409:
+        return CONFLICT
     if status == 404:
         return OUTDATED
     if status == 503:
@@ -94,15 +108,30 @@ def classify(status: int | None) -> str:
     return UNKNOWN
 
 
-def failure_payload(status: int | None) -> dict[str, Any]:
+def failure_payload(status: int | None, *, method: str | None = None) -> dict[str, Any]:
     """Build the panel's failure state. Carries no upstream text, ever."""
     reason = classify(status)
     detail = _FAILURES[reason]
+    remedy = detail["remedy"]
+    if reason in {UNREACHABLE, UNKNOWN, OUTDATED, NO_TOKEN}:
+        if method == "supervisor":
+            remedy = (
+                "Settings → Apps → Blink Live View Proxy: check its status, configuration and logs. "
+                "Older Home Assistant versions call Apps Add-ons. "
+                "Then check this integration's proxy URL and token in Configure."
+            )
+        elif method == "container":
+            remedy = (
+                "Check the proxy container's status, logs, image version and persistent data volume. "
+                "Then check this integration's proxy URL and token in Configure."
+            )
+        elif method not in {None, "systemd"}:
+            remedy = "Check the proxy process, its logs, configured URL and API token on the proxy host."
     return {
         "state": "failure",
         "reason": reason,
         "message": detail["message"],
-        "remedy": detail["remedy"],
+        "remedy": remedy,
         "authenticated": False,
         "challenge_id": None,
         "expires_in": None,

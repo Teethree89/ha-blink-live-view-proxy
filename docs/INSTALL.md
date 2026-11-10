@@ -9,7 +9,7 @@ the proxy's session. See
 
 Two pieces get installed: the **proxy**, which logs in to Blink and does the
 work, and the **integration**, which is how Home Assistant talks to it. The
-integration is always the same — HACS, restart, add it. Only the proxy differs.
+integration comes from Marketplace (HACS on older versions); follow Step 3. Only the proxy differs.
 
 | Your Home Assistant | Run the proxy as | Section |
 |---|---|---|
@@ -29,6 +29,11 @@ Then everyone continues from
 
 ### Rehearse the install without touching yours
 
+The rehearsal needs both the integration and proxy at 1.3.0 or newer. An older
+proxy can still serve cameras, but cannot provide this test. Optional Blink
+login creates a separate session and can issue a new PIN; it is not needed
+for the runtime/connection checks.
+
 Once the proxy and integration are running, the **Test installation** button in
 the Blink Live View Proxy sidebar panel runs a real, temporary second proxy next
 to your working one and discards it afterwards. It builds a fresh Python
@@ -40,7 +45,7 @@ Your working proxy, token and Blink session are never used or changed.
 
 The Blink login step is optional and starts a separate Blink session, so Blink
 sends a new PIN. The temporary install removes itself when you discard it or
-after it expires, and the report states what was and was not exercised. It
+after it expires or fails, and the report states what was and was not exercised. It
 tests a fresh proxy runtime on the proxy's own host; it does not provision a
 second add-on, Docker container or systemd service, so those paths still need a
 real fresh install.
@@ -67,7 +72,7 @@ yourself, or if your proxy is on Linux or Docker.
 
 **The manual way.**
 
-1. Go to `Settings → Add-ons → Add-on Store → ⋮ → Repositories` and add:
+1. Go to `Settings → Apps → Install app → ⋮ → Repositories (Add-ons → Add-on Store on older versions)` and add:
    ```
    https://github.com/Teethree89/ha-blink-live-view-proxy
    ```
@@ -149,7 +154,7 @@ sudo python3 -m venv /opt/blink-liveview-proxy/.venv
 sudo /opt/blink-liveview-proxy/.venv/bin/python -m pip install -r /opt/blink-liveview-proxy/requirements.txt
 
 sudo mkdir -p /etc/blink-liveview-proxy /var/lib/blink-liveview-proxy/secrets
-sudo cp proxy/config.example.json /etc/blink-liveview-proxy/config.json
+sudo cp proxy/example-config.json /etc/blink-liveview-proxy/config.json
 sudo chmod 600 /etc/blink-liveview-proxy/config.json
 ```
 
@@ -351,20 +356,31 @@ The proxy reads it within seconds and deletes the file.
 
 ## 3. Add the HA Integration
 
-**Via HACS (recommended):**
+**Via Marketplace / HACS (recommended):**
 
-1. Open HACS and search for **Blink Live View Proxy**.
-2. Download it and restart Home Assistant.
+On Home Assistant 2026.11+, open **Settings → Marketplace**, search for
+**Blink Live View Proxy** and select **Install**. Setup normally opens directly;
+restart and use **Add integration** if it does not. Updates still require a
+restart. The catalog card may call the project **Ha Blink Live View Proxy**.
 
-If it does not show up in the search, add it as a custom repository instead:
-HACS → three-dot menu → **Custom repositories**, add
-`https://github.com/Teethree89/ha-blink-live-view-proxy`, category
-`Integration`, then download it and restart.
+On older Home Assistant, open **HACS → Integrations**, search for **Blink Live
+View Proxy**, download it and restart, then use **Add integration**.
 
-To install a release candidate, turn on **Show beta versions** for this
-repository first — HACS's three-dot menu, then Redownload. Without it the
-"Need a different version?" list stops at the last stable release and the RC
-you are looking for is simply not there.
+If the listing is missing, use Marketplace's **Add from link**, or older HACS's
+three-dot menu → **Custom repositories**, with
+`https://github.com/Teethree89/ha-blink-live-view-proxy` (category **Integration**
+where requested).
+
+A hand-installed integration may show as uninstalled in the store. Install the
+same project through the store to adopt updates, keeping its existing config
+entry and token rather than adding it again.
+
+For a release candidate, enable the store's beta/prerelease option before
+selecting the version. A test integration branch still installs the companion
+proxy from the configured app repository's default branch. To test branch proxy
+code too, use a spare HAOS instance and add the repository URL with
+`#feature/installation-test-flow`. Remove that test repository after testing;
+normal users should use the unqualified release repository.
 
 **Manually:**
 
