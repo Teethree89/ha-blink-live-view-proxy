@@ -181,6 +181,9 @@ jobs:
       - name: Clip route guard tests
         run: python tests/test_clip_route_guard.py
 
+      - name: Cloud clip listing tests
+        run: python tests/test_cloud_clips.py
+
       - name: const export tests
         run: python tests/test_const_exports.py
 

@@ -9,6 +9,31 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [1.3.2] — 2026-11-24
+
+Fix cloud clips missing from the clip viewer. Only the proxy changed; the
+integration version moves only to stay aligned. No Blink reauthentication is
+needed.
+
+### Fixed
+
+- Recent cloud clips are listed again
+  ([#92](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/92)).
+  Blink stopped returning new clips from the clip list blinkpy 0.25.9 asks
+  (`media/changed`), so every account's cloud listing came back empty or
+  stale. The proxy now asks the list the current Blink app uses
+  (`POST /api/v4/accounts/{id}/media`) and falls back to the old one if that
+  gives no usable answer. Sync Module (local storage) clips were never
+  affected.
+
+### Known limitations
+
+- This is a temporary patch, a local port of the unmerged upstream fix
+  [fronzbot/blinkpy#1339](https://github.com/fronzbot/blinkpy/pull/1339).
+  It will be replaced by blinkpy's own call once a blinkpy release carries it;
+  [#93](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/93)
+  tracks that.
+
 ## [1.3.1] — 2026-11-10
 
 Fix the installation rehearsal's login and PIN fields losing focus while
