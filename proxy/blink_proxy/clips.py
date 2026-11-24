@@ -10,12 +10,31 @@ from pathlib import Path
 from typing import Any
 
 from blinkpy import api as blink_api
+from blinkpy.helpers.util import get_time
 
 from .blink import BlinkClient
 from .constants import LOGGER_NAME
 from .util import clip_filename, normalize_slug, parse_blink_time
 
 LOGGER = logging.getLogger(LOGGER_NAME)
+
+# How many v4 clip-list pages without a single video may be skipped in a row.
+V4_MAX_EMPTY_PAGES = 10
+
+
+def _media_path(url: Any) -> str | None:
+    """The path of a Blink media URL, or None if it is not a usable one.
+
+    The v4 list hands back absolute URLs, where media/changed gave a path. The
+    host is dropped and the account's own API host used instead, so a listing
+    can never point a download, which carries the Blink auth header, at
+    somewhere else.
+    """
+    if not isinstance(url, str) or not url:
+        return None
+    parts = urllib.parse.urlsplit(url)
+    path = urllib.parse.urlunsplit(("", "", parts.path, parts.query, ""))
+    return path if path.startswith("/") and not path.startswith("//") else None
 
 class ClipManager:
     """Lists and downloads cloud and Sync Module local-storage clips."""
@@ -64,42 +83,123 @@ class ClipManager:
         blink = self.client._require_blink()
         clips: list[dict[str, Any]] = []
 
+        for item in await self._cloud_media(since, pages):
+            if item.get("deleted"):
+                continue
+            camera_name = item.get("device_name") or item.get("camera_name")
+            media_path = item.get("media")
+            created_raw = item.get("created_at")
+            if not camera_name or not media_path or not created_raw:
+                continue
+
+            slug = self._slug_for_name(camera_name)
+            if camera_slug and slug != camera_slug:
+                continue
+
+            created_at = parse_blink_time(created_raw)
+            if created_at < since:
+                continue
+
+            clips.append(
+                {
+                    "source": "cloud",
+                    "slug": slug,
+                    "camera_name": camera_name,
+                    "created_at": created_at,
+                    "size": item.get("size"),
+                    "url": f"{blink.urls.base_url}{media_path}",
+                }
+            )
+        return clips
+
+    async def _cloud_media(
+        self, since: datetime.datetime, pages: int
+    ) -> list[dict[str, Any]]:
+        """Blink's cloud media entries since a time, newest list first.
+
+        Blink stopped answering ``GET /api/v1/accounts/{id}/media/changed``
+        with new clips: it returns an empty list while the Blink app, which
+        moved to ``POST /api/v4/accounts/{id}/media``, shows them (#92;
+        fronzbot/blinkpy#1353). blinkpy 0.25.9 still calls the old one, so
+        this asks the v4 list itself and only falls back to the old endpoint
+        when v4 gives no usable answer.
+
+        TEMPORARY: a local port of fronzbot/blinkpy#1339, which was unmerged
+        when this shipped. Once a blinkpy release carries the v4 clip list
+        (``request_clips``) and requirements.txt is bumped to it, replace
+        ``_v4_cloud_media``/``_v1_cloud_media`` with that call and delete
+        tests/test_cloud_clips.py's fakes for them. Tracked in #93.
+        """
+        media = await self._v4_cloud_media(since, pages)
+        if media is not None:
+            return media
+        LOGGER.warning(
+            "Blink's v4 clip list gave no usable answer; "
+            "falling back to the older media/changed list"
+        )
+        return await self._v1_cloud_media(since, pages)
+
+    async def _v4_cloud_media(
+        self, since: datetime.datetime, pages: int
+    ) -> list[dict[str, Any]] | None:
+        """Follow the v4 list's pagination keys. None if v4 did not answer."""
+        blink = self.client._require_blink()
+        media: list[dict[str, Any]] = []
+        pagination_key: str | None = None
+        pages_with_clips = 0
+        # A page can hold only snapshot entries with no video; skipping a few
+        # of those must not count against the pages asked for, but it is
+        # still bounded so a misbehaving key cannot loop for ever.
+        for _request in range(pages + V4_MAX_EMPTY_PAGES):
+            query = {"start_time": get_time(since.timestamp())}
+            if pagination_key:
+                query["pagination_key"] = pagination_key
+            url = (
+                f"{blink.urls.base_url}/api/v4/accounts/{blink.account_id}"
+                f"/media?{urllib.parse.urlencode(query)}"
+            )
+            response = await blink_api.http_post(blink, url=url)
+            if not isinstance(response, dict) or not isinstance(
+                response.get("media"), list
+            ):
+                # The first page failing means v4 is not usable here; a later
+                # one failing keeps what was already listed.
+                return None if pagination_key is None else media
+
+            page_clips = []
+            for entry in response["media"]:
+                if not isinstance(entry, dict):
+                    continue
+                path = _media_path(entry.get("media"))
+                if path is None:
+                    continue
+                page_clips.append({**entry, "media": path})
+            media.extend(page_clips)
+            if page_clips:
+                pages_with_clips += 1
+                if pages_with_clips >= pages:
+                    break
+
+            next_key = response.get("pagination_key")
+            if not next_key or next_key == pagination_key:
+                break
+            pagination_key = str(next_key)
+        return media
+
+    async def _v1_cloud_media(
+        self, since: datetime.datetime, pages: int
+    ) -> list[dict[str, Any]]:
+        blink = self.client._require_blink()
+        media: list[dict[str, Any]] = []
         for page in range(1, pages + 1):
             response = await blink_api.request_videos(
                 blink, time=since.timestamp(), page=page
             )
-            media = response.get("media", []) if isinstance(response, dict) else []
-            if not media:
+            items = response.get("media", []) if isinstance(response, dict) else []
+            if not items:
                 break
-
-            for item in media:
-                if item.get("deleted"):
-                    continue
-                camera_name = item.get("device_name") or item.get("camera_name")
-                media_path = item.get("media")
-                created_raw = item.get("created_at")
-                if not camera_name or not media_path or not created_raw:
-                    continue
-
-                slug = self._slug_for_name(camera_name)
-                if camera_slug and slug != camera_slug:
-                    continue
-
-                created_at = parse_blink_time(created_raw)
-                if created_at < since:
-                    continue
-
-                clips.append(
-                    {
-                        "source": "cloud",
-                        "slug": slug,
-                        "camera_name": camera_name,
-                        "created_at": created_at,
-                        "size": item.get("size"),
-                        "url": f"{blink.urls.base_url}{media_path}",
-                    }
-                )
-        return clips
+            media.extend(item for item in items if isinstance(item, dict))
+        return media
 
     async def _local_storage_clips(
         self, since: datetime.datetime, camera_slug: str | None
