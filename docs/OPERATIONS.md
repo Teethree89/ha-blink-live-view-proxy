@@ -89,6 +89,7 @@ The first line is a verdict on where the path stopped:
 |---|---|
 | No playlist (or stream) request reached Home Assistant | The device could not reach Home Assistant at that address, or the player never asked |
 | Home Assistant refused the playlist / stream / segments (HTTP …) | Token, add-on or Blink trouble; the status says which |
+| The device could not reach Home Assistant when the live view failed | The report was sent late, so the device's connection broke while it started: its network, or Home Assistant restarting. Checked before anything else, because what Home Assistant saw looks like the next row |
 | The device received the playlist and then stopped asking | The cause is on the device, not the camera or the proxy ([#91]) |
 | The device kept reloading the playlist but never requested a segment | The playlist never had enough video to start from |
 | Segments were delivered, but the device reports nothing buffered | The device got the video and discarded it |

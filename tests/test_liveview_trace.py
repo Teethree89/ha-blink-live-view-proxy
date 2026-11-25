@@ -409,6 +409,15 @@ def unit_verdicts() -> None:
     check("kept reloading" in verdict(reloads, {"transport": "hls"}),
           "reloads with no segment are told apart from silence")
     check(trace_mod.playlist_segment_count(PLAYLIST) == 1, "segments are counted")
+    # Airplane mode switched on while a live view loaded: Home Assistant served
+    # the playlist and saw nothing more, the #91 shape, but the report waited
+    # on the device. It must not be told it stopped asking.
+    one_playlist = {"requests": [{"kind": "playlist", "status": 200, "at": 0.0, "name": ""}]}
+    offline = verdict(one_playlist, {"transport": "hls", "code": "E-007", "queued": True})
+    check("could not reach Home Assistant" in offline and "stopped asking" not in offline,
+          "a report sent late blames the connection, not the device's player", offline)
+    check("stopped asking" in verdict(one_playlist, {"transport": "hls", "code": "E-005"}),
+          "while the same requests reported at once are still the #91 verdict")
     refused_stream = {"requests": [{"kind": "mpegts", "status": 503, "bytes": 0, "at": 0.0,
                                     "name": ""}]}
     summary = trace_mod.server_summary(refused_stream)

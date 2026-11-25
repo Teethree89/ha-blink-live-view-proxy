@@ -221,10 +221,25 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
         return "This browser can play neither stream type; nothing was requested."
     if code == "E-008":
         return "The browser waited for a tap to start playback, and none came."
+    # A report that had to wait on the device was made when the device could
+    # not reach Home Assistant. That comes first: what Home Assistant saw of
+    # such a live view - a playlist served and then nothing - is the same
+    # shape as a device that stopped asking (#91), and reads as the device's
+    # fault in a way that sends the reader the wrong way. Found by starting a
+    # live view and switching on airplane mode while it loaded.
+    lost = bool(client.get("queued"))
     if played:
+        if lost:
+            return ("The live view played, then the device lost its connection to Home "
+                    "Assistant; its report was sent once the connection came back.")
         return "The live view played." + (
             f" It then ended with {code}." if code else ""
         )
+    if lost:
+        return ("The device could not reach Home Assistant when the live view failed; its "
+                "report was sent once the connection came back. The connection broke while "
+                "the live view was starting: check the device's network, or whether Home "
+                "Assistant was restarting.")
 
     if transport == "hls":
         playlists = [r for r in requests if r["kind"] == "playlist"]
