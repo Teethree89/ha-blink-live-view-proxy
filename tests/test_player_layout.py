@@ -288,6 +288,29 @@ def test_diagnostics() -> None:
     check("&session=${session}" in page.split("function stopUrl()", 1)[1][:300],
           "the stop request joins the session's trace")
 
+    # Unsent reports: saved on the device by the player, sent later by the
+    # player or by the dashboard script (which the panel loads too). The panel
+    # itself never touches browser storage; test_authentication holds it to that.
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
+    dialog = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-liveview-dialog.js").read_text()
+    key = re.search(r'const PENDING_KEY = "([^"]+)"', page)
+    check(bool(key) and f'const PENDING_DIAGNOSTICS_KEY = "{key.group(1)}"' in dialog,
+          "the player and the dashboard script use the same key for unsent reports")
+    check("if (!report && queueDiagnostics(payload))" in page,
+          "a report that could not be sent is kept on the device")
+    check("setTimeout(flushPending, " in page and "sendPendingDiagnostics(hass)" in dialog,
+          "and sent later, by this camera's player or by any Home Assistant page")
+    event = re.search(r'const DIAGNOSTICS_SENT_EVENT = "([^"]+)"', dialog)
+    check(bool(event) and f'const DIAGNOSTICS_SENT_EVENT = "{event.group(1)}"' in panel,
+          "the panel hears when they have been sent, and reloads its list")
+    check("started_at: diag ? diag.wall" in page,
+          "a late report carries when it failed, not when it was sent")
+    copy_text = panel.split("async _copyText(text)", 1)[1].split("\n  }\n", 1)[0]
+    check(copy_text.index('execCommand("copy")') < copy_text.index("navigator.clipboard"),
+          "the panel copies with execCommand first, so plain HTTP works there too")
+    check('data-diag="${index}"' in panel and "_diagnosticsHtml(camera)" in panel,
+          "each camera card in the panel has its Diagnostics list")
+
 
 def main() -> int:
     test_javascript_parses()

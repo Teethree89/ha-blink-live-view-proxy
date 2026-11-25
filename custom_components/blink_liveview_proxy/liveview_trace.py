@@ -114,6 +114,16 @@ class LiveviewTrace:
     def get(self, session: str) -> dict[str, Any] | None:
         return self._sessions.get(session)
 
+    def sessions(self) -> list[tuple[str, dict[str, Any]]]:
+        """Every session still held, oldest first."""
+        return list(self._sessions.items())
+
+    def forget(self, slug: str) -> None:
+        """Drop one camera's sessions, so a cleared history stays cleared."""
+        for session, entry in list(self._sessions.items()):
+            if entry["slug"] == slug:
+                del self._sessions[session]
+
 
 # --------------------------------------------------------------------------
 # The verdict
@@ -206,6 +216,55 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
         return ("Home Assistant sent video, but the browser reports receiving none.")
 
     return "The player did not say which stream type it used."
+
+
+def infer_transport(server: dict[str, Any] | None) -> str:
+    """Which player a session used, judged from what it requested."""
+    kinds = {record["kind"] for record in (server or {}).get("requests", [])}
+    if kinds & {"playlist", "segment"}:
+        return "hls"
+    if "mpegts" in kinds:
+        return "mse"
+    return ""
+
+
+def server_summary(server: dict[str, Any]) -> str:
+    """What Home Assistant saw of a live view the device never reported on.
+
+    No verdict: a live view that played and one whose device dropped off the
+    network both end without a report, and only the device could tell them
+    apart. This says what arrived, which is usually enough to see which.
+    """
+    requests = server.get("requests", [])
+    last = max((record["at"] for record in requests), default=0.0)
+    over = f" over {last:.0f} s" if last >= 1 else ""
+    stopped = any(record["kind"] == "stop" for record in requests)
+    tail = (" The player closed it." if stopped
+            else " The player never closed it, so the device may have lost its connection.")
+    prefix = "No report from the device. "
+
+    def plural(count: int, word: str) -> str:
+        return f"{count} {word}{'' if count == 1 else 's'}"
+
+    if infer_transport(server) == "hls":
+        playlists = [r for r in requests if r["kind"] == "playlist"]
+        segments = [r for r in requests if r["kind"] == "segment"]
+        if playlists and not any(_ok(r) for r in playlists):
+            return prefix + _refused(playlists, "playlist") + tail
+        served = [r for r in playlists + segments if _ok(r)]
+        text = (f"Home Assistant served {plural(len([r for r in served if r['kind'] == 'playlist']), 'playlist')}"
+                f" and {plural(len([r for r in served if r['kind'] == 'segment']), 'segment')}{over}")
+        refused = [r for r in playlists + segments if r.get("status") is not None and not _ok(r)]
+        if refused:
+            text += f", and refused {len(refused)}"
+        return prefix + text + "." + tail
+    if infer_transport(server) == "mse":
+        streams = [r for r in requests if r["kind"] == "mpegts"]
+        if not any(_ok(r) for r in streams):
+            return prefix + _refused(streams, "stream") + tail
+        sent = sum(r.get("bytes", 0) for r in streams if _ok(r))
+        return prefix + f"Home Assistant streamed {sent / 1_000_000:.1f} MB of video{over}." + tail
+    return prefix + "No stream was requested." + tail
 
 
 # --------------------------------------------------------------------------
@@ -336,6 +395,7 @@ def build_report(
     *,
     slug: str,
     version: str,
+    verdict_text: str | None = None,
 ) -> str:
     """The plain-text report the player copies to the clipboard."""
     client = client if isinstance(client, dict) else {}
@@ -352,7 +412,7 @@ def build_report(
     lines = [
         "```",
         "Blink live view diagnostics",
-        f"Verdict: {verdict(server, client)}",
+        f"Verdict: {verdict_text or verdict(server, client)}",
         f"Code: {code or 'none'}" + (f" ({detail})" if detail else ""),
         f"Camera: {slug}   Path: {transport}   Integration: {version}",
         f"Page: {protocol}, {_host_kind(_clean(client.get('host'), 255))}",
@@ -360,6 +420,8 @@ def build_report(
     ]
     if started:
         lines.append(f"First request: {started}")
+    if client.get("queued"):
+        lines.append("Sent late: the device could not reach Home Assistant when this failed.")
     lines.append("")
     lines.append("Home Assistant received:")
     lines.extend(_server_lines(server))
@@ -368,3 +430,79 @@ def build_report(
     lines.extend(_client_lines(client.get("events") or []))
     lines.append("```")
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# Saved reports
+#
+# The report used to exist only while the failure screen was open. Testing it
+# in airplane mode showed why that is not enough: Home Assistant's own page
+# reloaded the moment it reconnected, and the report went with it. Reports are
+# now kept, per camera, for the admin panel to list and copy again later.
+
+MAX_SAVED_REPORTS = 50
+
+
+class ReportLog:
+    """The most recent reports, newest last, at most one per session."""
+
+    def __init__(self, reports: list[dict[str, Any]] | None = None) -> None:
+        self.reports: list[dict[str, Any]] = [
+            report for report in (reports or []) if isinstance(report, dict)
+        ][-MAX_SAVED_REPORTS:]
+
+    def add(self, report: dict[str, Any]) -> None:
+        # A second report for the same session replaces the first: a failed
+        # Save after a failed live view is one live view, not two.
+        self.reports = [
+            item for item in self.reports if item.get("session") != report.get("session")
+        ]
+        self.reports.append(report)
+        self.reports = self.reports[-MAX_SAVED_REPORTS:]
+
+    def clear(self, slug: str) -> int:
+        before = len(self.reports)
+        self.reports = [item for item in self.reports if item.get("slug") != slug]
+        return before - len(self.reports)
+
+    def sessions(self) -> set[str]:
+        return {str(item.get("session")) for item in self.reports}
+
+
+def history(
+    log: ReportLog,
+    trace: LiveviewTrace,
+    *,
+    slug: str | None,
+    version: str,
+) -> list[dict[str, Any]]:
+    """Saved reports, plus recent live views nobody reported on, newest first."""
+    entries = [
+        {**item, "source": "device"}
+        for item in log.reports
+        if slug is None or item.get("slug") == slug
+    ]
+    reported = log.sessions()
+    for session, server in trace.sessions():
+        if session in reported or (slug is not None and server["slug"] != slug):
+            continue
+        summary = server_summary(server)
+        entries.append({
+            "id": f"live-{session[:12]}",
+            "session": session,
+            "slug": server["slug"],
+            "at": server["started_wall"],
+            "code": "",
+            "verdict": summary,
+            "queued": False,
+            "source": "server",
+            "report": build_report(
+                server,
+                {"transport": infer_transport(server)},
+                slug=server["slug"],
+                version=version,
+                verdict_text=summary,
+            ),
+        })
+    entries.sort(key=lambda item: float(item.get("at") or 0), reverse=True)
+    return entries

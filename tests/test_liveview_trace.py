@@ -19,8 +19,9 @@ import json
 import logging
 import pathlib
 import sys
+import time
 import types
-from typing import Any
+from typing import Any, ClassVar
 
 from aiohttp import ClientError, web
 from aiohttp.test_utils import TestClient, TestServer
@@ -79,6 +80,24 @@ def _stub_home_assistant() -> None:
         return types.SimpleNamespace(version="9.9.9-test")
 
     loader.async_get_integration = async_get_integration
+
+    storage = module("homeassistant.helpers.storage")
+
+    class Store:
+        """In memory, and saves at once: what was saved is what reloads."""
+
+        saved: ClassVar[dict[str, Any]] = {}
+
+        def __init__(self, _hass, _version, key) -> None:
+            self.key = key
+
+        async def async_load(self):
+            return Store.saved.get(self.key)
+
+        def async_delay_save(self, data_func, _delay) -> None:
+            Store.saved[self.key] = json.loads(json.dumps(data_func()))
+
+    storage.Store = Store
 
 
 def _load() -> tuple[types.ModuleType, types.ModuleType]:
@@ -195,6 +214,9 @@ def build_app(hass: FakeHass) -> web.Application:
     app.router.add_get(f"{base}/mpegts", lambda r: mpegts.get(r, r.match_info["slug"]))
     app.router.add_post(f"{base}/stop", lambda r: stop.post(r, r.match_info["slug"]))
     app.router.add_post(f"{base}/diagnostics", lambda r: diagnostics.post(r, r.match_info["slug"]))
+    panel = views.BlinkLiveviewProxyPanelDiagnosticsView(hass)
+    app.router.add_get("/api/blink_liveview_proxy/panel/diagnostics", panel.get)
+    app.router.add_delete("/api/blink_liveview_proxy/panel/diagnostics", panel.delete)
     return app
 
 
@@ -387,11 +409,82 @@ def unit_verdicts() -> None:
     check("kept reloading" in verdict(reloads, {"transport": "hls"}),
           "reloads with no segment are told apart from silence")
     check(trace_mod.playlist_segment_count(PLAYLIST) == 1, "segments are counted")
+    refused_stream = {"requests": [{"kind": "mpegts", "status": 503, "bytes": 0, "at": 0.0,
+                                    "name": ""}]}
+    summary = trace_mod.server_summary(refused_stream)
+    check("refused the stream (HTTP 503)" in summary and "MB" not in summary,
+          "an unreported live view that was refused says so, not '0.0 MB streamed'", summary)
     many = {"requests": [{"kind": "playlist", "status": 200, "at": float(i), "name": "",
                           "ms": i % 2, "detail": "1 segment"} for i in range(30)]}
     lines = trace_mod._server_lines(many)
     check(len(lines) == 2 and "29 more like it" in lines[1] and "+29.0s" in lines[1],
           "a run of identical reloads is one line, not thirty", lines)
+
+
+async def scenario_history() -> None:
+    print("\nsaved history for the admin panel")
+    ADDON.clear()
+    ADDON["index.m3u8"] = PLAYLIST.encode()
+    sys.modules["homeassistant.helpers.storage"].Store.saved.clear()
+    hass = FakeHass()
+    panel = "/api/blink_liveview_proxy/panel/diagnostics"
+    other = "1a2b3c4d-0000-4000-8000-000000000002"
+    unreported = "1a2b3c4d-0000-4000-8000-000000000003"
+    an_hour_ago = int(time.time()) - 3600
+    async with TestClient(TestServer(build_app(hass))) as client:
+        # A live view that failed and was reported at once.
+        await client.get(url("hls/index.m3u8"))
+        await diagnose(client, {"code": "E-005", "transport": "hls"})
+        # The same session reporting again (a failed Save afterwards).
+        await diagnose(client, {"code": "E-009", "detail": "HTTP 404", "transport": "hls"})
+        # One sent late, from a device that was offline, with when it happened.
+        await diagnose(client, {"code": "E-007", "transport": "hls", "queued": True,
+                                "started_at": an_hour_ago * 1000}, session=other)
+        # One nobody reported on: playlist fetched, then the device vanished.
+        await client.get(url("hls/index.m3u8", session=unreported))
+
+        listed = await (await client.get(panel, params={"slug": SLUG})).json()
+        entries = listed["entries"]
+        by_session = {entry["session"]: entry for entry in entries}
+        check(len(entries) == 3, "one entry per live view: reported twice is still one",
+              [e["session"] for e in entries])
+        check(by_session[SESSION]["code"] == "E-009" and by_session[SESSION]["source"] == "device",
+              "a second report for a session replaces the first", by_session.get(SESSION))
+        late = by_session[other]
+        check(late["queued"] and late["at"] == an_hour_ago
+              and "Sent late" in late["report"],
+              "a late report is marked as late and dated when it happened", late)
+        silent = by_session[unreported]
+        check(silent["source"] == "server" and "No report from the device" in silent["verdict"]
+              and "never closed it" in silent["verdict"],
+              "a live view nobody reported on is listed from what Home Assistant saw",
+              silent["verdict"])
+        check(entries[-1]["session"] == other, "oldest last: entries are newest first",
+              [e["at"] for e in entries])
+        check(all(CAMERA_TOKEN not in entry["report"] for entry in entries),
+              "no saved report holds a token")
+
+        garage = await (await client.get(panel, params={"slug": "garage"})).json()
+        check(garage["entries"] == [], "each camera lists only its own")
+
+        saved = sys.modules["homeassistant.helpers.storage"].Store.saved
+        check(len(saved.get(views.REPORT_STORE_KEY, {}).get("reports", [])) == 2,
+              "reports are written to storage, so a restart keeps them")
+
+        cleared = await (await client.delete(panel, params={"slug": SLUG})).json()
+        after = await (await client.get(panel, params={"slug": SLUG})).json()
+        check(cleared["cleared"] == 2 and after["entries"] == [],
+              "clearing removes the saved reports and the unreported live views", after)
+        missing = await client.delete(panel)
+        check(missing.status == 400, "clearing needs a camera")
+
+    fresh = FakeHass()
+    log, _store = await views._report_log(fresh)
+    check(log.reports == [], "after clearing, a reload finds nothing")
+    for index in range(trace_mod.MAX_SAVED_REPORTS + 10):
+        log.add({"session": f"s{index}", "slug": SLUG})
+    check(len(log.reports) == trace_mod.MAX_SAVED_REPORTS and log.reports[-1]["session"] == "s59",
+          "only the most recent reports are kept")
 
 
 async def run_all() -> None:
@@ -400,6 +493,7 @@ async def run_all() -> None:
     await scenario_segments_delivered()
     await scenario_mpegts_not_ready()
     await scenario_boundaries()
+    await scenario_history()
 
 
 def main() -> int:

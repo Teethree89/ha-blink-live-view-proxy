@@ -732,6 +732,65 @@
     true
   );
 
+  // Diagnostics reports that a live view could not send when it failed,
+  // because the device had lost its connection to Home Assistant. The player
+  // keeps them on the device and sends its own camera's next time it opens;
+  // this sends any camera's, signed in as whoever is viewing, as soon as Home
+  // Assistant's page is back. It lives here rather than in the admin panel
+  // because the panel never touches browser storage, and because this module
+  // loads on every dashboard and the panel alike.
+  const PENDING_DIAGNOSTICS_KEY = "blink-liveview-pending-diagnostics";
+  const DIAGNOSTICS_SENT_EVENT = "blink-liveview-diagnostics-sent";
+
+  function readPendingDiagnostics() {
+    try {
+      const list = JSON.parse(window.localStorage.getItem(PENDING_DIAGNOSTICS_KEY) || "[]");
+      return Array.isArray(list) ? list : [];
+    } catch (err) {
+      return [];
+    }
+  }
+
+  async function sendPendingDiagnostics(hass) {
+    const pending = readPendingDiagnostics().filter((item) => item && item.slug && item.session);
+    if (!pending.length || !hass || typeof hass.callApi !== "function") return;
+    const done = new Set();
+    for (const item of pending) {
+      try {
+        await hass.callApi(
+          "POST",
+          `blink_liveview_proxy/cameras/${encodeURIComponent(item.slug)}/diagnostics?session=${encodeURIComponent(item.session)}`,
+          item
+        );
+        done.add(item.session);
+      } catch (err) {
+        // A camera that no longer exists, or a body it will never take: drop
+        // it. Anything else may work next time.
+        const status = err && (err.status_code || err.status);
+        if (status === 400 || status === 404 || status === 413) done.add(item.session);
+      }
+    }
+    if (!done.size) return;
+    try {
+      const left = readPendingDiagnostics().filter((item) => item && item.session && !done.has(item.session));
+      if (left.length) window.localStorage.setItem(PENDING_DIAGNOSTICS_KEY, JSON.stringify(left));
+      else window.localStorage.removeItem(PENDING_DIAGNOSTICS_KEY);
+    } catch (err) {}
+    window.dispatchEvent(new CustomEvent(DIAGNOSTICS_SENT_EVENT, { detail: { sent: done.size } }));
+  }
+
+  // Home Assistant's object arrives a moment after the page does. Look for it
+  // for half a minute, then give up until the next page load.
+  (function sendWhenHassArrives(attempt) {
+    const root = document.querySelector("home-assistant");
+    const hass = root && root.hass;
+    if (hass && hass.connected !== false) {
+      sendPendingDiagnostics(hass).catch(() => {});
+    } else if (attempt < 30) {
+      setTimeout(() => sendWhenHassArrives(attempt + 1), 1000);
+    }
+  })(0);
+
   window.addEventListener("message", answerClipsTokens);
   window.addEventListener("message", (event) => {
     // The player's back arrow: it cannot reach this dialog directly.

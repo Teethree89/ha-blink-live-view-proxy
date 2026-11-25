@@ -25,6 +25,15 @@ used.
   HTTP. The verdict is also logged in Home Assistant as a warning.
   `docs/OPERATIONS.md` explains how to read it
   ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+- **A Diagnostics list on each camera in the Blink Proxy panel.** Every report
+  is saved (the last 50, kept across restarts), and **Cameras & entities →
+  Diagnostics** lists a camera's live views with the time, code, verdict and a
+  **Copy** button. A device that lost its connection keeps its report and sends
+  it once it can reach Home Assistant again, marked "sent late" and dated when
+  it failed; before this, Home Assistant's own reconnect reloaded the page and
+  the report was gone. Live views that no device reported on are listed too,
+  from what Home Assistant saw of them.
+- The panel's **Copy YAML** now works on plain HTTP too.
 
 ### Changed
 

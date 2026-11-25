@@ -26,7 +26,9 @@ from .dashboard_yaml import HEALTH_ENTITY_ID, render_dashboard_yaml
 from .lovelace import resource_collection, resource_mode
 from .liveview_trace import (
     LiveviewTrace,
+    ReportLog,
     build_report,
+    history,
     playlist_segment_count,
     safe_code,
     valid_session,
@@ -79,6 +81,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
     hass.http.register_view(BlinkLiveviewProxyStopView(hass))
     hass.http.register_view(BlinkLiveviewProxyDiagnosticsView(hass))
+    hass.http.register_view(BlinkLiveviewProxyPanelDiagnosticsView(hass))
     hass.http.register_view(BlinkLiveviewProxyControlsView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
@@ -347,6 +350,38 @@ def _trace(hass: HomeAssistant) -> LiveviewTrace:
     if trace is None:
         trace = data["_liveview_trace"] = LiveviewTrace()
     return trace
+
+
+# Saved diagnostics reports, kept across restarts in .storage so a failure can
+# still be read after Home Assistant reloads - which is exactly what it does
+# when a device that dropped off the network comes back.
+REPORT_STORE_KEY = f"{DOMAIN}.liveview_diagnostics"
+REPORT_STORE_VERSION = 1
+
+
+async def _report_log(hass: HomeAssistant) -> tuple[ReportLog, Any]:
+    """The saved reports and the store behind them, loaded on first use."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "_report_log" not in data:
+        from homeassistant.helpers.storage import Store
+
+        store = Store(hass, REPORT_STORE_VERSION, REPORT_STORE_KEY)
+        stored = await store.async_load()
+        if "_report_log" not in data:
+            reports = stored.get("reports") if isinstance(stored, dict) else None
+            data["_report_log"] = (ReportLog(reports if isinstance(reports, list) else None), store)
+    return data["_report_log"]
+
+
+def _save_report_log(log: ReportLog, store: Any) -> None:
+    store.async_delay_save(lambda: {"reports": list(log.reports)}, 5)
+
+
+async def _integration_version(hass: HomeAssistant) -> str:
+    from homeassistant.loader import async_get_integration
+
+    integration = await async_get_integration(hass, DOMAIN)
+    return str(integration.version or "unknown")
 
 
 class _Traced:
@@ -1661,9 +1696,9 @@ function stopUrl() {{
   return new URL(path, window.location.origin).href;
 }}
 
-function diagnosticsUrl() {{
+function diagnosticsUrl(forSession = sessionId) {{
   const token = encodeURIComponent(accessToken || "");
-  const session = encodeURIComponent(sessionId);
+  const session = encodeURIComponent(forSession);
   const path = `/api/blink_liveview_proxy/cameras/${{slug}}/diagnostics?token=${{token}}&session=${{session}}`;
   return new URL(path, window.location.origin).href;
 }}
@@ -2126,6 +2161,7 @@ function startDiagnostics() {{
   stopDiagnostics();
   diag = {{
     t0: performance.now(),
+    wall: Date.now(),
     events: [],
     lastKey: "",
     buffered: false,
@@ -2184,7 +2220,73 @@ function diagnosticsPayload() {{
     buffered: !!(diag && diag.buffered),
     bytes_arrived: bytesArrived,
     events: diag ? diag.events : [],
+    // For a report that has to wait: which live view, of which camera, and
+    // when it failed rather than when it was finally sent.
+    session: sessionId,
+    slug,
+    started_at: diag ? diag.wall : Date.now(),
   }};
+}}
+
+// Reports that could not be sent when they were made.
+//
+// A device that loses its connection cannot send the report that would say
+// so, and Home Assistant's own page reloads when it reconnects, taking the
+// failure screen with it. So an unsent report waits on the device, and goes
+// the next time this camera's player opens, or the admin panel does - which
+// sends any camera's, signed in as the person viewing it.
+const PENDING_KEY = "blink-liveview-pending-diagnostics";
+const PENDING_MAX = 5;
+const PENDING_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+
+function readPending() {{
+  try {{
+    const list = JSON.parse(window.localStorage.getItem(PENDING_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  }} catch (err) {{
+    return [];
+  }}
+}}
+
+function writePending(list) {{
+  try {{
+    const fresh = list.filter((item) => item && Date.now() - (item.started_at || 0) < PENDING_MAX_AGE_MS);
+    if (fresh.length) window.localStorage.setItem(PENDING_KEY, JSON.stringify(fresh.slice(-PENDING_MAX)));
+    else window.localStorage.removeItem(PENDING_KEY);
+    return true;
+  }} catch (err) {{
+    // Private browsing, or site data blocked: nothing can wait, but the
+    // report on screen is still there to copy.
+    return false;
+  }}
+}}
+
+function queueDiagnostics(payload) {{
+  const list = readPending().filter((item) => item && item.session !== payload.session);
+  list.push({{ ...payload, queued: true }});
+  return writePending(list);
+}}
+
+async function flushPending() {{
+  const mine = readPending().filter((item) => item && item.slug === slug && item.session);
+  if (!mine.length) return;
+  const done = new Set();
+  for (const item of mine) {{
+    try {{
+      const response = await fetch(diagnosticsUrl(item.session), {{
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: {{ "Content-Type": "application/json" }},
+        body: JSON.stringify(item),
+      }});
+      // A refusal other than the token is not going to change on a retry.
+      if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 403)) {{
+        done.add(item.session);
+      }}
+    }} catch (err) {{}}
+  }}
+  if (done.size) writePending(readPending().filter((item) => !item || !done.has(item.session)));
 }}
 
 // If Home Assistant cannot be reached for its half, the device's half still
@@ -2241,6 +2343,11 @@ async function prepareDiagnostics() {{
   diagReport = report || localReport(payload);
   diagButton.disabled = false;
   diagButton.textContent = "Copy diagnostics";
+  if (!report && queueDiagnostics(payload)) {{
+    diagHint.textContent =
+      "Home Assistant could not be reached. This report is saved on this device and will be sent when it can be.";
+    diagHint.hidden = false;
+  }}
 }}
 
 // navigator.clipboard exists only on an HTTPS page, and plenty of Home
@@ -2899,6 +3006,9 @@ window.addEventListener("pagehide", () => {{
 }});
 
 startPlayer();
+// After the live view has had its start: a waiting report is small, but the
+// first seconds belong to waking the camera.
+setTimeout(flushPending, 5000);
 </script>
 </body>
 </html>"""
@@ -3213,9 +3323,7 @@ class BlinkLiveviewProxyDiagnosticsView(HomeAssistantView):
         self.hass = hass
 
     async def post(self, request: web.Request, slug: str) -> web.Response:
-        """Return the report for this player session."""
-        from homeassistant.loader import async_get_integration
-
+        """Return the report for this player session, and keep a copy."""
         _camera(self.hass, slug)
         _authorize_browser_request(self.hass, request, slug)
         if (request.content_length or 0) > self.MAX_BODY:
@@ -3236,21 +3344,77 @@ class BlinkLiveviewProxyDiagnosticsView(HomeAssistantView):
         server = _trace(self.hass).get(session) if valid_session(session) else None
         if server is not None and server.get("slug") != slug:
             server = None
-        integration = await async_get_integration(self.hass, DOMAIN)
         report = build_report(
-            server, client, slug=slug, version=str(integration.version or "unknown")
+            server, client, slug=slug, version=await _integration_version(self.hass)
         )
         summary = verdict(server, client)
+        code = safe_code(client.get("code"))
         LOGGER.warning(
-            "Live view for %s failed with %s: %s",
-            slug,
-            safe_code(client.get("code")) or "no code",
-            summary,
+            "Live view for %s failed with %s: %s", slug, code or "no code", summary
         )
+
+        now = time.time()
+        started = client.get("started_at")
+        at = now
+        # When it happened, not when it arrived: a report sent late from a
+        # device that was offline still sorts by the failure. Only a time
+        # inside the last week is believed.
+        if isinstance(started, (int, float)) and now - 7 * 86400 < started / 1000 <= now + 60:
+            at = started / 1000
+        log, store = await _report_log(self.hass)
+        log.add({
+            "id": secrets.token_hex(6),
+            "session": session if valid_session(session) else secrets.token_hex(8),
+            "slug": slug,
+            "at": at,
+            "received": now,
+            "code": code,
+            "verdict": summary,
+            "queued": bool(client.get("queued")),
+            "report": report,
+        })
+        _save_report_log(log, store)
         return web.json_response(
             {"verdict": summary, "report": report},
             headers={"Cache-Control": "no-store"},
         )
+
+
+class BlinkLiveviewProxyPanelDiagnosticsView(HomeAssistantView):
+    """List a camera's saved diagnostics reports for the admin panel, or clear them.
+
+    Saved reports come first-hand from devices. Recent live views that no
+    device reported on are listed too, from what the integration saw of them:
+    a device that lost its connection mid-failure cannot send anything, and
+    those are the ones most worth seeing.
+    """
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel/diagnostics"
+    name = "api:blink_liveview_proxy:panel_diagnostics"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def get(self, request: web.Request) -> web.Response:
+        slug = request.query.get("slug") or None
+        log, _store = await _report_log(self.hass)
+        entries = history(
+            log, _trace(self.hass), slug=slug, version=await _integration_version(self.hass)
+        )
+        return web.json_response({"entries": entries}, headers=AUTH_VIEW_HEADERS)
+
+    @require_admin
+    async def delete(self, request: web.Request) -> web.Response:
+        slug = request.query.get("slug", "")
+        if not slug:
+            raise web.HTTPBadRequest(text="slug is required\n")
+        log, store = await _report_log(self.hass)
+        cleared = log.clear(slug)
+        _trace(self.hass).forget(slug)
+        _save_report_log(log, store)
+        return web.json_response({"cleared": cleared}, headers=AUTH_VIEW_HEADERS)
 
 
 class BlinkLiveviewProxyControlsView(HomeAssistantView):

@@ -99,15 +99,37 @@ The same verdict is written to the Home Assistant log as a warning, `Live view
 for <camera> failed with E-0xx: ...`, so it is there even if nobody presses the
 button.
 
-What it does not contain: access tokens, and the address Home Assistant was
-opened at. The report says only what kind of address it was (IP address,
-`.local` name, domain name, Nabu Casa), which is what matters for diagnosis.
-It does include the browser's user agent, which names the device and its OS
-version. Nothing is sent anywhere: the report exists only in memory, holds the
-last 20 live views, and leaves the device only if someone pastes it.
+### Where reports are kept
 
-Copying works on plain HTTP as well as HTTPS. If the device will not copy, the
-report appears in a text box to select and copy by hand.
+Every report is also saved, so it can be read after the failure screen is
+gone. Open **Blink Proxy → Cameras & entities** and press **Diagnostics** on a
+camera: its live views are listed newest first, each with the time, the code,
+the verdict, **Copy**, and the full report. **Clear** empties one camera's list.
+
+- **Saved reports** come from the device that failed. Home Assistant keeps the
+  last 50 across all cameras in `.storage/blink_liveview_proxy.liveview_diagnostics`,
+  so they survive a restart.
+- **Sent late** marks a report the device could not send when it failed,
+  because it had lost its connection to Home Assistant. The player keeps it on
+  the device (up to five, for a week) and sends it the next time that camera's
+  live view opens, or when the Blink Proxy panel is opened, which sends any
+  camera's. It is dated when the live view failed, not when it arrived.
+- **Live views nobody reported on** are listed too, from what Home Assistant
+  saw of them: how many playlists and segments it served, or how much of the
+  stream, and whether the player ever closed it. A device that dropped off the
+  network mid-start shows up here as a playlist or two and no close. These come
+  from memory (the last 20 live views), so a restart clears them.
+
+What a report does not contain: access tokens, and the address Home Assistant
+was opened at. It says only what kind of address it was (IP address, `.local`
+name, domain name, Nabu Casa), which is what matters for diagnosis. It does
+include the browser's user agent, which names the device and its OS version.
+Nothing leaves Home Assistant unless someone copies a report and pastes it
+somewhere.
+
+Copying works on plain HTTP as well as HTTPS, in the player and in the panel.
+If the device will not copy, the player shows the report in a text box to
+select by hand, and the panel's **Show report** has the full text.
 
 [#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
 [#91]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91
