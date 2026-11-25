@@ -222,6 +222,47 @@ def test_start_watchdog() -> None:
     )
 
 
+def test_failure_codes() -> None:
+    """Every failure the player can end on carries a code, and each is documented.
+
+    Issue #91: an iPhone that never requested a segment was told the camera had
+    not started sending video, while the camera was streaming. The page had one
+    message for "nothing arrived" on both players, and only a screenshot showed
+    which branch had fired. Codes make that one line of text in an issue.
+    """
+    print("failure codes")
+    page = player_page()
+    table = page.split("const FAILURES = {", 1)[1].split("};", 1)[0]
+    defined = re.findall(r'"(E-\d{3}[a-z]?)":', table)
+    # Raised anywhere outside the table: in a failureMessage() call, or as one
+    # side of the ternary that picks between two.
+    rest = page.replace(table, "")
+    used = set(re.findall(r'"(E-\d{3}[a-z]?)"', rest))
+    check(len(defined) == len(set(defined)), "no code is defined twice")
+    check(used <= set(defined), f"every code raised is defined: {sorted(used - set(defined))}")
+    check(set(defined) <= used, f"every code defined is raised: {sorted(set(defined) - used)}")
+
+    docs = (ROOT / "docs/OPERATIONS.md").read_text()
+    dialog = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-liveview-dialog.js").read_text()
+    dialog_codes = set(re.findall(r"\((E-\d{3}[a-z]?)\)", dialog))
+    check(dialog_codes == {"E-010"}, "the dialog raises its own code")
+    check(not dialog_codes & set(defined), "and it does not reuse one of the player's")
+    undocumented = sorted(code for code in set(defined) | dialog_codes if f"`{code}`" not in docs)
+    check(not undocumented, f"every code is in docs/OPERATIONS.md: {undocumented}")
+
+    # The endings that are not failures stay free of codes.
+    check('endSession("Live view ended.")' in page, "a stream that ended is not an error")
+    check("Live view ended or the camera stopped sending video.\")" not in page,
+          "no failure is ended with bare text any more")
+    check('setEnded("Could not save' not in page, "including a failed save")
+
+    hls_nothing = re.search(r'"E-005": "([^"]+)"', table).group(1)
+    check("camera did not start" not in hls_nothing.lower(),
+          "the HLS no-video message does not blame the camera (#91)")
+    check('transport === "hls"' in page and len(re.findall(r'^\s*transport = "(hls|mse)";', page, re.M)) == 2,
+          "the page knows which player it ran, to pick the code")
+
+
 def main() -> int:
     test_javascript_parses()
     test_portrait()
@@ -229,6 +270,7 @@ def main() -> int:
     test_notch()
     test_saving_state()
     test_start_watchdog()
+    test_failure_codes()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

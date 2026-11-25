@@ -38,8 +38,39 @@ still have it installed, delete it rather than guarding its reloads.
 | Every Blink entity unavailable | Credentials expired | Re-auth in **Blink Proxy → Authentication** | Restarting, repeatedly |
 | `/health` not answering | Proxy wedged | Restart the proxy | Re-auth |
 | Watchdog attempts stuck at 3 | Refresh token rejected | Re-auth in **Blink Proxy → Authentication** | More restarts |
-| iPhone shows E-001b | Browser has no Media Source Extensions | Native HLS playback | — |
+| Live view ends with a code such as `(E-005)` | See the code | [Live view error codes](#live-view-error-codes) | Guessing from the wording |
 | `ffmpeg exited with 1` | Could be anything; stderr is discarded | Check the proxy log first | Guessing |
+
+## Live view error codes
+
+When a live view fails, the message ends with a code in brackets, sometimes
+followed by detail from the player: `(E-007, media error 4)`. The code says
+which check fired, so the wording on its own is never the evidence. The same
+code is written to the browser console as `Blink live view E-0xx`.
+
+The player picks one of two paths. Desktop browsers and Android use mpegts.js
+over the direct MPEG-TS stream; iPhone, iPad and the companion app on them have
+no Media Source Extensions and use native HLS. The add-on log shows which: an
+`/mpegts` request, or `Started ffmpeg HLS session` and `/hls/index.m3u8`.
+
+| Code | Path | What happened | Look at |
+|---|---|---|---|
+| `E-001b` | — | The browser has neither Media Source Extensions nor native HLS, so it cannot play either stream. | A different browser. |
+| `E-002` | MPEG-TS | Nothing arrived in 30 seconds. | The add-on log: did the live view start, and did Blink answer? |
+| `E-003` | MPEG-TS | Data arrived for 30 seconds but no picture started. | The stream itself: a codec or an announced track the browser waits for ([#80]). |
+| `E-004` | MPEG-TS | mpegts.js raised an error. The detail is its error type and kind, and the HTTP status if there was one: `NetworkError: HttpStatusCodeInvalid 503` is the proxy refusing the stream. | The detail first, then the add-on log at that time. |
+| `E-005` | HLS | Nothing was buffered in 30 seconds. Either the camera never started, or the device stopped asking for video. | The add-on log. `Cached the HLS live view` means the camera did send; no `/hls/segment_*.ts` requests means the device never asked ([#91]). |
+| `E-006` | HLS | Video was buffered for 30 seconds but no picture started. | The segments: `ffprobe` one from `/data/hls/<camera>/`. |
+| `E-007` | HLS | The video element reported an error. The detail is its media error code: 2 network, 3 decode, 4 not supported. Safari reports a playlist request the server refused as 4. | The integration's playlist response, then the add-on log. |
+| `E-008` | Either | The browser wanted a tap to start, and none came before the session limit. | Nothing is broken. |
+| `E-009` | Either | Save MP4 failed. The detail is the HTTP status of the last attempt. | Whether the live view played at all; a session that never started has nothing to save. |
+| `E-010` | — | The dashboard opened the dialog before the camera's access token was ready. | Refresh the dashboard. If it persists, the camera entity has no `access_token` attribute. |
+
+Codes are never reused. A code that stops being raised is retired, and its
+number is not given to a different failure.
+
+[#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
+[#91]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91
 
 ## The watchdog
 

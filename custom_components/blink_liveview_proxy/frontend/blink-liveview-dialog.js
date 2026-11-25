@@ -455,7 +455,9 @@
     if (!src) {
       const error = document.createElement("div");
       error.className = "blink-liveview-error";
-      error.textContent = "Camera access token is not ready yet. Refresh the dashboard and try again.";
+      // E-010 continues the player's failure codes (docs/OPERATIONS.md); this
+      // one is raised before there is a player to raise it.
+      error.textContent = "Camera access token is not ready yet. Refresh the dashboard and try again. (E-010)";
       shell.append(error);
     } else {
       iframe = document.createElement("iframe");

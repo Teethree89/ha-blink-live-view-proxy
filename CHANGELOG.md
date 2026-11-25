@@ -9,6 +9,32 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [Unreleased]
+
+### Changed
+
+- **Every live-view failure ends with a code**, such as `(E-005)`, followed
+  by any detail the player gave: the mpegts.js error and HTTP status, the HLS
+  video element's media error code, or the HTTP status of a failed save.
+  `docs/OPERATIONS.md` lists what each code means and where to look. Before
+  this, several different failures shared one wording, and a screenshot was the
+  only way to tell which check had fired
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+  The code is also written to the browser console.
+
+### Fixed
+
+- **An iPhone that never loaded any video no longer blames the camera.** On
+  the HLS path the page said "The camera did not start sending video" whenever
+  nothing was buffered, including when the camera was streaming and the iPhone
+  had simply stopped asking for it
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+  That case is now `E-005` and says either is possible.
+- **A live view left waiting for a tap no longer reports a silent camera.** When
+  the browser wanted a tap to start and none came before the session limit, the
+  page said the camera had not sent video. It now says play was not tapped
+  (`E-008`).
+
 ## [1.3.2] — 2026-11-24
 
 Fix cloud clips missing from the clip viewer. Only the proxy changed; the

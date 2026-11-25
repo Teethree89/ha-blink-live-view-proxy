@@ -1405,6 +1405,9 @@ let startTimer = null;
 let bytesArrived = false;
 // Set when the browser would not start the picture without a tap.
 let tapNeeded = false;
+// Which player this live view runs on: "mse" (mpegts.js) or "hls" (native).
+// The same symptom means different things on the two, so the codes differ.
+let transport = "";
 let talkWs = null;
 let talkStream = null;
 let talkContext = null;
@@ -1855,7 +1858,7 @@ async function saveLastView() {{
     }}, 1400);
   }} catch (err) {{
     save.textContent = originalText;
-    setEnded("Could not save the last live view.");
+    setEnded(failureMessage("E-009", err && err.message));
   }} finally {{
     save.disabled = false;
   }}
@@ -1937,14 +1940,44 @@ function stopPlayer() {{
 // takes a few seconds to a dozen, and the proxy gives the HLS path thirty
 // itself (hls_start_timeout). Past this the page used to say nothing at all
 // until the session limit ended it, and then said "60 second live view
-// finished", which reads as a stream that played. It never did: the camera was
-// silent, or sent something the browser could not start. Which of those it was
-// is worth telling, because the fix for each is different.
+// finished", which reads as a stream that played. It never did.
 const START_TIMEOUT_MS = 30000;
-const NO_VIDEO_MESSAGE =
-  "The camera did not start sending video. It may be offline, or asleep on a weak signal. Restart to try again.";
-const NO_PICTURE_MESSAGE =
-  "Video is arriving, but this browser could not start it. Restart to try again, and tell whoever looks after the proxy if it keeps happening.";
+
+// Every way a live view can fail has its own code, shown after the message.
+// The same words used to cover cases with different causes: on an iPhone that
+// never asked for a single segment (#91) the page blamed the camera, which was
+// in fact streaming, and a screenshot was the only way to learn which branch
+// had fired. A code says that in four characters someone can type into an
+// issue. docs/OPERATIONS.md lists them all; keep the two in step, and never
+// reuse a retired code for a different failure.
+const FAILURES = {{
+  // Neither Media Source Extensions nor native HLS.
+  "E-001b": "This browser cannot play the direct MPEG-TS stream.",
+  // MPEG-TS path (mpegts.js): desktop browsers and Android.
+  "E-002": "The camera did not start sending video. It may be offline, or asleep on a weak signal. Restart to try again.",
+  "E-003": "Video is arriving, but this browser could not start it. Restart to try again, and tell whoever looks after the proxy if it keeps happening.",
+  "E-004": "Live view ended or the camera stopped sending video.",
+  // Native HLS path: iPhone, iPad and the companion app on them. Nothing in
+  // the buffer here does not mean the camera was silent - the device may
+  // never have asked for the video - so E-005 does not blame the camera.
+  "E-005": "No video reached this device. The camera may not have started, or this device stopped loading the stream. Restart to try again.",
+  "E-006": "Video is arriving, but this device could not start it. Restart to try again, and tell whoever looks after the proxy if it keeps happening.",
+  "E-007": "Live view ended or the camera stopped sending video.",
+  // Either path.
+  "E-008": "Live view never started because play was not tapped. Restart to try again.",
+  "E-009": "Could not save the last live view.",
+}};
+
+// The message for a code, with the code and any detail the player gave after
+// it. Also logged, so a Web Inspector session shows what fired and when.
+function failureMessage(code, detail) {{
+  const text = FAILURES[code] || "Live view failed.";
+  const extra = detail ? `, ${{detail}}` : "";
+  try {{
+    console.warn(`Blink live view ${{code}}${{extra}}`);
+  }} catch (err) {{}}
+  return `${{text}} (${{code}}${{extra}})`;
+}}
 
 function disarmStartWatchdog() {{
   if (startTimer) {{
@@ -1962,21 +1995,27 @@ function armStartWatchdog() {{
 }}
 
 function noPictureMessage() {{
-  return bytesArrived || video.buffered.length > 0 ? NO_PICTURE_MESSAGE : NO_VIDEO_MESSAGE;
+  if (transport === "hls") {{
+    return failureMessage(video.buffered.length > 0 ? "E-006" : "E-005");
+  }}
+  return failureMessage(bytesArrived || video.buffered.length > 0 ? "E-003" : "E-002");
 }}
 
 // What to say when the session limit arrives: that the live view finished, but
 // only if there was a live view.
 function sessionLimitMessage() {{
-  return video.classList.contains("ready")
-    ? `${{seconds}} second live view finished.`
-    : noPictureMessage();
+  if (video.classList.contains("ready")) return `${{seconds}} second live view finished.`;
+  // The watchdog stands down while the page waits for a tap, so this is the
+  // first thing to notice a tap that never came.
+  if (tapNeeded && video.paused) return failureMessage("E-008");
+  return noPictureMessage();
 }}
 
 async function startPlayer() {{
   stopPlayer();
   bytesArrived = false;
   tapNeeded = false;
+  transport = "";
   setLoading("Waking camera and waiting for video");
 
   const canMse = !!(window.mpegts && mpegts.getFeatureList().mseLivePlayback);
@@ -1987,6 +2026,7 @@ async function startPlayer() {{
     // Media Source Extensions, so mpegts.js can never run there and the direct
     // MPEG-TS player always dies with E-001b. They do play HLS natively, and
     // the proxy already produces an HLS rendition, so use it.
+    transport = "hls";
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
@@ -2002,7 +2042,10 @@ async function startPlayer() {{
       endSession("Live view ended.");
     }};
     video.onerror = () => {{
-      endSession("Live view ended or the camera stopped sending video.");
+      // MediaError codes: 1 aborted, 2 network, 3 decode, 4 not supported.
+      // Safari reports a playlist the server refused as 4, not as 2.
+      const code = video.error ? video.error.code : 0;
+      endSession(failureMessage("E-007", code ? `media error ${{code}}` : ""));
     }};
     video.src = hlsUrl();
     video.load();
@@ -2019,10 +2062,11 @@ async function startPlayer() {{
   }}
 
   if (!canMse) {{
-    setEnded("This browser cannot play the direct MPEG-TS stream. E-001b");
+    setEnded(failureMessage("E-001b"));
     return;
   }}
 
+  transport = "mse";
   player = mpegts.createPlayer({{
     type: "mpegts",
     isLive: true,
@@ -2039,8 +2083,12 @@ async function startPlayer() {{
     stashInitialSize: 96 * 1024
   }});
 
-  player.on(mpegts.Events.ERROR, () => {{
-    endSession("Live view ended or the camera stopped sending video.");
+  player.on(mpegts.Events.ERROR, (type, detail, info) => {{
+    // For example "NetworkError: HttpStatusCodeInvalid 503" when the proxy
+    // refused the stream, against "MediaError" for one the browser could not
+    // decode.
+    const status = info && info.code ? ` ${{info.code}}` : "";
+    endSession(failureMessage("E-004", type ? `${{type}}: ${{detail}}${{status}}` : ""));
   }});
   player.on(mpegts.Events.STATISTICS_INFO, (info) => {{
     if (info && info.speed > 0) bytesArrived = true;
