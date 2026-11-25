@@ -26,6 +26,13 @@ from typing import Any, Callable
 # A handful of recent live views, in memory only. Diagnostics are wanted
 # straight after a failure, not days later, and nothing here is worth a write.
 MAX_SESSIONS = 20
+# Sessions no request has yet proved with a valid token. Requests are recorded
+# before authorisation on purpose (a refused request is the one nothing else
+# shows), but that means anyone who can reach Home Assistant can make them,
+# with no token at all. So they wait here, apart: never listed in the admin
+# panel, and unable to push a real live view out of the trace. A session moves
+# across the moment one of its requests is authorised.
+MAX_UNVERIFIED_SESSIONS = 10
 MAX_REQUESTS = 400
 MAX_CLIENT_EVENTS = 300
 # The player generates a UUID; anything else is not a session this page made.
@@ -53,24 +60,59 @@ class LiveviewTrace:
                  wall: Callable[[], float] = time.time) -> None:
         self._clock = clock
         self._wall = wall
+        # Sessions with at least one authorised request.
         self._sessions: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        # Sessions with none yet; see MAX_UNVERIFIED_SESSIONS.
+        self._unverified: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+    def _new_entry(self, slug: str) -> dict[str, Any]:
+        return {
+            "slug": slug,
+            "started_mono": self._clock(),
+            "started_wall": self._wall(),
+            "requests": [],
+            "dropped": 0,
+        }
+
+    @staticmethod
+    def _add(table: OrderedDict[str, dict[str, Any]], session: str,
+             entry: dict[str, Any], cap: int) -> None:
+        table[session] = entry
+        while len(table) > cap:
+            table.popitem(last=False)
 
     def _session(self, session: str, slug: str) -> dict[str, Any]:
-        entry = self._sessions.get(session)
-        if entry is None:
-            entry = {
-                "slug": slug,
-                "started_mono": self._clock(),
-                "started_wall": self._wall(),
-                "requests": [],
-                "dropped": 0,
-            }
-            self._sessions[session] = entry
-            while len(self._sessions) > MAX_SESSIONS:
-                self._sessions.popitem(last=False)
-        else:
-            self._sessions.move_to_end(session)
+        for table in (self._sessions, self._unverified):
+            entry = table.get(session)
+            if entry is not None:
+                table.move_to_end(session)
+                return entry
+        # New sessions start unverified: whoever made this request may hold
+        # no token at all.
+        entry = self._new_entry(slug)
+        self._add(self._unverified, session, entry, MAX_UNVERIFIED_SESSIONS)
         return entry
+
+    def verify(self, session: str | None, slug: str,
+               record: dict[str, Any] | None = None) -> None:
+        """Mark a session as a real live view: one of its requests was authorised.
+
+        `record` is that request's record. If a flood of unverified sessions
+        pushed this one out while the request was in flight, the session is
+        started again from it rather than lost.
+        """
+        if not valid_session(session):
+            return
+        if session in self._sessions:
+            self._sessions.move_to_end(session)
+            return
+        entry = self._unverified.pop(session, None)
+        if entry is None:
+            entry = self._new_entry(slug)
+            if record is not None:
+                record["at"] = 0.0
+                entry["requests"].append(record)
+        self._add(self._sessions, session, entry, MAX_SESSIONS)
 
     def begin(self, session: str | None, slug: str, kind: str, name: str = "") -> dict[str, Any] | None:
         """Note that a request arrived. Returns the record to finish, or None.
@@ -84,7 +126,9 @@ class LiveviewTrace:
         record = {
             "at": self._clock() - entry["started_mono"],
             "kind": kind,
-            "name": name,
+            # A segment's file name comes from the URL, from a request that
+            # may hold no token: one line, or it could forge lines in a report.
+            "name": _clean(name, 80),
             "status": None,
             "ms": None,
             "bytes": 0,
@@ -104,7 +148,7 @@ class LiveviewTrace:
         record["status"] = status
         record["ms"] = round((self._clock() - record["_t0"]) * 1000)
         if detail:
-            record["detail"] = detail[:120]
+            record["detail"] = _clean(detail, 120)
 
     @staticmethod
     def add_bytes(record: dict[str, Any] | None, count: int) -> None:
@@ -112,17 +156,29 @@ class LiveviewTrace:
             record["bytes"] += count
 
     def get(self, session: str) -> dict[str, Any] | None:
-        return self._sessions.get(session)
+        """One session, verified or not.
+
+        Only ever asked for by an authorised diagnostics request naming the
+        session id itself - a random UUID - so an unverified session reaches
+        the one device that made it, and is how a playlist refused on a stale
+        token still gets its verdict.
+        """
+        return self._sessions.get(session) or self._unverified.get(session)
 
     def sessions(self) -> list[tuple[str, dict[str, Any]]]:
-        """Every session still held, oldest first."""
+        """Every verified session still held, oldest first.
+
+        This is what the admin panel lists, so unverified sessions are left
+        out: anyone can make those, without a token.
+        """
         return list(self._sessions.items())
 
     def forget(self, slug: str) -> None:
         """Drop one camera's sessions, so a cleared history stays cleared."""
-        for session, entry in list(self._sessions.items()):
-            if entry["slug"] == slug:
-                del self._sessions[session]
+        for table in (self._sessions, self._unverified):
+            for session, entry in list(table.items()):
+                if entry["slug"] == slug:
+                    del table[session]
 
 
 # --------------------------------------------------------------------------

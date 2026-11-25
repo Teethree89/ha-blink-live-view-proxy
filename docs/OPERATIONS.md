@@ -118,7 +118,11 @@ the verdict, **Copy**, and the full report. **Clear** empties one camera's list.
   saw of them: how many playlists and segments it served, or how much of the
   stream, and whether the player ever closed it. A device that dropped off the
   network mid-start shows up here as a playlist or two and no close. These come
-  from memory (the last 20 live views), so a restart clears them.
+  from memory (the last 20 live views), so a restart clears them. Only live
+  views with at least one request that carried a valid token are listed:
+  anyone who can reach Home Assistant can send requests with no token, and
+  those are kept apart (the last 10, never listed) so they can neither appear
+  here nor push a real live view out.
 
 What a report does not contain: access tokens, and the address Home Assistant
 was opened at. It says only what kind of address it was (IP address, `.local`

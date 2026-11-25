@@ -415,6 +415,18 @@ class _Traced:
         return False
 
 
+def _authorize_traced(
+    hass: HomeAssistant, request: web.Request, slug: str, record: dict[str, Any] | None
+) -> None:
+    """Authorise a traced live-view request, then vouch for its session.
+
+    Until a request on it passes this, a session is unverified: anyone can
+    name one, without a token, and the admin panel never lists it.
+    """
+    _authorize_browser_request(hass, request, slug)
+    _trace(hass).verify(request.query.get("session"), slug, record)
+
+
 def _authorize_browser_request(
     hass: HomeAssistant,
     request: web.Request,
@@ -3100,7 +3112,7 @@ class BlinkLiveviewProxyMpegtsView(HomeAssistantView):
         """Stream MPEG-TS to the browser."""
         _camera(self.hass, slug)
         with _Traced(self.hass, request, slug, "mpegts") as record:
-            _authorize_browser_request(self.hass, request, slug)
+            _authorize_traced(self.hass, request, slug, record)
             query = {
                 "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
                 "force": request.query.get("force", "1"),
@@ -3136,7 +3148,7 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
         """Return the playlist with tokenised segment URIs."""
         _camera(self.hass, slug)
         with _Traced(self.hass, request, slug, "playlist") as record:
-            _authorize_browser_request(self.hass, request, slug)
+            _authorize_traced(self.hass, request, slug, record)
             session = request.query.get("session", "")
             query = {
                 "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
@@ -3189,7 +3201,7 @@ class BlinkLiveviewProxyHlsSegmentView(HomeAssistantView):
             raise web.HTTPNotFound()
         _camera(self.hass, slug)
         with _Traced(self.hass, request, slug, "segment", filename) as record:
-            _authorize_browser_request(self.hass, request, slug)
+            _authorize_traced(self.hass, request, slug, record)
             return await _proxy_stream(
                 self.hass,
                 request,
@@ -3300,7 +3312,7 @@ class BlinkLiveviewProxyStopView(HomeAssistantView):
         # The whole request is traced, not just the token check, so the time
         # shown is the add-on's and a stop it never confirmed says so.
         with _Traced(self.hass, request, slug, "stop") as record:
-            _authorize_browser_request(self.hass, request, slug)
+            _authorize_traced(self.hass, request, slug, record)
             client = _client(self.hass)
             try:
                 async with asyncio.timeout(15):

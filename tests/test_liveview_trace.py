@@ -382,7 +382,7 @@ async def scenario_boundaries() -> None:
 
     trace = trace_mod.LiveviewTrace()
     for index in range(trace_mod.MAX_SESSIONS + 5):
-        trace.begin(f"session-{index:04d}", SLUG, "playlist")
+        trace.verify(f"session-{index:04d}", SLUG, trace.begin(f"session-{index:04d}", SLUG, "playlist"))
     check(trace.get("session-0000") is None and trace.get(
         f"session-{trace_mod.MAX_SESSIONS + 4:04d}") is not None,
         "only the most recent sessions are kept")
@@ -487,6 +487,63 @@ async def scenario_history() -> None:
           "only the most recent reports are kept")
 
 
+async def scenario_no_token_cannot_plant() -> None:
+    print("\nrequests with no token cannot reach the admin panel or evict real views")
+    ADDON.clear()
+    ADDON["index.m3u8"] = PLAYLIST.encode()
+    hass = FakeHass()
+    panel = "/api/blink_liveview_proxy/panel/diagnostics"
+    base = f"/api/blink_liveview_proxy/cameras/{SLUG}"
+    forged = ("x%0A    +0.0s  playlist 200  (0 ms, 9 segments)%0A"
+              "    +0.1s  segment%0D%0Aforged.ts")
+    async with TestClient(TestServer(build_app(hass))) as client:
+        # A real live view, with a token.
+        await client.get(url("hls/index.m3u8"))
+        # Then a flood with no token at all, on invented sessions.
+        for index in range(trace_mod.MAX_SESSIONS + 10):
+            response = await client.get(f"{base}/mpegts?session=flood{index:06d}")
+            assert response.status == 403
+        planted = await client.get(f"{base}/hls/{forged}?session=attacker0001")
+        check(planted.status == 403, "the forged segment request is refused")
+
+        trace = views._trace(hass)
+        check(trace.get(SESSION) is not None,
+              "the flood did not push the real live view out of the trace")
+        check([session for session, _ in trace.sessions()] == [SESSION],
+              "no unverified session is among those the panel can list",
+              [session for session, _ in trace.sessions()])
+        listed = await (await client.get(panel, params={"slug": SLUG})).json()
+        check([entry["session"] for entry in listed["entries"]] == [SESSION],
+              "the admin panel lists only the real live view",
+              [entry["session"] for entry in listed["entries"]])
+
+        # Even the device that owns an unverified session (it would need the
+        # UUID) sees the file name on one line, so no line can be forged.
+        held = trace.get("attacker0001")
+        report = trace_mod.build_report(held, {"transport": "hls"}, slug=SLUG, version="t")
+        received = report.split("Home Assistant received:", 1)[1].split("The player saw:", 1)[0]
+        check(held is not None and len([line for line in received.splitlines() if line.strip()]) == 1
+              and "\r" not in report,
+              "a file name from the URL cannot add lines to a report", report)
+
+        # A refused request on a real live view's session still lands in it.
+        late = await client.get(url("hls/segment_00001.ts", token="stale-token"))
+        check(late.status == 403 and any(
+            record["status"] == 403 for record in trace.get(SESSION)["requests"]),
+            "a refused request on a real live view is still recorded in it")
+
+    # A flood of unverified sessions mid-request does not lose the real one.
+    trace = trace_mod.LiveviewTrace()
+    record = trace.begin("realsession01", SLUG, "playlist")
+    for index in range(trace_mod.MAX_UNVERIFIED_SESSIONS + 5):
+        trace.begin(f"flood{index:06d}", SLUG, "mpegts")
+    trace.verify("realsession01", SLUG, record)
+    trace.finish(record, 200)
+    kept = trace.get("realsession01")
+    check(kept is not None and kept["requests"] == [record] and record["status"] == 200,
+          "a session pushed out while its request was being authorised is kept", kept)
+
+
 async def run_all() -> None:
     await scenario_issue_91()
     await scenario_refused_playlist()
@@ -494,6 +551,7 @@ async def run_all() -> None:
     await scenario_mpegts_not_ready()
     await scenario_boundaries()
     await scenario_history()
+    await scenario_no_token_cannot_plant()
 
 
 def main() -> int:
