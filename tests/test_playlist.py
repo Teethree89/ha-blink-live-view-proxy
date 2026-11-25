@@ -83,6 +83,16 @@ def main():
     check("empty token still produces a valid URI",
           tokenise_playlist("seg.ts\n", "").strip() == "seg.ts?token=")
 
+    # The live-view trace matches segment requests to their session by this.
+    out = tokenise_playlist("seg.ts\n", "tok", session="abc-123_DEF")
+    check("session rides along after the token",
+          out.strip() == "seg.ts?token=tok&session=abc-123_DEF", out.strip())
+    check("no session, no session parameter",
+          "session" not in tokenise_playlist("seg.ts\n", "tok", session=""))
+    with_session = tokenise_playlist("seg.ts\n", "tok", session="s1234567")
+    check("idempotent with a session",
+          tokenise_playlist(with_session, "tok", session="s1234567") == with_session)
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} failed: {', '.join(FAILURES)}")

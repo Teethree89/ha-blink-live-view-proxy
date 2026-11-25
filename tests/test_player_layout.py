@@ -13,6 +13,7 @@ quietly pass.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import shutil
@@ -38,6 +39,12 @@ def player_page() -> str:
     """Render the player f-string with placeholder values."""
     source = VIEWS.read_text()
     body = source.split('    return f"""', 1)[1].split('"""', 1)[0]
+    # Python processes escapes in the f-string before the browser ever sees
+    # it: a "\\n" in the source reaches the page as "\n", but a bare "\n" reaches
+    # it as a line break, which ends a JavaScript string literal mid-line.
+    # Evaluating the literal first is what makes the parse check below see
+    # the same script the browser gets.
+    body = ast.literal_eval('"""' + body + '"""')
     names = set(re.findall(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})", body))
     return body.format(**dict.fromkeys(names, "0"))
 
@@ -263,6 +270,25 @@ def test_failure_codes() -> None:
           "the page knows which player it ran, to pick the code")
 
 
+
+def test_diagnostics() -> None:
+    """A failed live view offers a report, and copying it works on plain HTTP."""
+    print("diagnostics")
+    page = player_page()
+    check('id="diagnostics"' in page and 'id="diagText"' in page,
+          "the failure screen has a Copy diagnostics button and a fallback text box")
+    check("if (lastFailure && !diagReport) prepareDiagnostics();" in page,
+          "only a failure offers it, and the report is fetched as soon as it fails")
+    copy = page.split("function copyDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
+    check("await" not in copy, "copying happens inside the tap, with no await before it (iOS)")
+    check('document.execCommand("copy")' in copy and "readOnly = false" in copy,
+          "it copies with execCommand, which needs no HTTPS, from an editable field (iOS)")
+    check("stopDiagnostics();\n  disarmStartWatchdog();" in page,
+          "tearing the player down is not recorded as part of the failure")
+    check("&session=${session}" in page.split("function stopUrl()", 1)[1][:300],
+          "the stop request joins the session's trace")
+
+
 def main() -> int:
     test_javascript_parses()
     test_portrait()
@@ -271,6 +297,7 @@ def main() -> int:
     test_saving_state()
     test_start_watchdog()
     test_failure_codes()
+    test_diagnostics()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

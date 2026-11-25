@@ -11,6 +11,21 @@ used.
 
 ## [Unreleased]
 
+### Added
+
+- **Copy diagnostics on a failed live view.** The failure screen offers a
+  report to paste into an issue, with a verdict on where the live view's path
+  stopped: the device could not reach Home Assistant, Home Assistant refused a
+  request (and with what status), the device received the playlist and then
+  stopped asking, or the video arrived and would not play. It puts what the
+  integration received for that live view next to what the device's video
+  player did. The integration now records every live-view request in memory,
+  refused ones included, which the add-on log could never show. Tokens and the
+  address Home Assistant was opened at are left out, and copying works on plain
+  HTTP. The verdict is also logged in Home Assistant as a warning.
+  `docs/OPERATIONS.md` explains how to read it
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+
 ### Changed
 
 - **Every live-view failure ends with a code**, such as `(E-005)`, followed

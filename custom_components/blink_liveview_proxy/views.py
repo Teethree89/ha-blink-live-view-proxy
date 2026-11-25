@@ -24,6 +24,14 @@ from .api import BlinkLiveviewProxyClient, ProxyAuthError, ProxyConnectionError
 from .failures import failure_payload
 from .dashboard_yaml import HEALTH_ENTITY_ID, render_dashboard_yaml
 from .lovelace import resource_collection, resource_mode
+from .liveview_trace import (
+    LiveviewTrace,
+    build_report,
+    playlist_segment_count,
+    safe_code,
+    valid_session,
+    verdict,
+)
 from .playlist import tokenise_playlist
 from .const import (
     ASSET_URL_BASE,
@@ -70,6 +78,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyHlsSegmentView(hass))
     hass.http.register_view(BlinkLiveviewProxyPttView(hass))
     hass.http.register_view(BlinkLiveviewProxyStopView(hass))
+    hass.http.register_view(BlinkLiveviewProxyDiagnosticsView(hass))
     hass.http.register_view(BlinkLiveviewProxyControlsView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
@@ -331,6 +340,46 @@ def _is_browser_token_valid(hass: HomeAssistant, provided: str, slug: str) -> bo
     return True
 
 
+def _trace(hass: HomeAssistant) -> LiveviewTrace:
+    """The record of recent live views' requests; see liveview_trace."""
+    data = hass.data.setdefault(DOMAIN, {})
+    trace = data.get("_liveview_trace")
+    if trace is None:
+        trace = data["_liveview_trace"] = LiveviewTrace()
+    return trace
+
+
+class _Traced:
+    """Note one live-view request in the trace, including one that fails.
+
+    Entered before authorisation on purpose: a refused request is exactly the
+    one neither the add-on log nor anything else would otherwise show. A
+    request with no usable session id is simply not recorded.
+    """
+
+    def __init__(
+        self, hass: HomeAssistant, request: web.Request, slug: str, kind: str, name: str = ""
+    ) -> None:
+        self.trace = _trace(hass)
+        self.record = self.trace.begin(request.query.get("session"), slug, kind, name)
+
+    def __enter__(self) -> dict[str, Any] | None:
+        return self.record
+
+    def __exit__(self, _exc_type, exc, _tb) -> bool:
+        if self.record is None or self.record["status"] is not None:
+            return False
+        if exc is None:
+            self.trace.finish(self.record, 200)
+        elif isinstance(exc, web.HTTPException):
+            self.trace.finish(self.record, exc.status, (exc.text or "").strip())
+        elif isinstance(exc, asyncio.CancelledError):
+            self.trace.finish(self.record, 499, "client went away")
+        else:
+            self.trace.finish(self.record, 500, type(exc).__name__)
+        return False
+
+
 def _authorize_browser_request(
     hass: HomeAssistant,
     request: web.Request,
@@ -475,6 +524,7 @@ async def _proxy_stream(
     *,
     download_filename: str | None = None,
     cache_control: str = "no-store",
+    trace_record: dict[str, Any] | None = None,
 ) -> web.StreamResponse:
     """Stream bytes from the local proxy to the browser.
 
@@ -507,16 +557,21 @@ async def _proxy_stream(
     )
     response.content_type = content_type
 
+    closed = ""
     try:
         await response.prepare(request)
         async for chunk in upstream.content.iter_chunked(102400):
             if not hass.is_running:
                 break
             await response.write(chunk)
+            LiveviewTrace.add_bytes(trace_record, len(chunk))
     except (ConnectionResetError, TimeoutError, ClientError):
         LOGGER.debug("Browser stream closed for %s", path)
+        closed = "closed early"
     finally:
         upstream.close()
+        if trace_record is not None and trace_record["status"] is None:
+            _trace(hass).finish(trace_record, response.status, closed)
     return response
 
 
@@ -622,6 +677,25 @@ video.ready {{
 }}
 .actions[hidden] {{
   display:none;
+}}
+.diag-hint {{
+  color:#cbd5e1;
+  font-size:14px;
+}}
+.diag-hint[hidden],.diag-text[hidden] {{
+  display:none;
+}}
+.diag-text {{
+  width:min(520px,calc(100vw - 32px));
+  height:140px;
+  box-sizing:border-box;
+  padding:8px;
+  border:1px solid rgba(148,163,184,.4);
+  border-radius:8px;
+  background:#0b1220;
+  color:#e2e8f0;
+  font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+  resize:none;
 }}
 .live-actions {{
   position:absolute;
@@ -1245,7 +1319,10 @@ body.sheet-open video {{
       <div id="actions" class="actions" hidden>
         <button id="restart" type="button">Start Again</button>
         <button id="save" class="secondary" type="button">Save MP4</button>
+        <button id="diagnostics" class="secondary" type="button" hidden>Copy diagnostics</button>
       </div>
+      <div id="diagHint" class="diag-hint" hidden></div>
+      <textarea id="diagText" class="diag-text" readonly hidden aria-label="Live view diagnostics"></textarea>
     </div>
   </section>
   <div id="liveNotice" class="live-notice" hidden></div>
@@ -1398,6 +1475,9 @@ const save = document.getElementById("save");
 const talk = document.getElementById("talk");
 const sound = document.getElementById("sound");
 const endButton = document.getElementById("end");
+const diagButton = document.getElementById("diagnostics");
+const diagHint = document.getElementById("diagHint");
+const diagText = document.getElementById("diagText");
 let player = null;
 let endTimer = null;
 let startTimer = null;
@@ -1466,7 +1546,7 @@ async function startPlayback() {{
   // than leaving a still picture and "Tap play".
   if (soundWanted()) video.muted = false;
   try {{
-    await video.play();
+    await tracedPlay();
     return;
   }} catch (err) {{
     if (video.muted) {{
@@ -1480,7 +1560,7 @@ async function startPlayback() {{
   restoringMute = false;
   syncSoundButton();
   try {{
-    await video.play();
+    await tracedPlay();
   }} catch (err) {{
     statusText.textContent = "Tap play to start live view";
     tapNeeded = true;
@@ -1576,7 +1656,15 @@ function downloadUrl() {{
 
 function stopUrl() {{
   const token = encodeURIComponent(accessToken || "");
-  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/stop?token=${{token}}`;
+  const session = encodeURIComponent(sessionId);
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/stop?token=${{token}}&session=${{session}}`;
+  return new URL(path, window.location.origin).href;
+}}
+
+function diagnosticsUrl() {{
+  const token = encodeURIComponent(accessToken || "");
+  const session = encodeURIComponent(sessionId);
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/diagnostics?token=${{token}}&session=${{session}}`;
   return new URL(path, window.location.origin).href;
 }}
 
@@ -1910,10 +1998,16 @@ function setEnded(message) {{
   hideLiveChrome();
   talk.disabled = true;
   statusText.textContent = message;
+  // Only a failure offers diagnostics; a live view that ended normally has
+  // nothing to report.
+  if (lastFailure && !diagReport) prepareDiagnostics();
 }}
 
 function stopPlayer() {{
   stopTalk();
+  // Tearing the player down fires events of its own (emptied, abort) that
+  // are not part of what went wrong.
+  stopDiagnostics();
   disarmStartWatchdog();
   if (endTimer) {{
     clearTimeout(endTimer);
@@ -1976,7 +2070,209 @@ function failureMessage(code, detail) {{
   try {{
     console.warn(`Blink live view ${{code}}${{extra}}`);
   }} catch (err) {{}}
+  lastFailure = {{ code, detail: detail || "" }};
+  diagNote(code, detail);
   return `${{text}} (${{code}}${{extra}})`;
+}}
+
+// Diagnostics.
+//
+// The proxy's log only shows what reached the add-on, and nothing at all
+// showed what the device did. So the page keeps a short timeline of the video
+// element - its events, and its state each second while it changes - and when
+// a live view fails, sends it to the integration, which adds every request it
+// received for this session and works out where the path stopped. The result
+// is offered as text to paste into an issue. See liveview_trace.py.
+const DIAG_EVENTS = [
+  "loadstart", "durationchange", "loadedmetadata", "loadeddata", "canplay",
+  "canplaythrough", "play", "playing", "pause", "waiting", "stalled",
+  "suspend", "progress", "seeking", "seeked", "ended", "error", "abort",
+];
+// Fired again and again with nothing new to say; kept only on a change.
+const DIAG_NOISY = new Set(["progress", "suspend", "timeupdate", "state"]);
+const DIAG_MAX_EVENTS = 300;
+let diag = null;
+let diagReport = "";
+let lastFailure = null;
+
+function diagState() {{
+  let ahead = 0;
+  try {{
+    const ranges = video.buffered;
+    if (ranges.length) ahead = ranges.end(ranges.length - 1) - ranges.start(0);
+  }} catch (err) {{}}
+  return {{
+    ns: video.networkState,
+    rs: video.readyState,
+    buf: Math.round(ahead * 10) / 10,
+    paused: video.paused,
+  }};
+}}
+
+function diagNote(name, detail) {{
+  if (!diag || diag.closed || diag.events.length >= DIAG_MAX_EVENTS) return;
+  const state = diagState();
+  const key = `${{state.ns}}/${{state.rs}}/${{state.buf}}/${{state.paused}}`;
+  if (DIAG_NOISY.has(name) && key === diag.lastKey) return;
+  diag.lastKey = key;
+  if (state.buf > 0) diag.buffered = true;
+  if (name === "playing") diag.played = true;
+  const event = {{ t: Math.round((performance.now() - diag.t0) / 100) / 10, e: name, ...state }};
+  if (detail) event.d = String(detail).slice(0, 80);
+  diag.events.push(event);
+}}
+
+function startDiagnostics() {{
+  stopDiagnostics();
+  diag = {{
+    t0: performance.now(),
+    events: [],
+    lastKey: "",
+    buffered: false,
+    played: false,
+    closed: false,
+    timer: null,
+  }};
+  // State on the second, for a minute: enough to show a start that stalls,
+  // and deduplicated, so a healthy stream adds almost nothing.
+  let ticks = 0;
+  diag.timer = setInterval(() => {{
+    ticks += 1;
+    diagNote("state");
+    if (ticks >= 60 && diag) {{
+      clearInterval(diag.timer);
+      diag.timer = null;
+    }}
+  }}, 1000);
+}}
+
+function stopDiagnostics() {{
+  if (!diag) return;
+  if (diag.timer) clearInterval(diag.timer);
+  diag.timer = null;
+  diag.closed = true;
+}}
+
+async function tracedPlay() {{
+  diagNote("play() called", video.muted ? "muted" : "with sound");
+  try {{
+    await video.play();
+    diagNote("play() resolved");
+  }} catch (err) {{
+    diagNote("play() rejected", err && err.name);
+    throw err;
+  }}
+}}
+
+for (const name of DIAG_EVENTS) {{
+  video.addEventListener(name, () => {{
+    const detail = name === "error" && video.error ? `media error ${{video.error.code}}` : "";
+    diagNote(name, detail);
+  }});
+}}
+document.addEventListener("visibilitychange", () => diagNote("page", document.visibilityState));
+
+function diagnosticsPayload() {{
+  return {{
+    code: lastFailure ? lastFailure.code : "",
+    detail: lastFailure ? lastFailure.detail : "",
+    transport,
+    protocol: window.location.protocol,
+    host: window.location.host,
+    ua: navigator.userAgent,
+    played: !!(diag && diag.played),
+    buffered: !!(diag && diag.buffered),
+    bytes_arrived: bytesArrived,
+    events: diag ? diag.events : [],
+  }};
+}}
+
+// If Home Assistant cannot be reached for its half, the device's half still
+// says something - not least that Home Assistant could not be reached.
+function localReport(payload) {{
+  const lines = [
+    "```",
+    "Blink live view diagnostics (device only: Home Assistant did not answer)",
+    `Code: ${{payload.code || "none"}}${{payload.detail ? ` (${{payload.detail}})` : ""}}`,
+    `Camera: ${{slug}}   Path: ${{payload.transport || "unknown"}}   Page: ${{payload.protocol}}`,
+    `Device: ${{payload.ua}}`,
+    "",
+    "The player saw:",
+  ];
+  for (const event of payload.events) {{
+    lines.push(`  +${{event.t.toFixed(1)}}s  ${{event.e}}  network=${{event.ns}} ready=${{event.rs}} buffered=${{event.buf}}s${{event.d ? `  ${{event.d}}` : ""}}`);
+  }}
+  lines.push("```");
+  return lines.join("\\n");
+}}
+
+function resetDiagnosticsUi() {{
+  diagReport = "";
+  diagButton.hidden = true;
+  diagButton.disabled = false;
+  diagButton.textContent = "Copy diagnostics";
+  diagHint.hidden = true;
+  diagText.hidden = true;
+  diagText.value = "";
+}}
+
+// Fetched as soon as the live view fails, not on the tap: copying on iOS has
+// to happen inside the tap itself, with no await in between.
+async function prepareDiagnostics() {{
+  stopDiagnostics();
+  diagButton.hidden = false;
+  diagButton.disabled = true;
+  diagButton.textContent = "Preparing diagnostics";
+  const payload = diagnosticsPayload();
+  let report = "";
+  try {{
+    const response = await fetch(diagnosticsUrl(), {{
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {{ "Content-Type": "application/json" }},
+      body: JSON.stringify(payload),
+    }});
+    if (response.ok) {{
+      const data = await response.json();
+      report = (data && data.report) || "";
+    }}
+  }} catch (err) {{}}
+  diagReport = report || localReport(payload);
+  diagButton.disabled = false;
+  diagButton.textContent = "Copy diagnostics";
+}}
+
+// navigator.clipboard exists only on an HTTPS page, and plenty of Home
+// Assistant installs are plain HTTP on the LAN - the very installs most likely
+// to need this. execCommand("copy") works on both, provided the text is
+// selected in an editable field during the tap; iOS will not select text in a
+// read-only one.
+function copyDiagnostics() {{
+  if (!diagReport) return;
+  diagText.value = diagReport;
+  diagText.hidden = false;
+  diagText.readOnly = false;
+  diagText.focus();
+  diagText.select();
+  diagText.setSelectionRange(0, diagReport.length);
+  let copied = false;
+  try {{
+    copied = document.execCommand("copy");
+  }} catch (err) {{}}
+  diagText.readOnly = true;
+  diagText.blur();
+  if (!copied && navigator.clipboard && window.isSecureContext) {{
+    navigator.clipboard.writeText(diagReport).then(() => {{
+      diagHint.textContent = "Copied. Paste it into your GitHub issue.";
+      diagHint.hidden = false;
+    }}, () => {{}});
+  }}
+  diagHint.hidden = false;
+  diagHint.textContent = copied
+    ? "Copied. Paste it into your GitHub issue."
+    : "Select all of the text below, copy it, and paste it into your GitHub issue.";
+  diagButton.textContent = copied ? "Copied" : "Copy diagnostics";
 }}
 
 function disarmStartWatchdog() {{
@@ -2016,6 +2312,9 @@ async function startPlayer() {{
   bytesArrived = false;
   tapNeeded = false;
   transport = "";
+  lastFailure = null;
+  resetDiagnosticsUi();
+  startDiagnostics();
   setLoading("Waking camera and waiting for video");
 
   const canMse = !!(window.mpegts && mpegts.getFeatureList().mseLivePlayback);
@@ -2027,6 +2326,7 @@ async function startPlayer() {{
     // MPEG-TS player always dies with E-001b. They do play HLS natively, and
     // the proxy already produces an HLS rendition, so use it.
     transport = "hls";
+    diagNote("path", "native HLS");
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
@@ -2067,6 +2367,7 @@ async function startPlayer() {{
   }}
 
   transport = "mse";
+  diagNote("path", "mpegts.js");
   player = mpegts.createPlayer({{
     type: "mpegts",
     isLive: true,
@@ -2091,7 +2392,10 @@ async function startPlayer() {{
     endSession(failureMessage("E-004", type ? `${{type}}: ${{detail}}${{status}}` : ""));
   }});
   player.on(mpegts.Events.STATISTICS_INFO, (info) => {{
-    if (info && info.speed > 0) bytesArrived = true;
+    if (info && info.speed > 0 && !bytesArrived) {{
+      bytesArrived = true;
+      diagNote("data arriving", `${{Math.round(info.speed)}} KB/s`);
+    }}
   }});
 
   video.onplaying = () => {{
@@ -2127,6 +2431,7 @@ async function startPlayer() {{
 
 restart.addEventListener("click", startPlayer);
 save.addEventListener("click", saveLastView);
+diagButton.addEventListener("click", copyDiagnostics);
 endButton.addEventListener("click", endCurrentStream);
 sound.addEventListener("click", toggleSound);
 video.addEventListener("volumechange", () => {{
@@ -2669,19 +2974,21 @@ class BlinkLiveviewProxyMpegtsView(HomeAssistantView):
     async def get(self, request: web.Request, slug: str) -> web.StreamResponse:
         """Stream MPEG-TS to the browser."""
         _camera(self.hass, slug)
-        _authorize_browser_request(self.hass, request, slug)
-        query = {
-            "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
-            "force": request.query.get("force", "1"),
-            "session": request.query.get("session", ""),
-        }
-        return await _proxy_stream(
-            self.hass,
-            request,
-            f"/cameras/{slug}/mpegts",
-            "video/mp2t",
-            query,
-        )
+        with _Traced(self.hass, request, slug, "mpegts") as record:
+            _authorize_browser_request(self.hass, request, slug)
+            query = {
+                "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
+                "force": request.query.get("force", "1"),
+                "session": request.query.get("session", ""),
+            }
+            return await _proxy_stream(
+                self.hass,
+                request,
+                f"/cameras/{slug}/mpegts",
+                "video/mp2t",
+                query,
+                trace_record=record,
+            )
 
 
 class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
@@ -2703,25 +3010,37 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
     async def get(self, request: web.Request, slug: str) -> web.Response:
         """Return the playlist with tokenised segment URIs."""
         _camera(self.hass, slug)
-        _authorize_browser_request(self.hass, request, slug)
-        query = {
-            "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
-            "force": request.query.get("force", "1"),
-            "session": request.query.get("session", ""),
-        }
-        upstream = await _open_proxy_response(
-            _client(self.hass), f"/cameras/{slug}/hls/index.m3u8", query
-        )
-        try:
-            text = await upstream.text()
-        finally:
-            upstream.release()
+        with _Traced(self.hass, request, slug, "playlist") as record:
+            _authorize_browser_request(self.hass, request, slug)
+            session = request.query.get("session", "")
+            query = {
+                "seconds": request.query.get("seconds", str(_stream_seconds(self.hass))),
+                "force": request.query.get("force", "1"),
+                "session": session,
+            }
+            upstream = await _open_proxy_response(
+                _client(self.hass), f"/cameras/{slug}/hls/index.m3u8", query
+            )
+            try:
+                text = await upstream.text()
+            finally:
+                upstream.release()
 
-        return web.Response(
-            text=tokenise_playlist(text, request.query.get("token", "")),
-            content_type="application/vnd.apple.mpegurl",
-            headers={"Cache-Control": "no-store"},
-        )
+            count = playlist_segment_count(text)
+            _trace(self.hass).finish(
+                record, 200, f"{count} segment{'' if count == 1 else 's'}"
+            )
+            return web.Response(
+                # The session rides along on each segment URI so those requests
+                # land in the same trace as the playlist that listed them.
+                text=tokenise_playlist(
+                    text,
+                    request.query.get("token", ""),
+                    session=session if valid_session(session) else "",
+                ),
+                content_type="application/vnd.apple.mpegurl",
+                headers={"Cache-Control": "no-store"},
+            )
 
 
 class BlinkLiveviewProxyHlsSegmentView(HomeAssistantView):
@@ -2744,13 +3063,15 @@ class BlinkLiveviewProxyHlsSegmentView(HomeAssistantView):
         if "/" in filename or not filename.endswith(".ts"):
             raise web.HTTPNotFound()
         _camera(self.hass, slug)
-        _authorize_browser_request(self.hass, request, slug)
-        return await _proxy_stream(
-            self.hass,
-            request,
-            f"/cameras/{slug}/hls/{filename}",
-            "video/mp2t",
-        )
+        with _Traced(self.hass, request, slug, "segment", filename) as record:
+            _authorize_browser_request(self.hass, request, slug)
+            return await _proxy_stream(
+                self.hass,
+                request,
+                f"/cameras/{slug}/hls/{filename}",
+                "video/mp2t",
+                trace_record=record,
+            )
 
 
 class BlinkLiveviewProxyPttView(HomeAssistantView):
@@ -2851,7 +3172,8 @@ class BlinkLiveviewProxyStopView(HomeAssistantView):
     async def post(self, request: web.Request, slug: str) -> web.Response:
         """Ask the proxy to stop this camera's session."""
         _camera(self.hass, slug)
-        _authorize_browser_request(self.hass, request, slug)
+        with _Traced(self.hass, request, slug, "stop"):
+            _authorize_browser_request(self.hass, request, slug)
         client = _client(self.hass)
         try:
             async with asyncio.timeout(15):
@@ -2869,6 +3191,64 @@ class BlinkLiveviewProxyStopView(HomeAssistantView):
             )
         return web.json_response(
             payload if isinstance(payload, dict) else {"stopped": True},
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+class BlinkLiveviewProxyDiagnosticsView(HomeAssistantView):
+    """Turn a failed live view's trace into a report the viewer can paste.
+
+    The player posts its own timeline (what the video element did); this adds
+    every request the integration saw for the same session and returns a
+    verdict on where the path stopped. The verdict also goes to the Home
+    Assistant log, so it is there even if nobody presses Copy.
+    """
+
+    requires_auth = False
+    url = "/api/blink_liveview_proxy/cameras/{slug}/diagnostics"
+    name = "api:blink_liveview_proxy:diagnostics"
+    MAX_BODY = 256 * 1024
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    async def post(self, request: web.Request, slug: str) -> web.Response:
+        """Return the report for this player session."""
+        from homeassistant.loader import async_get_integration
+
+        _camera(self.hass, slug)
+        _authorize_browser_request(self.hass, request, slug)
+        if (request.content_length or 0) > self.MAX_BODY:
+            raise web.HTTPRequestEntityTooLarge(
+                max_size=self.MAX_BODY, actual_size=request.content_length or 0
+            )
+        raw = await request.content.read(self.MAX_BODY + 1)
+        if len(raw) > self.MAX_BODY:
+            raise web.HTTPRequestEntityTooLarge(max_size=self.MAX_BODY, actual_size=len(raw))
+        try:
+            client = json.loads(raw or b"{}")
+        except ValueError:
+            client = {}
+        if not isinstance(client, dict):
+            client = {}
+
+        session = request.query.get("session", "")
+        server = _trace(self.hass).get(session) if valid_session(session) else None
+        if server is not None and server.get("slug") != slug:
+            server = None
+        integration = await async_get_integration(self.hass, DOMAIN)
+        report = build_report(
+            server, client, slug=slug, version=str(integration.version or "unknown")
+        )
+        summary = verdict(server, client)
+        LOGGER.warning(
+            "Live view for %s failed with %s: %s",
+            slug,
+            safe_code(client.get("code")) or "no code",
+            summary,
+        )
+        return web.json_response(
+            {"verdict": summary, "report": report},
             headers={"Cache-Control": "no-store"},
         )
 

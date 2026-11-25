@@ -69,6 +69,46 @@ no Media Source Extensions and use native HLS. The add-on log shows which: an
 Codes are never reused. A code that stops being raised is retired, and its
 number is not given to a different failure.
 
+## Live view diagnostics
+
+A failed live view also offers **Copy diagnostics**. It copies a short report,
+already wrapped as a code block, to paste into an issue. It puts two records of
+the same live view side by side:
+
+- **What Home Assistant received.** Every request the integration got for that
+  live view: the playlist (with how many segments it listed), each segment, the
+  MPEG-TS stream, and the player's stop, with status, time and size. This
+  includes requests the integration refused, which the add-on log never sees.
+- **What the player saw.** The video element's events and its loading state,
+  noted only when it changes: `network=LOADING ready=NOTHING buffered=0s`
+  held for thirty seconds is the shape of a device that stopped asking.
+
+The first line is a verdict on where the path stopped:
+
+| Verdict | Meaning |
+|---|---|
+| No playlist (or stream) request reached Home Assistant | The device could not reach Home Assistant at that address, or the player never asked |
+| Home Assistant refused the playlist / stream / segments (HTTP …) | Token, add-on or Blink trouble; the status says which |
+| The device received the playlist and then stopped asking | The cause is on the device, not the camera or the proxy ([#91]) |
+| The device kept reloading the playlist but never requested a segment | The playlist never had enough video to start from |
+| Segments were delivered, but the device reports nothing buffered | The device got the video and discarded it |
+| Video reached the device but never started playing | Decoding or start-up problem on the device |
+| Home Assistant accepted the stream but the add-on sent no video | The camera did not start; read the add-on log |
+
+The same verdict is written to the Home Assistant log as a warning, `Live view
+for <camera> failed with E-0xx: ...`, so it is there even if nobody presses the
+button.
+
+What it does not contain: access tokens, and the address Home Assistant was
+opened at. The report says only what kind of address it was (IP address,
+`.local` name, domain name, Nabu Casa), which is what matters for diagnosis.
+It does include the browser's user agent, which names the device and its OS
+version. Nothing is sent anywhere: the report exists only in memory, holds the
+last 20 live views, and leaves the device only if someone pastes it.
+
+Copying works on plain HTTP as well as HTTPS. If the device will not copy, the
+report appears in a text box to select and copy by hand.
+
 [#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
 [#91]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91
 
