@@ -413,9 +413,23 @@ def unit_verdicts() -> None:
     # the playlist and saw nothing more, the #91 shape, but the report waited
     # on the device. It must not be told it stopped asking.
     one_playlist = {"requests": [{"kind": "playlist", "status": 200, "at": 0.0, "name": ""}]}
-    offline = verdict(one_playlist, {"transport": "hls", "code": "E-007", "queued": True})
+    offline = verdict(one_playlist, {"transport": "hls", "code": "E-007", "queued": True,
+                                     "unreachable": True})
     check("could not reach Home Assistant" in offline and "stopped asking" not in offline,
           "a report sent late blames the connection, not the device's player", offline)
+    # Home Assistant answered the first try with an error: it was reachable,
+    # so the report waited but what Home Assistant saw still decides.
+    refused_stream = {"requests": [{"kind": "mpegts", "status": 503, "at": 0.0, "name": "",
+                                    "bytes": 0}]}
+    answered = verdict(refused_stream, {"transport": "mse", "code": "E-004", "queued": True,
+                                        "unreachable": False, "answered": 503})
+    check("refused the stream (HTTP 503)" in answered and "could not reach" not in answered,
+          "a report that waited because Home Assistant answered with an error keeps its "
+          "real verdict", answered)
+    report = trace_mod.build_report(
+        refused_stream, {"transport": "mse", "queued": True, "answered": 503}, slug=SLUG, version="t")
+    check("Home Assistant answered (HTTP 503)" in report and "could not reach" not in report,
+          "and its report says Home Assistant answered, not that it was unreachable", report)
     check("stopped asking" in verdict(one_playlist, {"transport": "hls", "code": "E-005"}),
           "while the same requests reported at once are still the #91 verdict")
     refused_stream = {"requests": [{"kind": "mpegts", "status": 503, "bytes": 0, "at": 0.0,
@@ -448,6 +462,7 @@ async def scenario_history() -> None:
         await diagnose(client, {"code": "E-009", "detail": "HTTP 404", "transport": "hls"})
         # One sent late, from a device that was offline, with when it happened.
         await diagnose(client, {"code": "E-007", "transport": "hls", "queued": True,
+                                "unreachable": True,
                                 "started_at": an_hour_ago * 1000}, session=other)
         # One nobody reported on: playlist fetched, then the device vanished.
         await client.get(url("hls/index.m3u8", session=unreported))

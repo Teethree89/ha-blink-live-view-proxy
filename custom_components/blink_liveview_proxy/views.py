@@ -2316,7 +2316,9 @@ const TRANSPORT_NAMES = {{ hls: "HLS (native)", mse: "MPEG-TS (mpegts.js)" }};
 function localReport(payload) {{
   const lines = [
     "```",
-    "Blink live view diagnostics (device only: Home Assistant did not answer)",
+    payload.unreachable
+      ? "Blink live view diagnostics (device only: Home Assistant did not answer)"
+      : `Blink live view diagnostics (device only: Home Assistant answered${{payload.answered ? ` HTTP ${{payload.answered}}` : " without a report"}})`,
     `Code: ${{payload.code || "none"}}${{payload.detail ? ` (${{payload.detail}})` : ""}}`,
     `Camera: ${{slug}}   Path: ${{TRANSPORT_NAMES[payload.transport] || "unknown"}}   Page: ${{String(payload.protocol || "").replace(":", "") || "unknown"}}`,
     `Device: ${{payload.ua}}`,
@@ -2361,6 +2363,11 @@ async function prepareDiagnostics() {{
   diagButton.textContent = "Preparing diagnostics";
   const payload = diagnosticsPayload();
   let report = "";
+  // Only a request that never got an answer means Home Assistant could not
+  // be reached. An error status means it could; the report still waits on
+  // the device, but must not blame the connection.
+  let unreachable = false;
+  let status = 0;
   try {{
     const response = await fetch(diagnosticsUrl(), {{
       method: "POST",
@@ -2369,11 +2376,16 @@ async function prepareDiagnostics() {{
       headers: {{ "Content-Type": "application/json" }},
       body: JSON.stringify(payload),
     }});
+    status = response.status;
     if (response.ok) {{
       const data = await response.json();
       report = (data && data.report) || "";
     }}
-  }} catch (err) {{}}
+  }} catch (err) {{
+    unreachable = !status;
+  }}
+  payload.unreachable = unreachable;
+  payload.answered = unreachable ? 0 : status;
   // Unsent, it waits on the device whatever happens on screen next.
   const queued = !report && queueDiagnostics(payload);
   // Start Again was tapped while this was in flight: the report is for a live
@@ -2384,8 +2396,9 @@ async function prepareDiagnostics() {{
   diagButton.disabled = false;
   diagButton.textContent = "Copy diagnostics";
   if (queued) {{
-    diagHint.textContent =
-      "Home Assistant could not be reached. This report is saved on this device and will be sent when it can be.";
+    diagHint.textContent = unreachable
+      ? "Home Assistant could not be reached. This report is saved on this device and will be sent when it can be."
+      : `Home Assistant could not make the report just now${{status ? ` (HTTP ${{status}})` : ""}}. It is saved on this device and will be sent again later.`;
     diagHint.hidden = false;
   }}
 }}

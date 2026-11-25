@@ -110,8 +110,12 @@ the verdict, **Copy**, and the full report. **Clear** empties one camera's list.
 - **Saved reports** come from the device that failed. Home Assistant keeps the
   last 50 across all cameras in `.storage/blink_liveview_proxy.liveview_diagnostics`,
   so they survive a restart.
-- **Sent late** marks a report the device could not send when it failed,
-  because it had lost its connection to Home Assistant. The player keeps it on
+- **Sent late** marks a report the device could not send when it failed:
+  either it had lost its connection to Home Assistant, or Home Assistant
+  answered with an error instead of a report. Only the first changes the
+  verdict to a lost connection; in the second, Home Assistant was there, so
+  the report is judged on what it saw, and says which status it answered with.
+  The player keeps it on
   the device (up to five, for a week). It is sent when Home Assistant's
   connection comes back, when the device comes back online or the app returns
   to the foreground, when a camera's **Diagnostics** is opened, and once a

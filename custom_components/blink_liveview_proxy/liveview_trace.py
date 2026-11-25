@@ -221,13 +221,15 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
         return "This browser can play neither stream type; nothing was requested."
     if code == "E-008":
         return "The browser waited for a tap to start playback, and none came."
-    # A report that had to wait on the device was made when the device could
-    # not reach Home Assistant. That comes first: what Home Assistant saw of
+    # A report the device could not send because Home Assistant did not
+    # answer at all (not one it answered with an error: that report waits on
+    # the device too, but Home Assistant was there, and what it saw stands).
+    # That comes first: what Home Assistant saw of
     # such a live view - a playlist served and then nothing - is the same
     # shape as a device that stopped asking (#91), and reads as the device's
     # fault in a way that sends the reader the wrong way. Found by starting a
     # live view and switching on airplane mode while it loaded.
-    lost = bool(client.get("queued"))
+    lost = bool(client.get("queued")) and bool(client.get("unreachable"))
     if played:
         if lost:
             return ("The live view played, then the device lost its connection to Home "
@@ -492,7 +494,13 @@ def build_report(
     if started:
         lines.append(f"First request: {started}")
     if client.get("queued"):
-        lines.append("Sent late: the device could not reach Home Assistant when this failed.")
+        if client.get("unreachable"):
+            lines.append("Sent late: the device could not reach Home Assistant when this failed.")
+        else:
+            answered = client.get("answered")
+            status = f" (HTTP {int(answered)})" if isinstance(answered, int) and 100 <= answered < 600 else ""
+            lines.append(f"Sent late: Home Assistant answered{status} but could not make the "
+                         "report when this failed.")
     lines.append("")
     lines.append("Home Assistant received:")
     lines.extend(_server_lines(server))

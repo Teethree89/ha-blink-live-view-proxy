@@ -309,6 +309,9 @@ def test_diagnostics() -> None:
           "a report that could not be sent is kept on the device")
     check(queue_at != -1 and queue_at < prepare.find("if (generation !== diagGeneration) return;"),
           "even when Start Again was tapped while it was being sent")
+    check("unreachable = !status;" in prepare and "payload.unreachable = unreachable;" in prepare
+          and prepare.index("payload.unreachable = unreachable;") < queue_at,
+          "only a request that got no answer marks the report unreachable, before it is kept")
     check("setTimeout(flushPending, " in page and "sendPendingDiagnostics(hass)" in dialog,
           "and sent later, by this camera's player or by any Home Assistant page")
     event = re.search(r'const DIAGNOSTICS_SENT_EVENT = "([^"]+)"', dialog)
