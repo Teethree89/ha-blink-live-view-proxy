@@ -9,7 +9,13 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
-## [Unreleased]
+## [1.4.0] — 2026-11-25
+
+Live-view failures now say what went wrong and can be reported. Every failure
+ends with a code, a failed live view offers **Copy diagnostics**, and the
+Blink Proxy panel keeps a Diagnostics list per camera. Only the integration
+changed; the add-on version moves only to stay aligned. No Blink
+reauthentication is needed.
 
 ### Added
 
