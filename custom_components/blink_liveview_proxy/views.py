@@ -2307,18 +2307,31 @@ async function flushPending() {{
 
 // If Home Assistant cannot be reached for its half, the device's half still
 // says something - not least that Home Assistant could not be reached.
+// Written the same way liveview_trace.py writes the full report, so the two
+// read alike when both end up in an issue.
+const NETWORK_STATE_NAMES = ["EMPTY", "IDLE", "LOADING", "NO_SOURCE"];
+const READY_STATE_NAMES = ["NOTHING", "METADATA", "CURRENT_DATA", "FUTURE_DATA", "ENOUGH_DATA"];
+const TRANSPORT_NAMES = {{ hls: "HLS (native)", mse: "MPEG-TS (mpegts.js)" }};
+
 function localReport(payload) {{
   const lines = [
     "```",
     "Blink live view diagnostics (device only: Home Assistant did not answer)",
     `Code: ${{payload.code || "none"}}${{payload.detail ? ` (${{payload.detail}})` : ""}}`,
-    `Camera: ${{slug}}   Path: ${{payload.transport || "unknown"}}   Page: ${{payload.protocol}}`,
+    `Camera: ${{slug}}   Path: ${{TRANSPORT_NAMES[payload.transport] || "unknown"}}   Page: ${{String(payload.protocol || "").replace(":", "") || "unknown"}}`,
     `Device: ${{payload.ua}}`,
     "",
     "The player saw:",
   ];
   for (const event of payload.events) {{
-    lines.push(`  +${{event.t.toFixed(1)}}s  ${{event.e}}  network=${{event.ns}} ready=${{event.rs}} buffered=${{event.buf}}s${{event.d ? `  ${{event.d}}` : ""}}`);
+    const state = [
+      `network=${{NETWORK_STATE_NAMES[event.ns] || event.ns}}`,
+      `ready=${{READY_STATE_NAMES[event.rs] || event.rs}}`,
+      `buffered=${{event.buf}}s`,
+      event.paused ? "paused" : "unpaused",
+    ].join(" ");
+    const time = `+${{event.t.toFixed(1)}}s`.padStart(7);
+    lines.push(`  ${{time}}  ${{event.e}}  ${{state}}${{event.d ? ` ${{event.d}}` : ""}}`);
   }}
   lines.push("```");
   return lines.join("\\n");

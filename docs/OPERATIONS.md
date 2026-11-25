@@ -111,9 +111,12 @@ the verdict, **Copy**, and the full report. **Clear** empties one camera's list.
   so they survive a restart.
 - **Sent late** marks a report the device could not send when it failed,
   because it had lost its connection to Home Assistant. The player keeps it on
-  the device (up to five, for a week) and sends it the next time that camera's
-  live view opens, or when the Blink Proxy panel is opened, which sends any
-  camera's. It is dated when the live view failed, not when it arrived.
+  the device (up to five, for a week). It is sent when Home Assistant's
+  connection comes back, when the device comes back online or the app returns
+  to the foreground, when a camera's **Diagnostics** is opened, and once a
+  minute while anything waits; the companion app reconnects without reloading
+  the page, so waiting for a reload is not enough. It is dated when the live
+  view failed, not when it arrived.
 - **Live views nobody reported on** are listed too, from what Home Assistant
   saw of them: how many playlists and segments it served, or how much of the
   stream, and whether the player ever closed it. A device that dropped off the
@@ -128,6 +131,9 @@ What a report does not contain: access tokens, and the address Home Assistant
 was opened at. It says only what kind of address it was (IP address, `.local`
 name, domain name, Nabu Casa), which is what matters for diagnosis. It does
 include the browser's user agent, which names the device and its OS version.
+Recent iOS reports its version in Safari's user agent as 18.x whatever the
+real one is; the companion app adds the real version (`iOS 27.2.1`) after its
+own. For a Safari report, ask for the iOS version from Settings.
 Nothing leaves Home Assistant unless someone copies a report and pastes it
 somewhere.
 

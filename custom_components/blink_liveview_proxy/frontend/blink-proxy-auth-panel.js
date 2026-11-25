@@ -15,6 +15,8 @@ const RESET_CONFIRMATION = "RESET BLINK AUTH";
 // itself (see test_authentication), so it only listens, and reloads any
 // camera's list that is open.
 const DIAGNOSTICS_SENT_EVENT = "blink-liveview-diagnostics-sent";
+// And asks it to try sending them now, before listing a camera's reports.
+const SEND_PENDING_EVENT = "blink-liveview-send-pending";
 
 class BlinkProxyAuthPanel extends HTMLElement {
   constructor() {
@@ -391,6 +393,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
   }
 
   async _loadDiagnostics(slug) {
+    window.dispatchEvent(new CustomEvent(SEND_PENDING_EVENT));
     this._diag[slug] = { ...this._diag[slug], busy: true, error: "" };
     this._render();
     try {

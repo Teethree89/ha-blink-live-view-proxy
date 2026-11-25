@@ -779,17 +779,57 @@
     window.dispatchEvent(new CustomEvent(DIAGNOSTICS_SENT_EVENT, { detail: { sent: done.size } }));
   }
 
-  // Home Assistant's object arrives a moment after the page does. Look for it
-  // for half a minute, then give up until the next page load.
-  (function sendWhenHassArrives(attempt) {
+  // When to try. Page load alone was not enough: the companion app reconnects
+  // to Home Assistant without reloading the page, so a report saved while the
+  // phone was offline sat there until something reloaded it. So also: when
+  // Home Assistant's connection comes back, when the device comes back
+  // online, when the app returns to the foreground, when the admin panel
+  // opens a camera's Diagnostics, and once a minute while anything waits.
+  const SEND_PENDING_EVENT = "blink-liveview-send-pending";
+  let sendingPending = false;
+  let watchedConnection = null;
+
+  function currentHass() {
     const root = document.querySelector("home-assistant");
-    const hass = root && root.hass;
-    if (hass && hass.connected !== false) {
-      sendPendingDiagnostics(hass).catch(() => {});
-    } else if (attempt < 30) {
-      setTimeout(() => sendWhenHassArrives(attempt + 1), 1000);
+    return root && root.hass ? root.hass : null;
+  }
+
+  async function trySendPending() {
+    if (sendingPending || !readPendingDiagnostics().length) return;
+    const hass = currentHass();
+    if (!hass || hass.connected === false) return;
+    // Home Assistant swaps in a new connection object when it reconnects
+    // from scratch; listen on whichever one is current.
+    if (hass.connection && hass.connection !== watchedConnection
+        && typeof hass.connection.addEventListener === "function") {
+      watchedConnection = hass.connection;
+      watchedConnection.addEventListener("ready", () => trySendPending());
     }
+    sendingPending = true;
+    try {
+      await sendPendingDiagnostics(hass);
+    } catch (err) {
+    } finally {
+      sendingPending = false;
+    }
+  }
+
+  // Home Assistant's object arrives a moment after the page does.
+  (function whenHassArrives(attempt) {
+    const hass = currentHass();
+    if (hass && hass.connection && typeof hass.connection.addEventListener === "function") {
+      watchedConnection = hass.connection;
+      watchedConnection.addEventListener("ready", () => trySendPending());
+    }
+    if (hass) trySendPending();
+    else if (attempt < 30) setTimeout(() => whenHassArrives(attempt + 1), 1000);
   })(0);
+  window.addEventListener("online", () => trySendPending());
+  window.addEventListener(SEND_PENDING_EVENT, () => trySendPending());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") trySendPending();
+  });
+  setInterval(() => trySendPending(), 60000);
 
   window.addEventListener("message", answerClipsTokens);
   window.addEventListener("message", (event) => {

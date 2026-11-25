@@ -316,6 +316,23 @@ def test_diagnostics() -> None:
           "the panel hears when they have been sent, and reloads its list")
     check("started_at: diag ? diag.wall" in page,
           "a late report carries when it failed, not when it was sent")
+    # Found on an iPhone: the companion app reconnects without reloading the
+    # page, so a report that only went out on page load never went out.
+    for trigger, label in (
+        ('addEventListener("ready"', "Home Assistant's connection coming back"),
+        ('window.addEventListener("online"', "the device coming back online"),
+        ('document.visibilityState === "visible"', "the app returning to the foreground"),
+        ("setInterval(() => trySendPending(), 60000)", "a retry each minute"),
+        ("window.addEventListener(SEND_PENDING_EVENT", "the panel asking"),
+    ):
+        check(trigger in dialog, f"waiting reports are sent on {label}")
+    ask = re.search(r'const SEND_PENDING_EVENT = "([^"]+)"', dialog)
+    check(bool(ask) and f'const SEND_PENDING_EVENT = "{ask.group(1)}"' in panel
+          and "window.dispatchEvent(new CustomEvent(SEND_PENDING_EVENT))" in panel,
+          "opening a camera's Diagnostics asks for them first")
+    local = page.split("function localReport(payload)", 1)[1].split("\nfunction ", 1)[0]
+    check("NETWORK_STATE_NAMES[event.ns]" in local and "TRANSPORT_NAMES[payload.transport]" in local,
+          "the device-only report names states the way the full report does")
     copy_text = panel.split("async _copyText(text)", 1)[1].split("\n  }\n", 1)[0]
     check(copy_text.index('execCommand("copy")') < copy_text.index("navigator.clipboard"),
           "the panel copies with execCommand first, so plain HTTP works there too")
