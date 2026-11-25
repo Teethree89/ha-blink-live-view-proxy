@@ -38,8 +38,116 @@ still have it installed, delete it rather than guarding its reloads.
 | Every Blink entity unavailable | Credentials expired | Re-auth in **Blink Proxy → Authentication** | Restarting, repeatedly |
 | `/health` not answering | Proxy wedged | Restart the proxy | Re-auth |
 | Watchdog attempts stuck at 3 | Refresh token rejected | Re-auth in **Blink Proxy → Authentication** | More restarts |
-| iPhone shows E-001b | Browser has no Media Source Extensions | Native HLS playback | — |
+| Live view ends with a code such as `(E-005)` | See the code | [Live view error codes](#live-view-error-codes) | Guessing from the wording |
 | `ffmpeg exited with 1` | Could be anything; stderr is discarded | Check the proxy log first | Guessing |
+
+## Live view error codes
+
+When a live view fails, the message ends with a code in brackets, sometimes
+followed by detail from the player: `(E-007, media error 4)`. The code says
+which check fired, so the wording on its own is never the evidence. The same
+code is written to the browser console as `Blink live view E-0xx`.
+
+The player picks one of two paths. Desktop browsers and Android use mpegts.js
+over the direct MPEG-TS stream; iPhone, iPad and the companion app on them have
+no Media Source Extensions and use native HLS. The add-on log shows which: an
+`/mpegts` request, or `Started ffmpeg HLS session` and `/hls/index.m3u8`.
+
+| Code | Path | What happened | Look at |
+|---|---|---|---|
+| `E-001b` | — | The browser has neither Media Source Extensions nor native HLS, so it cannot play either stream. | A different browser. |
+| `E-002` | MPEG-TS | Nothing arrived in 30 seconds. | The add-on log: did the live view start, and did Blink answer? |
+| `E-003` | MPEG-TS | Data arrived for 30 seconds but no picture started. | The stream itself: a codec or an announced track the browser waits for ([#80]). |
+| `E-004` | MPEG-TS | mpegts.js raised an error. The detail is its error type and kind, and the HTTP status if there was one: `NetworkError: HttpStatusCodeInvalid 503` is the proxy refusing the stream. | The detail first, then the add-on log at that time. |
+| `E-005` | HLS | Nothing was buffered in 30 seconds. Either the camera never started, or the device stopped asking for video. | The add-on log. `Cached the HLS live view` means the camera did send; no `/hls/segment_*.ts` requests means the device never asked ([#91]). |
+| `E-006` | HLS | Video was buffered for 30 seconds but no picture started. | The segments: `ffprobe` one from `/data/hls/<camera>/`. |
+| `E-007` | HLS | The video element reported an error. The detail is its media error code: 2 network, 3 decode, 4 not supported. Safari reports a playlist request the server refused as 4. | The integration's playlist response, then the add-on log. |
+| `E-008` | Either | The browser wanted a tap to start, and none came before the session limit. | Nothing is broken. |
+| `E-009` | Either | Save MP4 failed. The detail is the HTTP status of the last attempt. | Whether the live view played at all; a session that never started has nothing to save. |
+| `E-010` | — | The dashboard opened the dialog before the camera's access token was ready. | Refresh the dashboard. If it persists, the camera entity has no `access_token` attribute. |
+
+Codes are never reused. A code that stops being raised is retired, and its
+number is not given to a different failure.
+
+## Live view diagnostics
+
+A failed live view also offers **Copy diagnostics**. It copies a short report,
+already wrapped as a code block, to paste into an issue. It puts two records of
+the same live view side by side:
+
+- **What Home Assistant received.** Every request the integration got for that
+  live view: the playlist (with how many segments it listed), each segment, the
+  MPEG-TS stream, and the player's stop, with status, time and size. This
+  includes requests the integration refused, which the add-on log never sees.
+- **What the player saw.** The video element's events and its loading state,
+  noted only when it changes: `network=LOADING ready=NOTHING buffered=0s`
+  held for thirty seconds is the shape of a device that stopped asking.
+
+The first line is a verdict on where the path stopped:
+
+| Verdict | Meaning |
+|---|---|
+| No playlist (or stream) request reached Home Assistant | The device could not reach Home Assistant at that address, or the player never asked |
+| Home Assistant refused the playlist / stream / segments (HTTP …) | Token, add-on or Blink trouble; the status says which |
+| The device could not reach Home Assistant when the live view failed | The report was sent late, so the device's connection broke while it started: its network, or Home Assistant restarting. Checked before anything else, because what Home Assistant saw looks like the next row |
+| The device received the playlist and then stopped asking | The cause is on the device, not the camera or the proxy ([#91]) |
+| The device kept reloading the playlist but never requested a segment | The playlist never had enough video to start from |
+| Segments were delivered, but the device reports nothing buffered | The device got the video and discarded it |
+| Video reached the device but never started playing | Decoding or start-up problem on the device |
+| Home Assistant accepted the stream but the add-on sent no video | The camera did not start; read the add-on log |
+
+The same verdict is written to the Home Assistant log as a warning, `Live view
+for <camera> failed with E-0xx: ...`, so it is there even if nobody presses the
+button.
+
+### Where reports are kept
+
+Every report is also saved, so it can be read after the failure screen is
+gone. Open **Blink Proxy → Cameras & entities** and press **Diagnostics** on a
+camera: its live views are listed newest first, each with the time, the code,
+the verdict, **Copy**, and the full report. **Clear** empties one camera's list.
+
+- **Saved reports** come from the device that failed. Home Assistant keeps the
+  last 50 across all cameras in `.storage/blink_liveview_proxy.liveview_diagnostics`,
+  so they survive a restart.
+- **Sent late** marks a report the device could not send when it failed:
+  either it had lost its connection to Home Assistant, or Home Assistant
+  answered with an error instead of a report. Only the first changes the
+  verdict to a lost connection; in the second, Home Assistant was there, so
+  the report is judged on what it saw, and says which status it answered with.
+  The player keeps it on
+  the device (up to five, for a week). It is sent when Home Assistant's
+  connection comes back, when the device comes back online or the app returns
+  to the foreground, when a camera's **Diagnostics** is opened, and once a
+  minute while anything waits; the companion app reconnects without reloading
+  the page, so waiting for a reload is not enough. It is dated when the live
+  view failed, not when it arrived.
+- **Live views nobody reported on** are listed too, from what Home Assistant
+  saw of them: how many playlists and segments it served, or how much of the
+  stream, and whether the player ever closed it. A device that dropped off the
+  network mid-start shows up here as a playlist or two and no close. These come
+  from memory (the last 20 live views), so a restart clears them. Only live
+  views with at least one request that carried a valid token are listed:
+  anyone who can reach Home Assistant can send requests with no token, and
+  those are kept apart (the last 10, never listed) so they can neither appear
+  here nor push a real live view out.
+
+What a report does not contain: access tokens, and the address Home Assistant
+was opened at. It says only what kind of address it was (IP address, `.local`
+name, domain name, Nabu Casa), which is what matters for diagnosis. It does
+include the browser's user agent, which names the device and its OS version.
+Recent iOS reports its version in Safari's user agent as 18.x whatever the
+real one is; the companion app adds the real version (`iOS 27.2.1`) after its
+own. For a Safari report, ask for the iOS version from Settings.
+Nothing leaves Home Assistant unless someone copies a report and pastes it
+somewhere.
+
+Copying works on plain HTTP as well as HTTPS, in the player and in the panel.
+If the device will not copy, the player shows the report in a text box to
+select by hand, and the panel's **Show report** has the full text.
+
+[#80]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/80
+[#91]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91
 
 ## The watchdog
 

@@ -130,6 +130,9 @@ jobs:
       - name: HLS playlist tests
         run: python tests/test_playlist.py
 
+      - name: Live view trace and diagnostics tests
+        run: python tests/test_liveview_trace.py
+
       - name: Asset and generator tests
         run: python tests/test_assets.py
 

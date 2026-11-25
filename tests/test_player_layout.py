@@ -13,6 +13,7 @@ quietly pass.
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import shutil
@@ -38,6 +39,12 @@ def player_page() -> str:
     """Render the player f-string with placeholder values."""
     source = VIEWS.read_text()
     body = source.split('    return f"""', 1)[1].split('"""', 1)[0]
+    # Python processes escapes in the f-string before the browser ever sees
+    # it: a "\\n" in the source reaches the page as "\n", but a bare "\n" reaches
+    # it as a line break, which ends a JavaScript string literal mid-line.
+    # Evaluating the literal first is what makes the parse check below see
+    # the same script the browser gets.
+    body = ast.literal_eval('"""' + body + '"""')
     names = set(re.findall(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})", body))
     return body.format(**dict.fromkeys(names, "0"))
 
@@ -222,6 +229,120 @@ def test_start_watchdog() -> None:
     )
 
 
+def test_failure_codes() -> None:
+    """Every failure the player can end on carries a code, and each is documented.
+
+    Issue #91: an iPhone that never requested a segment was told the camera had
+    not started sending video, while the camera was streaming. The page had one
+    message for "nothing arrived" on both players, and only a screenshot showed
+    which branch had fired. Codes make that one line of text in an issue.
+    """
+    print("failure codes")
+    page = player_page()
+    table = page.split("const FAILURES = {", 1)[1].split("};", 1)[0]
+    defined = re.findall(r'"(E-\d{3}[a-z]?)":', table)
+    # Raised anywhere outside the table: in a failureMessage() call, or as one
+    # side of the ternary that picks between two.
+    rest = page.replace(table, "")
+    used = set(re.findall(r'"(E-\d{3}[a-z]?)"', rest))
+    check(len(defined) == len(set(defined)), "no code is defined twice")
+    check(used <= set(defined), f"every code raised is defined: {sorted(used - set(defined))}")
+    check(set(defined) <= used, f"every code defined is raised: {sorted(set(defined) - used)}")
+
+    docs = (ROOT / "docs/OPERATIONS.md").read_text()
+    dialog = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-liveview-dialog.js").read_text()
+    dialog_codes = set(re.findall(r"\((E-\d{3}[a-z]?)\)", dialog))
+    check(dialog_codes == {"E-010"}, "the dialog raises its own code")
+    check(not dialog_codes & set(defined), "and it does not reuse one of the player's")
+    undocumented = sorted(code for code in set(defined) | dialog_codes if f"`{code}`" not in docs)
+    check(not undocumented, f"every code is in docs/OPERATIONS.md: {undocumented}")
+
+    # The endings that are not failures stay free of codes.
+    check('endSession("Live view ended.")' in page, "a stream that ended is not an error")
+    check("Live view ended or the camera stopped sending video.\")" not in page,
+          "no failure is ended with bare text any more")
+    check('setEnded("Could not save' not in page, "including a failed save")
+
+    hls_nothing = re.search(r'"E-005": "([^"]+)"', table).group(1)
+    check("camera did not start" not in hls_nothing.lower(),
+          "the HLS no-video message does not blame the camera (#91)")
+    check('transport === "hls"' in page and len(re.findall(r'^\s*transport = "(hls|mse)";', page, re.M)) == 2,
+          "the page knows which player it ran, to pick the code")
+
+
+
+def test_diagnostics() -> None:
+    """A failed live view offers a report, and copying it works on plain HTTP."""
+    print("diagnostics")
+    page = player_page()
+    check('id="diagnostics"' in page and 'id="diagText"' in page,
+          "the failure screen has a Copy diagnostics button and a fallback text box")
+    check("if (lastFailure && diagPreparedFor !== diagGeneration) prepareDiagnostics();" in page,
+          "only a failure offers it, and the report is fetched as soon as it fails")
+    prepare = page.split("async function prepareDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
+    reset = page.split("function resetDiagnosticsUi()", 1)[1].split("\nfunction ", 1)[0]
+    check("diagGeneration += 1;" in reset
+          and "if (generation !== diagGeneration) return;" in prepare
+          and prepare.index("if (generation !== diagGeneration) return;")
+          < prepare.index("diagReport = report"),
+          "a report that lands after Start Again is dropped, not kept for the next view")
+    copy = page.split("function copyDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
+    check("await" not in copy, "copying happens inside the tap, with no await before it (iOS)")
+    check('document.execCommand("copy")' in copy and "readOnly = false" in copy,
+          "it copies with execCommand, which needs no HTTPS, from an editable field (iOS)")
+    check("stopDiagnostics();\n  disarmStartWatchdog();" in page,
+          "tearing the player down is not recorded as part of the failure")
+    check("&session=${session}" in page.split("function stopUrl()", 1)[1][:300],
+          "the stop request joins the session's trace")
+
+    # Unsent reports: saved on the device by the player, sent later by the
+    # player or by the dashboard script (which the panel loads too). The panel
+    # itself never touches browser storage; test_authentication holds it to that.
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
+    dialog = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-liveview-dialog.js").read_text()
+    key = re.search(r'const PENDING_KEY = "([^"]+)"', page)
+    check(bool(key) and f'const PENDING_DIAGNOSTICS_KEY = "{key.group(1)}"' in dialog,
+          "the player and the dashboard script use the same key for unsent reports")
+    prepare = page.split("async function prepareDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
+    queue_at = prepare.find("const queued = !report && queueDiagnostics(payload);")
+    check(queue_at != -1,
+          "a report that could not be sent is kept on the device")
+    check(queue_at != -1 and queue_at < prepare.find("if (generation !== diagGeneration) return;"),
+          "even when Start Again was tapped while it was being sent")
+    check("unreachable = !status;" in prepare and "payload.unreachable = unreachable;" in prepare
+          and prepare.index("payload.unreachable = unreachable;") < queue_at,
+          "only a request that got no answer marks the report unreachable, before it is kept")
+    check("setTimeout(flushPending, " in page and "sendPendingDiagnostics(hass)" in dialog,
+          "and sent later, by this camera's player or by any Home Assistant page")
+    event = re.search(r'const DIAGNOSTICS_SENT_EVENT = "([^"]+)"', dialog)
+    check(bool(event) and f'const DIAGNOSTICS_SENT_EVENT = "{event.group(1)}"' in panel,
+          "the panel hears when they have been sent, and reloads its list")
+    check("started_at: diag ? diag.wall" in page,
+          "a late report carries when it failed, not when it was sent")
+    # Found on an iPhone: the companion app reconnects without reloading the
+    # page, so a report that only went out on page load never went out.
+    for trigger, label in (
+        ('addEventListener("ready"', "Home Assistant's connection coming back"),
+        ('window.addEventListener("online"', "the device coming back online"),
+        ('document.visibilityState === "visible"', "the app returning to the foreground"),
+        ("setInterval(() => trySendPending(), 60000)", "a retry each minute"),
+        ("window.addEventListener(SEND_PENDING_EVENT", "the panel asking"),
+    ):
+        check(trigger in dialog, f"waiting reports are sent on {label}")
+    ask = re.search(r'const SEND_PENDING_EVENT = "([^"]+)"', dialog)
+    check(bool(ask) and f'const SEND_PENDING_EVENT = "{ask.group(1)}"' in panel
+          and "window.dispatchEvent(new CustomEvent(SEND_PENDING_EVENT))" in panel,
+          "opening a camera's Diagnostics asks for them first")
+    local = page.split("function localReport(payload)", 1)[1].split("\nfunction ", 1)[0]
+    check("NETWORK_STATE_NAMES[event.ns]" in local and "TRANSPORT_NAMES[payload.transport]" in local,
+          "the device-only report names states the way the full report does")
+    copy_text = panel.split("async _copyText(text)", 1)[1].split("\n  }\n", 1)[0]
+    check(copy_text.index('execCommand("copy")') < copy_text.index("navigator.clipboard"),
+          "the panel copies with execCommand first, so plain HTTP works there too")
+    check('data-diag="${index}"' in panel and "_diagnosticsHtml(camera)" in panel,
+          "each camera card in the panel has its Diagnostics list")
+
+
 def main() -> int:
     test_javascript_parses()
     test_portrait()
@@ -229,6 +350,8 @@ def main() -> int:
     test_notch()
     test_saving_state()
     test_start_watchdog()
+    test_failure_codes()
+    test_diagnostics()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:
         print("\nfailed:")

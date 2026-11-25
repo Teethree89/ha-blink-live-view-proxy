@@ -9,6 +9,62 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [1.4.0] — 2026-11-25
+
+Live-view failures now say what went wrong and can be reported. Every failure
+ends with a code, a failed live view offers **Copy diagnostics**, and the
+Blink Proxy panel keeps a Diagnostics list per camera. Only the integration
+changed; the add-on version moves only to stay aligned. No Blink
+reauthentication is needed.
+
+### Added
+
+- **Copy diagnostics on a failed live view.** The failure screen offers a
+  report to paste into an issue, with a verdict on where the live view's path
+  stopped: the device could not reach Home Assistant, Home Assistant refused a
+  request (and with what status), the device received the playlist and then
+  stopped asking, or the video arrived and would not play. It puts what the
+  integration received for that live view next to what the device's video
+  player did. The integration now records every live-view request in memory,
+  refused ones included, which the add-on log could never show. Tokens and the
+  address Home Assistant was opened at are left out, and copying works on plain
+  HTTP. The verdict is also logged in Home Assistant as a warning.
+  `docs/OPERATIONS.md` explains how to read it
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+- **A Diagnostics list on each camera in the Blink Proxy panel.** Every report
+  is saved (the last 50, kept across restarts), and **Cameras & entities →
+  Diagnostics** lists a camera's live views with the time, code, verdict and a
+  **Copy** button. A device that lost its connection keeps its report and sends
+  it once it can reach Home Assistant again, marked "sent late" and dated when
+  it failed; before this, Home Assistant's own reconnect reloaded the page and
+  the report was gone. Live views that no device reported on are listed too,
+  from what Home Assistant saw of them.
+- The panel's **Copy YAML** now works on plain HTTP too.
+
+### Changed
+
+- **Every live-view failure ends with a code**, such as `(E-005)`, followed
+  by any detail the player gave: the mpegts.js error and HTTP status, the HLS
+  video element's media error code, or the HTTP status of a failed save.
+  `docs/OPERATIONS.md` lists what each code means and where to look. Before
+  this, several different failures shared one wording, and a screenshot was the
+  only way to tell which check had fired
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+  The code is also written to the browser console.
+
+### Fixed
+
+- **An iPhone that never loaded any video no longer blames the camera.** On
+  the HLS path the page said "The camera did not start sending video" whenever
+  nothing was buffered, including when the camera was streaming and the iPhone
+  had simply stopped asking for it
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+  That case is now `E-005` and says either is possible.
+- **A live view left waiting for a tap no longer reports a silent camera.** When
+  the browser wanted a tap to start and none came before the session limit, the
+  page said the camera had not sent video. It now says play was not tapped
+  (`E-008`).
+
 ## [1.3.2] — 2026-11-24
 
 Fix cloud clips missing from the clip viewer. Only the proxy changed; the

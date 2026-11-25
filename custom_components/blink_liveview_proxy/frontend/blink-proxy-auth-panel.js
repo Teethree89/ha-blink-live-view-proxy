@@ -10,6 +10,14 @@ const UPDATE_TIMEOUT_MS = 5 * 60 * 1000;
 // in three places; this page only keeps a stray tap from sending it.
 const RESET_CONFIRMATION = "RESET BLINK AUTH";
 
+// Fired by blink-liveview-dialog.js after it sends diagnostics reports that a
+// device kept while it was offline. This page never reads browser storage
+// itself (see test_authentication), so it only listens, and reloads any
+// camera's list that is open.
+const DIAGNOSTICS_SENT_EVENT = "blink-liveview-diagnostics-sent";
+// And asks it to try sending them now, before listing a camera's reports.
+const SEND_PENDING_EVENT = "blink-liveview-send-pending";
+
 class BlinkProxyAuthPanel extends HTMLElement {
   constructor() {
     super();
@@ -47,6 +55,9 @@ class BlinkProxyAuthPanel extends HTMLElement {
     // visible changed, or the focused credential field would be erased.
     this._signature = null;
     this._installationTest = null;
+    // Per camera slug: { open, busy, entries, error }. Fetched when a camera's
+    // Diagnostics is opened, never with the panel poll.
+    this._diag = {};
   }
 
   set hass(value) {
@@ -56,6 +67,11 @@ class BlinkProxyAuthPanel extends HTMLElement {
       this._ensureDialog();
       this._render();
       Promise.all([this._refresh(), this._refreshPanel()]).then(() => this._schedule());
+      window.addEventListener(DIAGNOSTICS_SENT_EVENT, () => {
+        for (const slug of Object.keys(this._diag)) {
+          if (this._diag[slug].open) this._loadDiagnostics(slug);
+        }
+      });
     }
   }
 
@@ -331,13 +347,112 @@ class BlinkProxyAuthPanel extends HTMLElement {
 
   async _copyYaml() {
     if (!this._yaml) return;
+    this._notice = (await this._copyText(this._yaml))
+      ? "YAML copied to the clipboard."
+      : "Clipboard access was denied. Select the YAML and copy it manually.";
+    this._render();
+  }
+
+  // navigator.clipboard only exists on an HTTPS page, and plenty of installs
+  // are plain HTTP on the LAN. execCommand("copy") works on both, as long as
+  // it runs inside the click and the text is selected in an editable field
+  // (iOS will not select text in a read-only one), so it goes first.
+  async _copyText(text) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    // 16px keeps iOS from zooming the page to focus it.
+    area.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px";
+    document.body.append(area);
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, text.length);
+    let copied = false;
     try {
-      await navigator.clipboard.writeText(this._yaml);
-      this._notice = "YAML copied to the clipboard.";
+      copied = document.execCommand("copy");
+    } catch (_error) {}
+    area.remove();
+    if (copied) return true;
+    if (!navigator.clipboard || !window.isSecureContext) return false;
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
     } catch (_error) {
-      this._notice = "Clipboard access was denied. Select the YAML and copy it manually.";
+      return false;
+    }
+  }
+
+  _diagApi(method, slug) {
+    return this._panelApi(method, `/diagnostics?slug=${encodeURIComponent(slug)}`);
+  }
+
+  async _toggleDiagnostics(camera) {
+    const state = this._diag[camera.slug] || {};
+    this._diag[camera.slug] = { ...state, open: !state.open };
+    this._render();
+    if (this._diag[camera.slug].open) await this._loadDiagnostics(camera.slug);
+  }
+
+  async _loadDiagnostics(slug) {
+    window.dispatchEvent(new CustomEvent(SEND_PENDING_EVENT));
+    this._diag[slug] = { ...this._diag[slug], busy: true, error: "" };
+    this._render();
+    try {
+      const result = await this._diagApi("GET", slug);
+      this._diag[slug] = { ...this._diag[slug], entries: result.entries || [], busy: false };
+    } catch (_error) {
+      this._diag[slug] = { ...this._diag[slug], busy: false, error: "Home Assistant could not load the diagnostics." };
     }
     this._render();
+  }
+
+  async _clearDiagnostics(slug) {
+    if (!window.confirm("Clear this camera's live view diagnostics?")) return;
+    try {
+      await this._diagApi("DELETE", slug);
+    } catch (_error) {
+      this._notice = "Home Assistant could not clear the diagnostics.";
+    }
+    await this._loadDiagnostics(slug);
+  }
+
+  async _copyDiagnostics(slug, index) {
+    const entry = ((this._diag[slug] || {}).entries || [])[index];
+    if (!entry) return;
+    this._notice = (await this._copyText(entry.report))
+      ? "Report copied. Paste it into your GitHub issue."
+      : "Could not copy. Open the report below, select it, and copy it by hand.";
+    this._render();
+  }
+
+  _diagnosticsHtml(camera) {
+    const state = this._diag[camera.slug];
+    if (!state || !state.open) return "";
+    const slug = this._escape(camera.slug);
+    const entries = state.entries || [];
+    const list = entries.map((entry, index) => {
+      const when = new Date(Number(entry.at || 0) * 1000).toLocaleString();
+      const badges = [
+        entry.code ? `<span class="badge code">${this._escape(entry.code)}</span>` : "",
+        entry.queued ? `<span class="badge">sent late</span>` : "",
+      ].join("");
+      return `<li class="diag-entry">
+        <div class="diag-meta"><strong>${this._escape(when)}</strong>${badges}</div>
+        <p class="muted">${this._escape(entry.verdict)}</p>
+        <button type="button" class="secondary" data-diag-copy="${slug}" data-diag-index="${index}">Copy</button>
+        <details><summary>Show report</summary><pre>${this._escape(entry.report)}</pre></details>
+      </li>`;
+    }).join("");
+    const body = state.busy && !state.entries
+      ? `<p class="muted">Loading…</p>`
+      : state.error
+        ? `<p class="muted">${this._escape(state.error)}</p>`
+        : entries.length
+          ? `<ul class="diag-list">${list}</ul>`
+          : `<p class="muted">Nothing yet. A live view that fails saves a report here, and one that stops reaching Home Assistant shows what Home Assistant last saw of it.</p>`;
+    return `<div class="diag">
+      <div class="diag-head"><h3>Live view diagnostics</h3><span><button type="button" class="secondary" data-diag-refresh="${slug}" ${state.busy ? "disabled" : ""}>Refresh</button><button type="button" class="secondary" data-diag-clear="${slug}" ${entries.length ? "" : "disabled"}>Clear</button></span></div>
+      ${body}
+    </div>`;
   }
 
   _openEntity(entityId) {
@@ -644,7 +759,8 @@ class BlinkProxyAuthPanel extends HTMLElement {
         <div class="camera-head"><div><h2>${this._escape(camera.name)}</h2><p class="muted">${this._escape(camera.camera_type || "camera")} · ${this._escape(camera.product_type || "unknown model")}</p></div><span class="badge">${camera.ptt_supported ? "PTT" : "view only"}</span></div>
         <dl><dt>Serial</dt><dd>${this._escape(camera.serial || "—")}</dd><dt>Network</dt><dd>${this._escape(camera.network_id || "—")}</dd><dt>Source</dt><dd><code>${this._escape(camera.entity_id || "—")}</code></dd></dl>
         <p class="capabilities">${camera.capabilities.map((item) => `<span class="badge">${this._escape(item.replaceAll("_", " "))}</span>`).join("")}</p>
-        <div class="actions"><button data-live="${index}" ${camera.live_entity_id ? "" : "disabled"}>Live view</button><button class="secondary" data-clips="${index}">Clips</button><button class="secondary" data-snapshot="${index}">Refresh snapshot</button></div>
+        <div class="actions"><button data-live="${index}" ${camera.live_entity_id ? "" : "disabled"}>Live view</button><button class="secondary" data-clips="${index}">Clips</button><button class="secondary" data-snapshot="${index}">Refresh snapshot</button><button class="secondary" data-diag="${index}" aria-expanded="${(this._diag[camera.slug] || {}).open ? "true" : "false"}">Diagnostics</button></div>
+        ${this._diagnosticsHtml(camera)}
         <h3>Home Assistant entities</h3>
         <div class="entities">${camera.entities.map((entity) => `<button class="entity ${entity.disabled ? "disabled" : ""}" data-entity="${this._escape(entity.entity_id)}"><span>${this._escape(entity.name)}</span><small>${this._escape(entity.entity_id)} · ${entity.disabled ? "disabled" : this._escape(entity.state)}${entity.unit ? ` ${this._escape(entity.unit)}` : ""}</small></button>`).join("") || `<p class="muted">No related entities found.</p>`}</div>
       </ha-card>`).join("")}</section>`;
@@ -715,6 +831,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
       this._yaml,
       this._yamlFormat,
       this._yamlCamera,
+      this._diag,
       // Swapping themes swaps the wordmark, and nothing else here would say so.
       this._darkTheme(),
       // The banner's phase is derived, so nothing above it changes when a
@@ -725,7 +842,7 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this._signature = signature;
     const content = { overview: this._overviewHtml(), cameras: this._camerasHtml(), auth: this._authHtml(), yaml: this._yamlHtml(), installation: '<div id="installation-test-host"></div>' }[this._tab];
     this.shadowRoot.innerHTML = `<style>
-      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h1 .wordmark{display:block;height:40px;width:auto} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin:18px 0 0;padding:0}.check{padding:14px 16px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-left:4px solid var(--secondary-text-color);border-radius:6px}.check.ok{border-left-color:var(--success-color,#2e7d32)}.check.missing.required{border-left-color:var(--error-color,#c62828)}.check.missing.optional{border-left-color:var(--warning-color,#e68a00)}.check-head{display:flex;align-items:flex-start;gap:12px}.check-text{flex:1 1 auto;min-width:0}.check h3{margin:0;font-size:15px}.check .detail{margin:4px 0 0;font-size:14px;line-height:1.5}.check .muted{margin:4px 0 0;font-size:13px}.dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--secondary-text-color)}.check.ok .dot{background:var(--success-color,#2e7d32)}.check.missing.required .dot{background:var(--error-color,#c62828)}.check.missing.optional .dot{background:var(--warning-color,#e68a00)}.badge.status{white-space:nowrap}.check details{margin-top:10px}.check summary{padding:4px 0;font-size:13px;color:var(--secondary-text-color);cursor:pointer}.check details ul{margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--secondary-text-color)}.check details li{margin-bottom:6px}.check details a{color:var(--primary-color)}.setup .paths{margin:4px 0 6px;padding-left:22px;line-height:1.55}.setup .paths li{margin-bottom:10px}.setup .paths a{color:var(--primary-color);white-space:nowrap}.setup code{font-size:13px}.update-banner .bar{position:relative;height:6px;margin:4px 0 0;border-radius:999px;background:var(--divider-color);overflow:hidden}.update-banner .bar span{position:absolute;top:0;bottom:0;left:0;width:100%;border-radius:999px;background:var(--primary-color)}.update-banner .bar.busy span{width:40%;animation:blink-proxy-slide 1.4s ease-in-out infinite}.update-banner.done .bar span{background:var(--success-color,#2e7d32)}.update-banner.timeout .bar span{background:var(--warning-color,#e68a00)}.update-banner .detail{margin:12px 0 0;font-size:14px;line-height:1.5}pre.update-log{max-height:320px;margin:14px 0 0;white-space:pre;font-size:12px;line-height:1.5}details.manual-update{margin:16px 0 0;padding:12px 14px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-radius:6px}details.manual-update summary{font-size:14px;cursor:pointer;color:var(--primary-text-color)}details.manual-update ol{margin:12px 0 0;padding-left:22px;line-height:1.9}details.manual-update code{font-size:13px;overflow-wrap:anywhere}details.manual-update .muted{margin:10px 0 0}@keyframes blink-proxy-slide{0%{left:-40%}100%{left:100%}}@media(prefers-reduced-motion:reduce){.update-banner .bar.busy span{width:100%;animation:none;opacity:.6}}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}.check-head{flex-wrap:wrap}h1 .wordmark{height:32px}}
+      :host{display:block;min-height:100%;box-sizing:border-box;padding:24px;color:var(--primary-text-color);background:var(--primary-background-color);font-family:var(--paper-font-body1_-_font-family,sans-serif)} main{max-width:1100px;margin:0 auto} header{display:flex;align-items:center;gap:10px;margin-bottom:16px} header button.back{display:flex;flex:0 0 auto;width:48px;height:48px;margin:0;padding:12px;background:none;color:var(--primary-text-color);border-radius:50%}header button.back svg{width:24px;height:24px;fill:currentColor} h1{font-size:26px;margin:0} h1 .wordmark{display:block;height:40px;width:auto} h2{font-size:19px;margin:0 0 12px} h3{font-size:15px;margin:20px 0 8px} ha-card{display:block;padding:22px;margin-bottom:18px} nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:20px;border-bottom:1px solid var(--divider-color)} nav button{margin:0;padding:12px 16px;background:transparent;color:var(--secondary-text-color);border-radius:0;border-bottom:3px solid transparent;white-space:nowrap} nav button.active{color:var(--primary-color);border-bottom-color:var(--primary-color)} button{margin:14px 8px 0 0;padding:10px 16px;font:inherit;border:0;border-radius:4px;cursor:pointer;background:var(--primary-color);color:var(--text-primary-color,white)} button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)} button:disabled{opacity:.55;cursor:default}.notice{padding:11px 14px;margin-bottom:16px;border-radius:6px;background:var(--secondary-background-color)}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.metrics ha-card{display:flex;flex-direction:column;gap:8px}.metrics strong{font-size:20px}.good{color:var(--success-color,#2e7d32)}.warn{color:var(--warning-color,#e68a00)}.muted{color:var(--secondary-text-color);font-size:14px;line-height:1.5}dl{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px}dt{color:var(--secondary-text-color)}dd{margin:0;overflow-wrap:anywhere}.camera-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.camera-head{display:flex;justify-content:space-between;gap:12px}.badge{display:inline-block;height:max-content;padding:5px 9px;border-radius:999px;background:var(--secondary-background-color);font-size:12px}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.entities{display:flex;flex-direction:column;gap:6px}.entity{display:flex;flex-direction:column;align-items:flex-start;width:100%;margin:0;padding:10px 12px;text-align:left;background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}.entity.disabled{opacity:.65}.entity small{color:var(--secondary-text-color);margin-top:3px}.state{border-left:4px solid var(--primary-color);padding:12px 16px;background:var(--secondary-background-color);border-radius:4px}.state.success{border-color:var(--success-color,#2e7d32)}.state.failure,.state.expired{border-color:var(--error-color,#c62828)}label{display:block;margin:14px 0 6px;font-weight:600}input,select,textarea{box-sizing:border-box;width:100%;padding:11px;font:inherit;color:var(--primary-text-color);background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:4px}pre,textarea{font-family:monospace;font-size:13px;line-height:1.45}pre{padding:12px;overflow:auto;background:var(--secondary-background-color)}textarea{min-height:430px;margin-top:16px;white-space:pre}.yaml-controls{display:grid;grid-template-columns:1fr 1fr;gap:14px}.checks{list-style:none;display:flex;flex-direction:column;gap:12px;margin:18px 0 0;padding:0}.check{padding:14px 16px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-left:4px solid var(--secondary-text-color);border-radius:6px}.check.ok{border-left-color:var(--success-color,#2e7d32)}.check.missing.required{border-left-color:var(--error-color,#c62828)}.check.missing.optional{border-left-color:var(--warning-color,#e68a00)}.check-head{display:flex;align-items:flex-start;gap:12px}.check-text{flex:1 1 auto;min-width:0}.check h3{margin:0;font-size:15px}.check .detail{margin:4px 0 0;font-size:14px;line-height:1.5}.check .muted{margin:4px 0 0;font-size:13px}.dot{flex:0 0 auto;width:10px;height:10px;margin-top:6px;border-radius:50%;background:var(--secondary-text-color)}.check.ok .dot{background:var(--success-color,#2e7d32)}.check.missing.required .dot{background:var(--error-color,#c62828)}.check.missing.optional .dot{background:var(--warning-color,#e68a00)}.badge.status{white-space:nowrap}.check details{margin-top:10px}.check summary{padding:4px 0;font-size:13px;color:var(--secondary-text-color);cursor:pointer}.check details ul{margin:8px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--secondary-text-color)}.check details li{margin-bottom:6px}.check details a{color:var(--primary-color)}.setup .paths{margin:4px 0 6px;padding-left:22px;line-height:1.55}.setup .paths li{margin-bottom:10px}.setup .paths a{color:var(--primary-color);white-space:nowrap}.setup code{font-size:13px}.update-banner .bar{position:relative;height:6px;margin:4px 0 0;border-radius:999px;background:var(--divider-color);overflow:hidden}.update-banner .bar span{position:absolute;top:0;bottom:0;left:0;width:100%;border-radius:999px;background:var(--primary-color)}.update-banner .bar.busy span{width:40%;animation:blink-proxy-slide 1.4s ease-in-out infinite}.update-banner.done .bar span{background:var(--success-color,#2e7d32)}.update-banner.timeout .bar span{background:var(--warning-color,#e68a00)}.update-banner .detail{margin:12px 0 0;font-size:14px;line-height:1.5}pre.update-log{max-height:320px;margin:14px 0 0;white-space:pre;font-size:12px;line-height:1.5}details.manual-update{margin:16px 0 0;padding:12px 14px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-radius:6px}details.manual-update summary{font-size:14px;cursor:pointer;color:var(--primary-text-color)}details.manual-update ol{margin:12px 0 0;padding-left:22px;line-height:1.9}details.manual-update code{font-size:13px;overflow-wrap:anywhere}details.manual-update .muted{margin:10px 0 0}.diag{margin-top:14px;padding:14px;background:var(--secondary-background-color);border:1px solid var(--divider-color);border-radius:6px}.diag-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px}.diag-head h3{margin:0}.diag-head button{margin:0 0 0 8px}.diag-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}.diag-entry{padding:12px;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:6px}.diag-meta{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.diag-entry p{margin:6px 0 0}.diag-entry button{margin:10px 8px 0 0}.diag-entry details{margin-top:8px}.diag-entry summary{font-size:13px;color:var(--secondary-text-color);cursor:pointer}.diag-entry pre{max-height:360px;margin:8px 0 0;white-space:pre;font-size:12px}.badge.code{font-family:monospace}@keyframes blink-proxy-slide{0%{left:-40%}100%{left:100%}}@media(prefers-reduced-motion:reduce){.update-banner .bar.busy span{width:100%;animation:none;opacity:.6}}@media(max-width:760px){:host{padding:14px}.metrics,.camera-grid,.yaml-controls{grid-template-columns:1fr}header{align-items:center}.check-head{flex-wrap:wrap}h1 .wordmark{height:32px}}
     </style><main><header><button type="button" class="back" id="back" aria-label="Back"><svg viewBox="0 0 24 24"><path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/></svg></button><div><h1>${this._wordmark()}</h1><p class="muted">Admin dashboard</p></div></header><nav>${[["overview","Overview"],["cameras","Cameras & entities"],["auth","Authentication"],["yaml","YAML"],["installation","Test installation"]].map(([key,label]) => `<button data-tab="${key}" class="${this._tab === key ? "active" : ""}">${label}</button>`).join("")}</nav>${this._notice ? `<div class="notice" role="status">${this._escape(this._notice)}</div>` : ""}${content}</main>`;
     this._renderExpiry();
     const testHost = this.shadowRoot.getElementById("installation-test-host");
@@ -759,6 +876,10 @@ class BlinkProxyAuthPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-entity]").forEach((node) => node.addEventListener("click", () => this._openEntity(node.dataset.entity)));
     this.shadowRoot.querySelectorAll("[data-live]").forEach((node) => node.addEventListener("click", () => this._openLive(this._panelData.cameras[Number(node.dataset.live)])));
     this.shadowRoot.querySelectorAll("[data-clips]").forEach((node) => node.addEventListener("click", () => this._openClips(this._panelData.cameras[Number(node.dataset.clips)])));
+    this.shadowRoot.querySelectorAll("[data-diag]").forEach((node) => node.addEventListener("click", () => this._toggleDiagnostics(this._panelData.cameras[Number(node.dataset.diag)])));
+    this.shadowRoot.querySelectorAll("[data-diag-refresh]").forEach((node) => node.addEventListener("click", () => this._loadDiagnostics(node.dataset.diagRefresh)));
+    this.shadowRoot.querySelectorAll("[data-diag-clear]").forEach((node) => node.addEventListener("click", () => this._clearDiagnostics(node.dataset.diagClear)));
+    this.shadowRoot.querySelectorAll("[data-diag-copy]").forEach((node) => node.addEventListener("click", () => this._copyDiagnostics(node.dataset.diagCopy, Number(node.dataset.diagIndex))));
     this.shadowRoot.querySelectorAll("[data-snapshot]").forEach((node) => node.addEventListener("click", () => this._refreshSnapshot(this._panelData.cameras[Number(node.dataset.snapshot)])));
     this.shadowRoot.getElementById("yaml-format")?.addEventListener("change", (event) => { this._yamlFormat = event.target.value; this._yaml = ""; this._render(); });
     this.shadowRoot.getElementById("yaml-camera")?.addEventListener("change", (event) => { this._yamlCamera = event.target.value; this._yaml = ""; this._render(); });
