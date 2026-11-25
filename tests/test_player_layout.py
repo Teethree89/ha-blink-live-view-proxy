@@ -277,8 +277,15 @@ def test_diagnostics() -> None:
     page = player_page()
     check('id="diagnostics"' in page and 'id="diagText"' in page,
           "the failure screen has a Copy diagnostics button and a fallback text box")
-    check("if (lastFailure && !diagReport) prepareDiagnostics();" in page,
+    check("if (lastFailure && diagPreparedFor !== diagGeneration) prepareDiagnostics();" in page,
           "only a failure offers it, and the report is fetched as soon as it fails")
+    prepare = page.split("async function prepareDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
+    reset = page.split("function resetDiagnosticsUi()", 1)[1].split("\nfunction ", 1)[0]
+    check("diagGeneration += 1;" in reset
+          and "if (generation !== diagGeneration) return;" in prepare
+          and prepare.index("if (generation !== diagGeneration) return;")
+          < prepare.index("diagReport = report"),
+          "a report that lands after Start Again is dropped, not kept for the next view")
     copy = page.split("function copyDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
     check("await" not in copy, "copying happens inside the tap, with no await before it (iOS)")
     check('document.execCommand("copy")' in copy and "readOnly = false" in copy,
@@ -296,8 +303,12 @@ def test_diagnostics() -> None:
     key = re.search(r'const PENDING_KEY = "([^"]+)"', page)
     check(bool(key) and f'const PENDING_DIAGNOSTICS_KEY = "{key.group(1)}"' in dialog,
           "the player and the dashboard script use the same key for unsent reports")
-    check("if (!report && queueDiagnostics(payload))" in page,
+    prepare = page.split("async function prepareDiagnostics()", 1)[1].split("\nfunction ", 1)[0]
+    queue_at = prepare.find("const queued = !report && queueDiagnostics(payload);")
+    check(queue_at != -1,
           "a report that could not be sent is kept on the device")
+    check(queue_at != -1 and queue_at < prepare.find("if (generation !== diagGeneration) return;"),
+          "even when Start Again was tapped while it was being sent")
     check("setTimeout(flushPending, " in page and "sendPendingDiagnostics(hass)" in dialog,
           "and sent later, by this camera's player or by any Home Assistant page")
     event = re.search(r'const DIAGNOSTICS_SENT_EVENT = "([^"]+)"', dialog)

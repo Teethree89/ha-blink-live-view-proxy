@@ -2035,7 +2035,7 @@ function setEnded(message) {{
   statusText.textContent = message;
   // Only a failure offers diagnostics; a live view that ended normally has
   // nothing to report.
-  if (lastFailure && !diagReport) prepareDiagnostics();
+  if (lastFailure && diagPreparedFor !== diagGeneration) prepareDiagnostics();
 }}
 
 function stopPlayer() {{
@@ -2128,6 +2128,10 @@ const DIAG_NOISY = new Set(["progress", "suspend", "timeupdate", "state"]);
 const DIAG_MAX_EVENTS = 300;
 let diag = null;
 let diagReport = "";
+// Which live view the page is on, and which one diagnostics were last
+// prepared for; see resetDiagnosticsUi and prepareDiagnostics.
+let diagGeneration = 0;
+let diagPreparedFor = -1;
 let lastFailure = null;
 
 function diagState() {{
@@ -2309,6 +2313,9 @@ function localReport(payload) {{
 }}
 
 function resetDiagnosticsUi() {{
+  // A report still being fetched belongs to the live view before this one;
+  // bumping the generation makes it discard itself when it lands.
+  diagGeneration += 1;
   diagReport = "";
   diagButton.hidden = true;
   diagButton.disabled = false;
@@ -2321,6 +2328,8 @@ function resetDiagnosticsUi() {{
 // Fetched as soon as the live view fails, not on the tap: copying on iOS has
 // to happen inside the tap itself, with no await in between.
 async function prepareDiagnostics() {{
+  const generation = diagGeneration;
+  diagPreparedFor = generation;
   stopDiagnostics();
   diagButton.hidden = false;
   diagButton.disabled = true;
@@ -2340,10 +2349,16 @@ async function prepareDiagnostics() {{
       report = (data && data.report) || "";
     }}
   }} catch (err) {{}}
+  // Unsent, it waits on the device whatever happens on screen next.
+  const queued = !report && queueDiagnostics(payload);
+  // Start Again was tapped while this was in flight: the report is for a live
+  // view that is gone, and keeping it would stop the next failure from
+  // preparing its own (and leave the button hidden).
+  if (generation !== diagGeneration) return;
   diagReport = report || localReport(payload);
   diagButton.disabled = false;
   diagButton.textContent = "Copy diagnostics";
-  if (!report && queueDiagnostics(payload)) {{
+  if (queued) {{
     diagHint.textContent =
       "Home Assistant could not be reached. This report is saved on this device and will be sent when it can be.";
     diagHint.hidden = false;
@@ -3282,27 +3297,30 @@ class BlinkLiveviewProxyStopView(HomeAssistantView):
     async def post(self, request: web.Request, slug: str) -> web.Response:
         """Ask the proxy to stop this camera's session."""
         _camera(self.hass, slug)
-        with _Traced(self.hass, request, slug, "stop"):
+        # The whole request is traced, not just the token check, so the time
+        # shown is the add-on's and a stop it never confirmed says so.
+        with _Traced(self.hass, request, slug, "stop") as record:
             _authorize_browser_request(self.hass, request, slug)
-        client = _client(self.hass)
-        try:
-            async with asyncio.timeout(15):
-                async with client._session.post(  # noqa: SLF001
-                    client.proxy_url(f"/cameras/{slug}/stop"),
-                    headers=client.auth_headers(),
-                ) as response:
-                    payload = await response.json(content_type=None)
-        except (ClientError, asyncio.TimeoutError, ValueError) as err:
-            # Best effort by nature: the caller is on its way out either way,
-            # and the idle timeout is still there behind this.
-            LOGGER.debug("Could not stop the live view for %s: %s", slug, err)
+            client = _client(self.hass)
+            try:
+                async with asyncio.timeout(15):
+                    async with client._session.post(  # noqa: SLF001
+                        client.proxy_url(f"/cameras/{slug}/stop"),
+                        headers=client.auth_headers(),
+                    ) as response:
+                        payload = await response.json(content_type=None)
+            except (ClientError, asyncio.TimeoutError, ValueError) as err:
+                # Best effort by nature: the caller is on its way out either
+                # way, and the idle timeout is still there behind this.
+                LOGGER.debug("Could not stop the live view for %s: %s", slug, err)
+                _trace(self.hass).finish(record, 200, "add-on did not confirm the stop")
+                return web.json_response(
+                    {"stopped": False}, headers={"Cache-Control": "no-store"}
+                )
             return web.json_response(
-                {"stopped": False}, headers={"Cache-Control": "no-store"}
+                payload if isinstance(payload, dict) else {"stopped": True},
+                headers={"Cache-Control": "no-store"},
             )
-        return web.json_response(
-            payload if isinstance(payload, dict) else {"stopped": True},
-            headers={"Cache-Control": "no-store"},
-        )
 
 
 class BlinkLiveviewProxyDiagnosticsView(HomeAssistantView):
