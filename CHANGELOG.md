@@ -9,6 +9,21 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [Unreleased]
+
+### Fixed
+
+- **Live view never started on iPhones running iOS 18**
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91),
+  reported by @ussoccer18). The add-on served the first HLS playlist as soon as
+  ffmpeg had cut one one-second segment. iOS 27 starts from that;
+  iOS 18 reads it, reloads it once, and then waits without asking for a segment
+  or raising an error, until the page gives up with `E-005`. Seen on iOS 18.3,
+  18.5 and 18.7.5, in Safari and Chrome, over plain HTTP and Nabu Casa, with a
+  Blink Mini that plays on iOS 27. The first playlist now waits for three
+  segments (`hls_min_segments`), which adds about two seconds to the start on
+  every device. Only the add-on changed.
+
 ## [1.4.0] — 2026-11-25
 
 Live-view failures now say what went wrong and can be reported. Every failure

@@ -74,7 +74,7 @@ async def record_args(extra_config):
         ffmpeg = tmp / "fake-ffmpeg"
         ffmpeg.write_text(RECORDER)
         ffmpeg.chmod(0o755)
-        config = {"ffmpeg": str(ffmpeg), "hls_dir": str(tmp / "hls"), "hls_start_timeout": 3}
+        config = {"ffmpeg": str(ffmpeg), "hls_dir": str(tmp / "hls"), "hls_start_timeout": 3, "hls_min_segments": 0}
         config.update(extra_config)
         session = HlsSession("testcam", HlsManager(FakeBroker(), config, tmp))
         await session.start()

@@ -146,8 +146,32 @@ class HlsSession:
             return ""
         return text[-limit:]
 
+    def _segment_count(self) -> int:
+        """How many media segments the playlist on disk lists right now."""
+        try:
+            text = self.playlist.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return 0
+        return sum(1 for line in text.splitlines() if line and not line.startswith("#"))
+
     async def wait_ready(self) -> None:
+        """Wait until the playlist is worth serving.
+
+        Not merely until it exists. ffmpeg writes the playlist as soon as the
+        first one-second segment is cut, and a live playlist that short is one
+        a player may not start from: the HLS spec has it begin no closer than
+        three target durations to the end. iOS 27 starts anyway.
+        iOS 18 reads that playlist, reloads it once, and then waits for ever
+        without asking for a segment or reporting an error - issue #91, seen on
+        two iPhones on iOS 18.5 and 18.7.5 and reproduced on a rented iOS 18
+        device against a Blink Mini that plays on iOS 27. So the first playlist
+        waits for hls_min_segments segments, about two seconds longer.
+
+        If they do not arrive within hls_start_timeout, whatever playlist
+        exists is served rather than failing a live view that may yet play.
+        """
         timeout = float(self.manager.config.get("hls_start_timeout", 30))
+        wanted = max(0, int(self.manager.config.get("hls_min_segments", 3)))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             # A client waiting here is active; keep the idle reaper off it.
@@ -162,8 +186,18 @@ class HlsSession:
                 )
                 raise RuntimeError(f"ffmpeg exited with {self.process.returncode}")
             if self.playlist.exists() and self.playlist.stat().st_size > 0:
-                return
+                if wanted == 0 or self._segment_count() >= wanted:
+                    return
             await asyncio.sleep(0.2)
+        if self.playlist.exists() and self.playlist.stat().st_size > 0:
+            LOGGER.warning(
+                "HLS playlist for %s listed %d of %d segments after %.0fs; serving it anyway",
+                self.slug,
+                self._segment_count(),
+                wanted,
+                timeout,
+            )
+            return
         tail = self._ffmpeg_error_tail()
         LOGGER.error(
             "HLS playlist never appeared for %s after %.0fs and ffmpeg is still "

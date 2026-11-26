@@ -75,6 +75,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hls_dir": ".runtime/blink-liveview-proxy",
     "hls_idle_timeout": 10,
     "hls_start_timeout": 30,
+    # Segments the first playlist must list before it is served; see
+    # HlsSession.wait_ready. 0 serves it as soon as ffmpeg writes it.
+    "hls_min_segments": 3,
     "liveview_cache_dir": ".runtime/blink-liveview-proxy/liveviews",
     # Local clips are fetched from Blink once and kept here, with the first
     # frame of each cut as a thumbnail. Oldest files go first past the cap.
