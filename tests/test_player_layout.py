@@ -271,6 +271,26 @@ def test_failure_codes() -> None:
 
 
 
+def test_video_never_invisible() -> None:
+    """The video element is never fully transparent, not even before it plays.
+
+    Issue #91: iOS read the playlist, never requested a segment, and play()
+    never settled. iOS starts a muted video only while it is visible, and the
+    page hid it with opacity:0 until the "playing" event, which could then
+    never come. The same stream played when opened in Safari directly.
+    """
+    print("video visibility")
+    page = player_page()
+    style = "\n".join(re.findall(r"<style>(.*?)</style>", page, re.S))
+    rules = re.findall(r"(^|\n)\s*(video(?:\.[\w-]+)?)\s*\{([^}]*)\}", style)
+    bases = [body for _start, selector, body in rules if selector == "video"]
+    check(bool(bases), "there is a base rule for the video")
+    check(all(not re.search(r"opacity\s*:\s*0(?![.\d])", body) for _s, _sel, body in rules),
+          "no video rule makes it fully transparent")
+    check(any("background:transparent" in body for body in bases),
+          "before it plays, the snapshot behind it stays in view")
+
+
 def test_diagnostics() -> None:
     """A failed live view offers a report, and copying it works on plain HTTP."""
     print("diagnostics")
@@ -351,6 +371,7 @@ def main() -> int:
     test_saving_state()
     test_start_watchdog()
     test_failure_codes()
+    test_video_never_invisible()
     test_diagnostics()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:

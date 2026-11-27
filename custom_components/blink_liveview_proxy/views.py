@@ -663,18 +663,24 @@ body {{
   background:#05070a center/cover no-repeat;
   {snapshot_style}
 }}
+/* Never opacity:0, not even while loading. iOS only starts a muted video
+   without a tap while the video is visible, and a fully transparent one may
+   count as hidden: playback then waits for the video to show, while the page
+   waited for playback to show it. Suspected for #91, where iOS read the
+   playlist, never asked for a segment, and play() never settled. Until it
+   plays, a transparent background keeps the snapshot behind it in view, and
+   the overlay covers the empty element as it always did. */
 video {{
   position:absolute;
   inset:0;
   width:100%;
   height:100%;
   object-fit:contain;
-  background:#05070a;
-  opacity:0;
-  transition:opacity .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
+  background:transparent;
+  transition:background-color .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
 }}
 video.ready {{
-  opacity:1;
+  background:#05070a;
 }}
 .overlay {{
   position:absolute;

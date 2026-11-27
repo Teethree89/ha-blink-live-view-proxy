@@ -21,6 +21,12 @@ trips on is not confirmed yet.
 
 ### Fixed
 
+- **The live-view video is no longer hidden with `opacity: 0` while it
+  loads.** iOS starts a muted video without a tap only while it is visible,
+  and the page made the video visible only once it was playing. The same
+  Blink Mini stream that never started in the player played when opened
+  directly in Safari on iOS 17.5, which points at the page rather than the
+  stream. Suspected cause of #91; not yet confirmed on an affected device.
 - **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
   the `; charset=utf-8` that aiohttp appended. Apple's validator rejects the
   latter as an illegal MIME type (451001). Integration and add-on both changed.
