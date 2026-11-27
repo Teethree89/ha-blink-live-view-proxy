@@ -64,7 +64,7 @@ no Media Source Extensions and use native HLS. The add-on log shows which: an
 | `E-007` | HLS | The video element reported an error. The detail is its media error code: 2 network, 3 decode, 4 not supported. Safari reports a playlist request the server refused as 4. | The integration's playlist response, then the add-on log. |
 | `E-008` | Either | The browser wanted a tap to start, and none came before the session limit. | Nothing is broken. |
 | `E-009` | Either | Save MP4 failed. The detail is the HTTP status of the last attempt. | Whether the live view played at all; a session that never started has nothing to save. |
-| `E-011` | HLS | The page's warm-up request, which starts the stream before the video player sees it, was refused. The detail is the HTTP status: 403 a stale token (refresh the dashboard), 429 Blink's live-view cooldown, 503 the add-on not ready, 504 the camera did not start sending video in time, 502 the add-on failed. | The status first; for 502 and 504 the add-on log at that time. |
+| `E-011` | HLS, iOS 18 and earlier | The page's warm-up request, which starts the stream before the video player sees it, was refused. The detail is the HTTP status: 403 a stale token (refresh the dashboard), 429 Blink's live-view cooldown, 503 the add-on not ready, 504 the camera did not start sending video in time, 502 the add-on failed. | The status first; for 502 and 504 the add-on log at that time. |
 | `E-010` | — | The dashboard opened the dialog before the camera's access token was ready. | Refresh the dashboard. If it persists, the camera entity has no `access_token` attribute. |
 
 Codes are never reused. A code that stops being raised is retired, and its

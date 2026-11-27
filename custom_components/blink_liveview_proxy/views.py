@@ -671,23 +671,29 @@ body {{
   background:#05070a center/cover no-repeat;
   {snapshot_style}
 }}
-/* Never opacity:0, not even while loading. iOS only starts a muted video
-   without a tap while the video is visible, and a fully transparent one may
-   count as hidden: playback then waits for the video to show, while the page
-   waited for playback to show it. Suspected for #91, where iOS read the
-   playlist, never asked for a segment, and play() never settled. Until it
-   plays, a transparent background keeps the snapshot behind it in view, and
-   the overlay covers the empty element as it always did. */
 video {{
   position:absolute;
   inset:0;
   width:100%;
   height:100%;
   object-fit:contain;
+  background:#05070a;
+  opacity:0;
+  transition:opacity .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
+}}
+video.ready {{
+  opacity:1;
+}}
+/* iOS 18 and earlier only; see legacyIosHls(). iOS starts a muted video
+   without a tap only while it is visible, so there the video is never
+   opacity:0, and its transparent background keeps the snapshot in view
+   until it plays. Everything else keeps the rules above. */
+video.ios-legacy {{
+  opacity:1;
   background:transparent;
   transition:background-color .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
 }}
-video.ready {{
+video.ios-legacy.ready {{
   background:#05070a;
 }}
 .overlay {{
@@ -1371,7 +1377,7 @@ body.sheet-open video {{
 </head>
 <body>
 <main class="stage">
-  <video id="video" muted playsinline autoplay></video>
+  <video id="video" muted playsinline autoplay controls></video>
   <section id="overlay" class="overlay">
     <div class="panel">
       <div id="spinner" class="spinner"></div>
@@ -2091,12 +2097,10 @@ function stopPlayer() {{
     try {{ player.destroy(); }} catch (err) {{}}
     player = null;
   }}
-  // Native controls only once there is a picture. The video stays visible
-  // while it loads (iOS will not start a muted video it counts as hidden), so
-  // with controls on from the start iOS drew an empty player - a play button,
-  // mute and full-screen icons and a 00:00 bar - through the loading overlay.
-  // A tap on the overlay already starts playback when iOS asks for one.
-  video.controls = false;
+  // Back to the element as every other device has it; the iOS 18 mode is
+  // applied afresh by the next start that needs it.
+  video.classList.remove("ios-legacy");
+  video.controls = true;
   video.removeAttribute("src");
   video.load();
 }}
@@ -2520,6 +2524,29 @@ function sessionLimitMessage() {{
   return noPictureMessage();
 }}
 
+// Which iOS this is, for the HLS path. iOS 26 and later put "OS 18_x" in
+// Safari's user agent whatever the real version, so that token cannot tell
+// iOS 18 from 27. These can: the companion app's "iOS 27.2.1", then Safari's
+// own "Version/26.0". 0 when neither is there, as in Chrome on iOS.
+function iosMajorVersion() {{
+  const ua = navigator.userAgent || "";
+  const app = ua.match(/\\biOS (\\d+)\\.\\d/);
+  if (app) return Number(app[1]);
+  if (!/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua)) {{
+    const safari = ua.match(/\\bVersion\\/(\\d+)/);
+    if (safari) return Number(safari[1]);
+  }}
+  return 0;
+}}
+
+// Whether the HLS path needs the iOS 18 handling below (#91). Newer iOS plays
+// the stream as it always did and gets exactly the behaviour it always had.
+// When the version cannot be read, the iOS 18 handling is used: it also plays
+// on newer iOS, while guessing wrong the other way breaks iOS 18.
+function legacyIosHls() {{
+  return !(iosMajorVersion() >= 26);
+}}
+
 // Start the stream before the video element sees it (#91).
 //
 // The first playlist request wakes the camera and starts ffmpeg, so it takes
@@ -2564,25 +2591,30 @@ async function startPlayer() {{
     // MPEG-TS player always dies with E-001b. They do play HLS natively, and
     // the proxy already produces an HLS rendition, so use it.
     transport = "hls";
-    diagNote("path", "native HLS");
-    // Armed before the warm-up, so the thirty seconds cover waking the camera
+    const legacy = legacyIosHls();
+    diagNote("path", legacy ? "native HLS, iOS 18 mode" : "native HLS");
+    // Armed before any warm-up, so the thirty seconds cover waking the camera
     // too, as they always have.
     armStartWatchdog();
-    const generation = playerGeneration;
-    const warmStatus = await warmHls();
-    // Ended, restarted or timed out while the camera woke: nothing to start.
-    if (generation !== playerGeneration) return;
-    // Refused outright (a stale token, Blink's cooldown, a camera that did
-    // not start): handing the video element the same request only fails it
-    // again, more vaguely. With no answer at all, it does try, and reports.
-    if (warmStatus >= 400) {{
-      endSession(failureMessage("E-011", `HTTP ${{warmStatus}}`));
-      return;
+    if (legacy) {{
+      video.classList.add("ios-legacy");
+      video.controls = false;
+      const generation = playerGeneration;
+      const warmStatus = await warmHls();
+      // Ended, restarted or timed out while the camera woke: nothing to start.
+      if (generation !== playerGeneration) return;
+      // Refused outright (a stale token, Blink's cooldown, a camera that did
+      // not start): handing the video element the same request only fails it
+      // again, more vaguely. With no answer at all, it does try, and reports.
+      if (warmStatus >= 400) {{
+        endSession(failureMessage("E-011", `HTTP ${{warmStatus}}`));
+        return;
+      }}
     }}
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
-      video.controls = true;
+      if (legacy) video.controls = true;
       overlay.classList.add("hidden");
       actions.hidden = true;
       liveActions.hidden = false;
@@ -2654,7 +2686,6 @@ async function startPlayer() {{
   video.onplaying = () => {{
     disarmStartWatchdog();
     video.classList.add("ready");
-    video.controls = true;
     overlay.classList.add("hidden");
     actions.hidden = true;
     liveActions.hidden = false;
