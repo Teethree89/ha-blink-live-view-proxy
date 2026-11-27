@@ -12,7 +12,7 @@ LOGGER_NAME = "blink_liveview_proxy"
 # proxy is old enough to be missing routes it needs. Kept in step with
 # manifest.json and addon/config.yaml by a test, because a version that lies is
 # worse than no version at all.
-PROXY_VERSION = "1.4.0"
+PROXY_VERSION = "1.4.1"
 
 IMMI_HEADER_BYTES = 9
 
@@ -75,6 +75,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hls_dir": ".runtime/blink-liveview-proxy",
     "hls_idle_timeout": 10,
     "hls_start_timeout": 30,
+    # Segments the first playlist must list before it is served; see
+    # HlsSession.wait_ready. 0, the default, serves it as soon as ffmpeg
+    # writes it.
+    "hls_min_segments": 0,
+    # Cut HLS segments only at keyframes instead of every second. Slower to
+    # start, but every segment decodes on its own; see HlsSession.start.
+    "hls_keyframe_segments": False,
     "liveview_cache_dir": ".runtime/blink-liveview-proxy/liveviews",
     # Local clips are fetched from Blink once and kept here, with the first
     # frame of each cut as a thumbnail. Oldest files go first past the cap.

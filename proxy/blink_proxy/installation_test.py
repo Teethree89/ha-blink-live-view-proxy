@@ -31,7 +31,7 @@ TEST_TTL = 30 * 60
 BUILD_TIMEOUT = 10 * 60
 REUSABLE_KEYS = frozenset({
     "cameras", "ffmpeg", "ffmpeg_probesize", "ffmpeg_analyzeduration",
-    "hls_idle_timeout", "hls_start_timeout", "mpegts_session_seconds",
+    "hls_idle_timeout", "hls_start_timeout", "hls_min_segments", "hls_keyframe_segments", "mpegts_session_seconds",
     "ptt_disabled_product_types", "ptt_disabled_camera_types", "ptt_force_enabled_slugs",
 })
 ALLOWED_REQUESTS = frozenset({

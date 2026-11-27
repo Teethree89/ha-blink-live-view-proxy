@@ -202,13 +202,37 @@ def test_start_watchdog() -> None:
     print("start watchdog")
     page = player_page()
     check("const START_TIMEOUT_MS = 30000" in page, "a picture has thirty seconds to appear")
-    arms = [m.start() for m in re.finditer(r"armStartWatchdog\(\);", page)]
+    # Not disarmStartWatchdog(): that is a different call that merely ends alike.
+    arms = [m.start() for m in re.finditer(r"(?<!dis)armStartWatchdog\(\);", page)]
     awaits = [m.start() for m in re.finditer(r"await startPlayback\(\);", page)]
     check(len(awaits) == 2, "both the MSE and the HLS start paths wait for playback")
+    # HLS waits twice - the warm-up fetch, then play() - and one watchdog,
+    # armed before the first, covers both. MPEG-TS arms just before play().
+    warm = page.index("await warmHls();")
+    hls_wait, mse_wait = sorted(awaits)
     check(
-        all(any(0 < wait - arm < 400 for arm in arms) for wait in awaits),
-        "the watchdog is armed before each await, not after it",
+        any(0 < warm - arm < 300 for arm in arms)
+        and warm < hls_wait
+        and not any(warm < arm < hls_wait for arm in arms)
+        and any(0 < mse_wait - arm < 400 for arm in arms),
+        "the watchdog is armed before each path's first await, not after it",
     )
+    # #91: iOS 18 never started a stream it met cold. The page starts it first.
+    hls_branch = page[page.index('transport = "hls";'):hls_wait]
+    check(
+        hls_branch.index("await warmHls();") < hls_branch.index("video.src = hlsUrl();"),
+        "on HLS the stream is warmed before the video element is given it",
+    )
+    check(
+        "if (generation !== playerGeneration) return;" in hls_branch
+        and "playerGeneration += 1;" in page,
+        "a live view ended or restarted during the warm-up does not start anyway",
+    )
+    check('hlsUrl(true)' in page and '"&warm=1"' in page,
+          "the warm-up request is marked, so the trace can tell it apart")
+    check("if (warmStatus >= 400) {" in hls_branch
+          and 'failureMessage("E-011", `HTTP ${warmStatus}`)' in hls_branch,
+          "a refused warm-up ends at once with E-011 and its status, not after 30 s")
     check(page.count("disarmStartWatchdog();\n      video.classList.add(\"ready\")") == 1
           and page.count("disarmStartWatchdog();\n    video.classList.add(\"ready\")") == 1,
           "a picture appearing disarms it on both paths")
@@ -271,6 +295,50 @@ def test_failure_codes() -> None:
 
 
 
+def test_warm_up_switch() -> None:
+    """The #91 warm-up runs only when the panel's switch is on; the look is 1.4.0's.
+
+    On iOS 18 a live view met cold never started (#91), and warming the stream
+    first fixed it. It is "Warm up camera before starting" in the Blink Proxy
+    panel, off by default, rather than guessed from the iOS version: Safari on
+    iOS 26 and later reports "OS 18" in its user agent. With it off, an E-005
+    on the HLS path says where the switch is.
+    """
+    print("warm-up switch")
+    page = player_page()
+    style = "\n".join(re.findall(r"<style>(.*?)</style>", page, re.S))
+    first_video_rule = re.search(r"(^|\n)video \{([^}]*)\}", style).group(2)
+    check("opacity:0" in first_video_rule and "background:#05070a" in first_video_rule,
+          "the video rule is 1.4.0's: hidden until it plays")
+    check("ios-legacy" not in page and "iosMajorVersion" not in page,
+          "no visibility change and no iOS version detection")
+    tag = re.search(r'<video id="video"[^>]*>', page).group(0)
+    check("controls" in tag and "video.controls" not in page,
+          "native controls from the start, as in 1.4.0")
+
+    source = VIEWS.read_text()
+    check("const warmUp = {warm_up_json};" in source and "hls_warm_up: bool = False" in source,
+          "the page is told the switch's state, off unless set")
+    hls = page[page.index('transport = "hls";'):page.index("await startPlayback();")]
+    warm = hls[hls.index("if (warmUp) {"):]
+    check("await warmHls();" in warm and page.count("await warmHls();") == 1,
+          "the warm-up runs only behind the switch")
+    check('warmUp ? "native HLS, warm-up on" : "native HLS"' in hls,
+          "and the diagnostics timeline says whether it was on")
+    check("return warmUp ? message : `${message} ${WARM_UP_SUGGESTION}`;" in page
+          and "Warm up camera before starting" in page.split("const WARM_UP_SUGGESTION", 1)[1][:200],
+          "an E-005 with the switch off says where to turn it on")
+
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
+    check('id="warm-up" role="switch"' in panel and 'id="warm-up-info"' in panel
+          and 'aria-controls="warm-up-help"' in panel,
+          "the panel has the switch and an (i) that opens its explanation")
+    check('this._panelApi("POST", "/settings", { hls_warm_up: !!on })' in panel,
+          "and saves it through the settings endpoint")
+    check("entry.suggest_warm_up && !this._warmUpOn()" in panel and "data-warm-up-on" in panel,
+          "a Diagnostics entry with the #91 failure offers to turn it on")
+
+
 def test_diagnostics() -> None:
     """A failed live view offers a report, and copying it works on plain HTTP."""
     print("diagnostics")
@@ -294,6 +362,16 @@ def test_diagnostics() -> None:
           "tearing the player down is not recorded as part of the failure")
     check("&session=${session}" in page.split("function stopUrl()", 1)[1][:300],
           "the stop request joins the session's trace")
+    # Found on a Mac: mpegts.js fires durationchange ten times a second, the
+    # timeline hit its cap at 24 s, and the failure at 36 s never made it in.
+    check('"durationchange"' in page.split("const DIAG_NOISY", 1)[1].split("\n", 1)[0],
+          "durationchange is routine, kept only when the player's state changes")
+    note = page.split("function diagNote(", 1)[1].split("\nfunction ", 1)[0]
+    check("events.length >= DIAG_MAX_EVENTS) return" not in note
+          and "diag.events.splice(DIAG_HEAD, 1);" in note,
+          "a full timeline drops from the middle, so the end that failed is kept")
+    check("events: diagnosticsEvents()," in page and "events left out" in page,
+          "and the report says how much was left out")
 
     # Unsent reports: saved on the device by the player, sent later by the
     # player or by the dashboard script (which the panel loads too). The panel
@@ -351,6 +429,7 @@ def main() -> int:
     test_saving_state()
     test_start_watchdog()
     test_failure_codes()
+    test_warm_up_switch()
     test_diagnostics()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:

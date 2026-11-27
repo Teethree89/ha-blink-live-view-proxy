@@ -83,7 +83,7 @@ def make_session(tmp, script):
     config = {
         "ffmpeg": str(ffmpeg),
         "hls_dir": str(tmp / "hls"),
-        "hls_start_timeout": 3,
+        "hls_start_timeout": 3, "hls_min_segments": 0,
     }
     return HlsSession("testcam", HlsManager(FakeBroker(), config, tmp))
 

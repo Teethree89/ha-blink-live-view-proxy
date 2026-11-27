@@ -59,11 +59,12 @@ no Media Source Extensions and use native HLS. The add-on log shows which: an
 | `E-002` | MPEG-TS | Nothing arrived in 30 seconds. | The add-on log: did the live view start, and did Blink answer? |
 | `E-003` | MPEG-TS | Data arrived for 30 seconds but no picture started. | The stream itself: a codec or an announced track the browser waits for ([#80]). |
 | `E-004` | MPEG-TS | mpegts.js raised an error. The detail is its error type and kind, and the HTTP status if there was one: `NetworkError: HttpStatusCodeInvalid 503` is the proxy refusing the stream. | The detail first, then the add-on log at that time. |
-| `E-005` | HLS | Nothing was buffered in 30 seconds. Either the camera never started, or the device stopped asking for video. | The add-on log. `Cached the HLS live view` means the camera did send; no `/hls/segment_*.ts` requests means the device never asked ([#91]). |
+| `E-005` | HLS | Nothing was buffered in 30 seconds. Either the camera never started, or the device stopped asking for video. On iOS 18 the usual cause is a stream met cold; turn on **Warm up camera before starting** (Blink Proxy → Overview → Live view), and the message says so while it is off. | The add-on log. `Cached the HLS live view` means the camera did send; no `/hls/segment_*.ts` requests means the device never asked ([#91]). |
 | `E-006` | HLS | Video was buffered for 30 seconds but no picture started. | The segments: `ffprobe` one from `/data/hls/<camera>/`. |
 | `E-007` | HLS | The video element reported an error. The detail is its media error code: 2 network, 3 decode, 4 not supported. Safari reports a playlist request the server refused as 4. | The integration's playlist response, then the add-on log. |
 | `E-008` | Either | The browser wanted a tap to start, and none came before the session limit. | Nothing is broken. |
 | `E-009` | Either | Save MP4 failed. The detail is the HTTP status of the last attempt. | Whether the live view played at all; a session that never started has nothing to save. |
+| `E-011` | HLS, with "Warm up camera before starting" on | The page's warm-up request, which starts the stream before the video player sees it, was refused. The detail is the HTTP status: 403 a stale token (refresh the dashboard), 429 Blink's live-view cooldown, 503 the add-on not ready, 504 the camera did not start sending video in time, 502 the add-on failed. | The status first; for 502 and 504 the add-on log at that time. |
 | `E-010` | — | The dashboard opened the dialog before the camera's access token was ready. | Refresh the dashboard. If it persists, the camera entity has no `access_token` attribute. |
 
 Codes are never reused. A code that stops being raised is retired, and its

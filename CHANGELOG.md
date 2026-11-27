@@ -9,6 +9,77 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
+## [1.4.1] — 2026-11-26
+
+Live view on iPhones and iPads running iOS 17 and 18 now works, behind a new
+switch: **Blink Proxy → Overview → Live view → Warm up camera before
+starting**, off by default
+([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+Turn it on if a live view on an iPhone or iPad ends in `E-005`. With it off,
+live view behaves exactly as in 1.4.0. The integration and the add-on both
+changed; update both. No Blink reauthentication is needed.
+
+### Fixed
+
+- **Live view never started on iPhones and iPads running iOS 18**
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91),
+  reported by @ussoccer18). iOS 18 read the HLS playlist, reloaded it once,
+  and then never asked for a segment or reported an error, until the page gave
+  up with `E-005`. It happened only on a cold start: the first playlist
+  request had to wake the camera, took two to five seconds, and answered with
+  a playlist a few segments old. With the stream already running, the same
+  page played the same camera. Copy diagnostics, from 1.4.0, is what narrowed
+  this down.
+
+  The fix is a switch, **Warm up camera before starting**, in Blink Proxy →
+  Overview → Live view, **off by default**, with an ⓘ that explains it. On, the
+  player on iPhone and iPad fetches the playlist itself first, which waits out
+  the camera, and only then gives the address to the video element, which gets
+  an immediate answer from a running stream. Confirmed from a cold start on an
+  iPhone on iOS 18 and an iPad on iPadOS 18.6, with a Blink Mini and with
+  cameras that send a keyframe every 4 seconds; it adds no time to the start. Off, nothing
+  changes from 1.4.0. A switch rather than a guess at the iOS version, because
+  Safari on iOS 26 and later reports "OS 18" in its user agent. With it off,
+  an `E-005` on iPhone or iPad says where to turn it on, the diagnostics verdict
+  for that failure suggests it, and the panel's Diagnostics list offers a
+  **Turn it on** button next to the entry. Diagnostics list the request as
+  `playlist warm-up`.
+- **A camera too slow to start is reported as such.** When no playlist
+  appeared within `hls_start_timeout`, the add-on let the error escape and
+  answered a bare `500 Internal Server Error`, which reads as the proxy
+  crashing. It now answers `504` saying the camera did not start sending video
+  in time (and `502` naming ffmpeg if ffmpeg died), the integration passes the
+  504 on, and the diagnostics verdict says the camera may be asleep or offline.
+  Seen on a driveway camera's first live view after the add-on restarted.
+- **With the warm-up on, a stream that could not be started says so at once.**
+  When the player's warm-up request is refused, the live view now ends
+  immediately with a new code, `E-011`, and the HTTP status, instead of waiting
+  out the 30-second start limit and showing the vaguer `E-005`.
+- **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
+  the `; charset=utf-8` that aiohttp appended. Apple's `mediastreamvalidator`
+  rejects the latter as an illegal MIME type (451001). Not the cause of #91,
+  but a must-fix by Apple's rules. Integration and add-on both changed.
+- **A long live view's diagnostics kept the beginning and lost the end.**
+  mpegts.js reports a duration change about ten times a second, and each one
+  was recorded, so the timeline reached its 300-event cap within 24 seconds
+  and whatever failed after that was not in it. Routine events are now kept
+  only when the player's state changes, and past the cap the middle is
+  dropped, with a marker saying how much, rather than the end.
+
+### Added
+
+- **`hls_keyframe_segments`** (default off; add-on option, optional). Cuts HLS
+  segments only at the camera's keyframes, so every segment decodes on its own.
+  Off, ffmpeg cuts a segment every second with `split_by_time`, and on a Blink
+  Mini half the segments start without a keyframe, which Apple's validator
+  calls a must-fix (541007). On, segments are one keyframe interval long (2 s
+  on a Mini, 4 s on most Blink cameras) and the live view starts later. Not
+  needed for iOS 17 or 18: with the warm-up on, a Mini and cameras with 4-second
+  keyframes both stream there without it.
+- **`hls_min_segments`** (default `0`). Holds the first playlist back until it
+  lists that many segments, for players that keep strictly to the HLS rule of
+  starting three target durations from the end. About a second per segment.
+
 ## [1.4.0] — 2026-11-25
 
 Live-view failures now say what went wrong and can be reported. Every failure

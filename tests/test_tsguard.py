@@ -453,7 +453,7 @@ def hls_arguments(tmp: pathlib.Path) -> list[str]:
     recorder.chmod(0o755)
 
     async def go() -> list[str]:
-        config = {"ffmpeg": str(recorder), "hls_dir": str(tmp / "hls"), "hls_start_timeout": 3}
+        config = {"ffmpeg": str(recorder), "hls_dir": str(tmp / "hls"), "hls_start_timeout": 3, "hls_min_segments": 0}
         session = HlsSession("cam", HlsManager(_Broker(), config, tmp))
         await session.start()
         await session.wait_ready()

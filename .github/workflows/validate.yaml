@@ -130,6 +130,12 @@ jobs:
       - name: HLS playlist tests
         run: python tests/test_playlist.py
 
+      - name: First HLS playlist waits for enough segments
+        run: python tests/test_hls_start.py
+
+      - name: Add-on HLS playlist route errors and type
+        run: python tests/test_hls_playlist_route.py
+
       - name: Live view trace and diagnostics tests
         run: python tests/test_liveview_trace.py
 

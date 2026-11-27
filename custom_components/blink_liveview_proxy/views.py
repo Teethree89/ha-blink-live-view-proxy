@@ -31,6 +31,7 @@ from .liveview_trace import (
     history,
     playlist_segment_count,
     safe_code,
+    suggests_warm_up,
     valid_session,
     verdict,
 )
@@ -82,6 +83,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyStopView(hass))
     hass.http.register_view(BlinkLiveviewProxyDiagnosticsView(hass))
     hass.http.register_view(BlinkLiveviewProxyPanelDiagnosticsView(hass))
+    hass.http.register_view(BlinkLiveviewProxyPanelSettingsView(hass))
     hass.http.register_view(BlinkLiveviewProxyControlsView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
@@ -377,6 +379,34 @@ def _save_report_log(log: ReportLog, store: Any) -> None:
     store.async_delay_save(lambda: {"reports": list(log.reports)}, 5)
 
 
+# Live-view settings the admin panel changes. A store of their own rather than
+# the config entry's options: changing those reloads the whole integration.
+SETTINGS_STORE_KEY = f"{DOMAIN}.liveview_settings"
+SETTINGS_STORE_VERSION = 1
+DEFAULT_LIVEVIEW_SETTINGS: dict[str, Any] = {
+    # Fetch the HLS playlist before handing it to the video element (#91).
+    "hls_warm_up": False,
+}
+
+
+async def _liveview_settings(hass: HomeAssistant) -> tuple[dict[str, Any], Any]:
+    """The live-view settings and the store behind them, loaded on first use."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "_liveview_settings" not in data:
+        from homeassistant.helpers.storage import Store
+
+        store = Store(hass, SETTINGS_STORE_VERSION, SETTINGS_STORE_KEY)
+        stored = await store.async_load()
+        if "_liveview_settings" not in data:
+            settings = dict(DEFAULT_LIVEVIEW_SETTINGS)
+            if isinstance(stored, dict):
+                for key, default in DEFAULT_LIVEVIEW_SETTINGS.items():
+                    if isinstance(stored.get(key), type(default)):
+                        settings[key] = stored[key]
+            data["_liveview_settings"] = (settings, store)
+    return data["_liveview_settings"]
+
+
 async def _integration_version(hass: HomeAssistant) -> str:
     from homeassistant.loader import async_get_integration
 
@@ -545,6 +575,14 @@ async def _open_proxy_response(
             text=body or "Requested range not satisfiable\n",
             headers={"Content-Range": content_range} if content_range else None,
         )
+    if response.status == 504:
+        # The camera did not start in time. Not the gateway failing, which is
+        # what a 502 would tell the browser and the diagnostics verdict.
+        body = await response.text()
+        response.close()
+        raise web.HTTPGatewayTimeout(
+            text=body or "The camera did not start sending video in time\n"
+        )
     if response.status == 429:
         retry_after = response.headers.get("Retry-After", "30")
         body = await response.text()
@@ -627,6 +665,7 @@ def _player_html(
     slug: str,
     camera: dict[str, Any],
     access_token: str,
+    hls_warm_up: bool = False,
 ) -> str:
     """Return the direct live-view player page."""
     safe_slug = quote(slug, safe="")
@@ -635,6 +674,7 @@ def _player_html(
     token_json = json.dumps(access_token)
     stream_seconds = _stream_seconds(hass)
     ptt_supported = json.dumps(bool(camera.get("ptt_supported", True)))
+    warm_up_json = json.dumps(bool(hls_warm_up))
 
     return f"""<!doctype html>
 <html lang="en">
@@ -1506,6 +1546,8 @@ const slug = "{safe_slug}";
 const seconds = {stream_seconds};
 const accessToken = {token_json};
 const pttSupported = {ptt_supported};
+// "Warm up camera before starting", from the Blink Proxy panel (#91).
+const warmUp = {warm_up_json};
 const sessionId = window.crypto && crypto.randomUUID
   ? crypto.randomUUID()
   : `${{Date.now()}}-${{Math.random().toString(36).slice(2)}}`;
@@ -1535,6 +1577,9 @@ let tapNeeded = false;
 // Which player this live view runs on: "mse" (mpegts.js) or "hls" (native).
 // The same symptom means different things on the two, so the codes differ.
 let transport = "";
+// Bumped whenever the player is torn down, so a start that was waiting on the
+// network can tell it has been ended or replaced in the meantime.
+let playerGeneration = 0;
 let talkWs = null;
 let talkStream = null;
 let talkContext = null;
@@ -1679,10 +1724,10 @@ function streamUrl() {{
   return new URL(path, window.location.origin).href;
 }}
 
-function hlsUrl() {{
+function hlsUrl(warm = false) {{
   const token = encodeURIComponent(accessToken || "");
   const session = encodeURIComponent(sessionId);
-  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/hls/index.m3u8?token=${{token}}&seconds=${{seconds}}&force=1&session=${{session}}&cache=${{Date.now()}}`;
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/hls/index.m3u8?token=${{token}}&seconds=${{seconds}}&force=1&session=${{session}}&cache=${{Date.now()}}${{warm ? "&warm=1" : ""}}`;
   return new URL(path, window.location.origin).href;
 }}
 
@@ -2051,6 +2096,7 @@ function setEnded(message) {{
 }}
 
 function stopPlayer() {{
+  playerGeneration += 1;
   stopTalk();
   // Tearing the player down fires events of its own (emptied, abort) that
   // are not part of what went wrong.
@@ -2107,6 +2153,9 @@ const FAILURES = {{
   // Either path.
   "E-008": "Live view never started because play was not tapped. Restart to try again.",
   "E-009": "Could not save the last live view.",
+  // HLS: the page's warm-up request was refused, so there is no stream to
+  // play. Said at once, with the status, instead of after thirty seconds.
+  "E-011": "The stream could not be started. Restart to try again.",
 }};
 
 // The message for a code, with the code and any detail the player gave after
@@ -2136,8 +2185,17 @@ const DIAG_EVENTS = [
   "suspend", "progress", "seeking", "seeked", "ended", "error", "abort",
 ];
 // Fired again and again with nothing new to say; kept only on a change.
-const DIAG_NOISY = new Set(["progress", "suspend", "timeupdate", "state"]);
+//
+// mpegts.js fires durationchange about ten times a second for as long as the
+// stream runs, and a healthy buffer changes depth just as often. Recorded
+// each time, they filled the timeline in 24 seconds and pushed out the
+// failure the report was for. Routine events are now kept only when the
+// player's state changes (network, ready, paused, or whether anything is
+// buffered at all), and past the cap the middle goes, never the end.
+const DIAG_NOISY = new Set(["progress", "suspend", "timeupdate", "state", "durationchange"]);
 const DIAG_MAX_EVENTS = 300;
+// Kept from the start when the timeline overflows; the rest is the latest.
+const DIAG_HEAD = 100;
 let diag = null;
 let diagReport = "";
 // Which live view the page is on, and which one diagnostics were last
@@ -2161,16 +2219,32 @@ function diagState() {{
 }}
 
 function diagNote(name, detail) {{
-  if (!diag || diag.closed || diag.events.length >= DIAG_MAX_EVENTS) return;
+  if (!diag || diag.closed) return;
   const state = diagState();
-  const key = `${{state.ns}}/${{state.rs}}/${{state.buf}}/${{state.paused}}`;
+  const key = `${{state.ns}}/${{state.rs}}/${{state.buf > 0}}/${{state.paused}}`;
   if (DIAG_NOISY.has(name) && key === diag.lastKey) return;
   diag.lastKey = key;
   if (state.buf > 0) diag.buffered = true;
   if (name === "playing") diag.played = true;
   const event = {{ t: Math.round((performance.now() - diag.t0) / 100) / 10, e: name, ...state }};
   if (detail) event.d = String(detail).slice(0, 80);
+  if (diag.events.length >= DIAG_MAX_EVENTS) {{
+    diag.events.splice(DIAG_HEAD, 1);
+    diag.dropped += 1;
+  }}
   diag.events.push(event);
+}}
+
+// The timeline as sent: when the middle had to go, a marker says how much.
+function diagnosticsEvents() {{
+  if (!diag) return [];
+  if (!diag.dropped) return diag.events;
+  const next = diag.events[DIAG_HEAD];
+  return [
+    ...diag.events.slice(0, DIAG_HEAD),
+    {{ t: next ? next.t : 0, e: "...", d: `${{diag.dropped}} events left out` }},
+    ...diag.events.slice(DIAG_HEAD),
+  ];
 }}
 
 function startDiagnostics() {{
@@ -2179,6 +2253,7 @@ function startDiagnostics() {{
     t0: performance.now(),
     wall: Date.now(),
     events: [],
+    dropped: 0,
     lastKey: "",
     buffered: false,
     played: false,
@@ -2235,7 +2310,7 @@ function diagnosticsPayload() {{
     played: !!(diag && diag.played),
     buffered: !!(diag && diag.buffered),
     bytes_arrived: bytesArrived,
-    events: diag ? diag.events : [],
+    events: diagnosticsEvents(),
     // For a report that has to wait: which live view, of which camera, and
     // when it failed rather than when it was finally sent.
     session: sessionId,
@@ -2450,9 +2525,16 @@ function armStartWatchdog() {{
   }}, START_TIMEOUT_MS);
 }}
 
+// E-005 on iPhone or iPad is what "Warm up camera before starting" fixes on
+// iOS 18 (#91), so with it off the message says where to find it.
+const WARM_UP_SUGGESTION =
+  "If this keeps happening on this device, an admin can turn on \u201cWarm up camera before starting\u201d in Blink Proxy.";
+
 function noPictureMessage() {{
   if (transport === "hls") {{
-    return failureMessage(video.buffered.length > 0 ? "E-006" : "E-005");
+    if (video.buffered.length > 0) return failureMessage("E-006");
+    const message = failureMessage("E-005");
+    return warmUp ? message : `${{message}} ${{WARM_UP_SUGGESTION}}`;
   }}
   return failureMessage(bytesArrived || video.buffered.length > 0 ? "E-003" : "E-002");
 }}
@@ -2465,6 +2547,32 @@ function sessionLimitMessage() {{
   // first thing to notice a tap that never came.
   if (tapNeeded && video.paused) return failureMessage("E-008");
   return noPictureMessage();
+}}
+
+// Start the stream before the video element sees it (#91), when "Warm up
+// camera before starting" is on in the Blink Proxy panel.
+//
+// The first playlist request wakes the camera and starts ffmpeg, so it takes
+// seconds and answers with a playlist only a few segments old. iOS 18 reads
+// that playlist and then never asks for a segment: the same page played the
+// same camera on iOS 18 when the stream was already running, and failed every
+// time it was not. So the page fetches the playlist itself first, which
+// blocks until the stream is up, and only then hands the address to the
+// video element, which gets an immediate answer from a running stream.
+// Off by default, and only the HLS path (iPhone and iPad) uses it.
+// Returns the HTTP status, or 0 when the request never got an answer.
+async function warmHls() {{
+  const started = performance.now();
+  diagNote("warming stream");
+  try {{
+    const response = await fetch(hlsUrl(true), {{ cache: "no-store", credentials: "same-origin" }});
+    diagNote("stream warm", `HTTP ${{response.status}} after ${{Math.round(performance.now() - started)}} ms`);
+    return response.status;
+  }} catch (err) {{
+    // The video element will meet the same failure and report it with a code.
+    diagNote("stream warm failed", err && err.name);
+    return 0;
+  }}
 }}
 
 async function startPlayer() {{
@@ -2486,7 +2594,23 @@ async function startPlayer() {{
     // MPEG-TS player always dies with E-001b. They do play HLS natively, and
     // the proxy already produces an HLS rendition, so use it.
     transport = "hls";
-    diagNote("path", "native HLS");
+    diagNote("path", warmUp ? "native HLS, warm-up on" : "native HLS");
+    // Armed before any warm-up, so the thirty seconds cover waking the camera
+    // too, as they always have.
+    armStartWatchdog();
+    if (warmUp) {{
+      const generation = playerGeneration;
+      const warmStatus = await warmHls();
+      // Ended, restarted or timed out while the camera woke: nothing to start.
+      if (generation !== playerGeneration) return;
+      // Refused outright (a stale token, Blink's cooldown, a camera that did
+      // not start): handing the video element the same request only fails it
+      // again, more vaguely. With no answer at all, it does try, and reports.
+      if (warmStatus >= 400) {{
+        endSession(failureMessage("E-011", `HTTP ${{warmStatus}}`));
+        return;
+      }}
+    }}
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
@@ -2509,9 +2633,9 @@ async function startPlayer() {{
     }};
     video.src = hlsUrl();
     video.load();
-    // Before the await, not after: play() does not settle until media is
-    // playing, so on a stream that never starts nothing below it would ever run.
-    armStartWatchdog();
+    // The watchdog was armed before the warm-up, which is before this await:
+    // play() does not settle until media is playing, so on a stream that never
+    // starts nothing below it would ever run.
     await startPlayback();
     // A browser that wants a tap is waiting for the viewer, not stalled.
     if (tapNeeded) disarmStartWatchdog();
@@ -3083,8 +3207,11 @@ class BlinkLiveviewProxyPlayerView(HomeAssistantView):
         access_token = _authorize_browser_request(
             self.hass, request, slug, issue_browser_token=True
         )
+        settings, _store = await _liveview_settings(self.hass)
         return web.Response(
-            text=_player_html(self.hass, slug, camera, access_token),
+            text=_player_html(
+                self.hass, slug, camera, access_token, bool(settings["hls_warm_up"])
+            ),
             content_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
@@ -3173,7 +3300,10 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
     async def get(self, request: web.Request, slug: str) -> web.Response:
         """Return the playlist with tokenised segment URIs."""
         _camera(self.hass, slug)
-        with _Traced(self.hass, request, slug, "playlist") as record:
+        # The player's own warm-up fetch (#91) is recorded apart from the video
+        # element's requests, which the verdict reads.
+        name = "warm-up" if request.query.get("warm") == "1" else ""
+        with _Traced(self.hass, request, slug, "playlist", name) as record:
             _authorize_traced(self.hass, request, slug, record)
             session = request.query.get("session", "")
             query = {
@@ -3196,11 +3326,15 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
             return web.Response(
                 # The session rides along on each segment URI so those requests
                 # land in the same trace as the playlist that listed them.
-                text=tokenise_playlist(
+                #
+                # Bytes, not text: given text, aiohttp sends the type as
+                # "application/vnd.apple.mpegurl; charset=utf-8", which Apple's
+                # mediastreamvalidator rejects as an illegal MIME type (451001).
+                body=tokenise_playlist(
                     text,
                     request.query.get("token", ""),
                     session=session if valid_session(session) else "",
-                ),
+                ).encode("utf-8"),
                 content_type="application/vnd.apple.mpegurl",
                 headers={"Cache-Control": "no-store"},
             )
@@ -3427,6 +3561,8 @@ class BlinkLiveviewProxyDiagnosticsView(HomeAssistantView):
             "code": code,
             "verdict": summary,
             "queued": bool(client.get("queued")),
+            # For the panel, which offers to turn the warm-up on (#91).
+            "suggest_warm_up": suggests_warm_up(server, client),
             "report": report,
         })
         _save_report_log(log, store)
@@ -4846,10 +4982,40 @@ class BlinkLiveviewProxyPanelView(HomeAssistantView):
         secure_context = (
             None if reported not in ("0", "1") else reported == "1"
         )
-        return web.json_response(
-            await _panel_payload(self.hass, secure_context),
-            headers=AUTH_VIEW_HEADERS,
-        )
+        payload = await _panel_payload(self.hass, secure_context)
+        settings, _store = await _liveview_settings(self.hass)
+        payload["settings"] = dict(settings)
+        return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
+
+
+class BlinkLiveviewProxyPanelSettingsView(HomeAssistantView):
+    """Change the live-view settings from the admin panel."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel/settings"
+    name = "api:blink_liveview_proxy:panel_settings"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except ValueError as err:
+            raise web.HTTPBadRequest(text="Expected a JSON object\n") from err
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="Expected a JSON object\n")
+        settings, store = await _liveview_settings(self.hass)
+        for key, value in body.items():
+            default = DEFAULT_LIVEVIEW_SETTINGS.get(key)
+            if default is None:
+                raise web.HTTPBadRequest(text=f"Unknown setting: {key}\n")
+            if not isinstance(value, type(default)):
+                raise web.HTTPBadRequest(text=f"{key} must be {type(default).__name__}\n")
+            settings[key] = value
+        store.async_delay_save(lambda: dict(settings), 1)
+        return web.json_response({"settings": dict(settings)}, headers=AUTH_VIEW_HEADERS)
 
 
 class BlinkLiveviewProxyInstallationTestView(HomeAssistantView):

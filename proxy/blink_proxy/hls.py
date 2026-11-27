@@ -85,7 +85,16 @@ class HlsSession:
         # playlist can declare a 1 s target and iOS starts after ~3 s instead of
         # ~12. Only every fourth segment opens on a keyframe; a player that lands
         # mid-group waits for the next one, so the window keeps 8 s available.
+        #
+        # Apple's mediastreamvalidator calls that a MUST-fix (541007: video
+        # segment does not contain an IDR frame), and iOS 18 never starts the
+        # stream (#91). hls_keyframe_segments cuts only at keyframes instead:
+        # every segment decodes on its own, at the cost of segments one
+        # keyframe interval long (2-4 s on Blink) and a slower start.
         codec_args = ["-c", "copy"]
+        hls_flags = ["delete_segments", "omit_endlist", "program_date_time"]
+        if not bool(self.manager.config.get("hls_keyframe_segments", False)):
+            hls_flags.append("split_by_time")
 
         log_handle = open(self.log_path, "wb")
         try:
@@ -118,7 +127,7 @@ class HlsSession:
                 "-hls_list_size",
                 "8",
                 "-hls_flags",
-                "delete_segments+omit_endlist+program_date_time+split_by_time",
+                "+".join(hls_flags),
                 "-hls_segment_filename",
                 str(segment_pattern),
                 str(self.playlist),
@@ -146,8 +155,29 @@ class HlsSession:
             return ""
         return text[-limit:]
 
+    def _segment_count(self) -> int:
+        """How many media segments the playlist on disk lists right now."""
+        try:
+            text = self.playlist.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return 0
+        return sum(1 for line in text.splitlines() if line and not line.startswith("#"))
+
     async def wait_ready(self) -> None:
+        """Wait until the playlist exists, or lists hls_min_segments segments.
+
+        ffmpeg writes the playlist as soon as the first segment is cut, and the
+        HLS spec has a player start no closer than three target durations to
+        the end, so a playlist that young is one a strict player may not start
+        from. hls_min_segments holds the first one back until it is longer, at
+        about a second per segment. It defaults to 0: tried for #91, it did
+        not make iOS 18 play, and the player's own warm-up did.
+
+        If they do not arrive within hls_start_timeout, whatever playlist
+        exists is served rather than failing a live view that may yet play.
+        """
         timeout = float(self.manager.config.get("hls_start_timeout", 30))
+        wanted = max(0, int(self.manager.config.get("hls_min_segments", 0)))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             # A client waiting here is active; keep the idle reaper off it.
@@ -162,8 +192,18 @@ class HlsSession:
                 )
                 raise RuntimeError(f"ffmpeg exited with {self.process.returncode}")
             if self.playlist.exists() and self.playlist.stat().st_size > 0:
-                return
+                if wanted == 0 or self._segment_count() >= wanted:
+                    return
             await asyncio.sleep(0.2)
+        if self.playlist.exists() and self.playlist.stat().st_size > 0:
+            LOGGER.warning(
+                "HLS playlist for %s listed %d of %d segments after %.0fs; serving it anyway",
+                self.slug,
+                self._segment_count(),
+                wanted,
+                timeout,
+            )
+            return
         tail = self._ffmpeg_error_tail()
         LOGGER.error(
             "HLS playlist never appeared for %s after %.0fs and ffmpeg is still "

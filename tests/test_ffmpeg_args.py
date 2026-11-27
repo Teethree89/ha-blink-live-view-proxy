@@ -74,7 +74,7 @@ async def record_args(extra_config):
         ffmpeg = tmp / "fake-ffmpeg"
         ffmpeg.write_text(RECORDER)
         ffmpeg.chmod(0o755)
-        config = {"ffmpeg": str(ffmpeg), "hls_dir": str(tmp / "hls"), "hls_start_timeout": 3}
+        config = {"ffmpeg": str(ffmpeg), "hls_dir": str(tmp / "hls"), "hls_start_timeout": 3, "hls_min_segments": 0}
         config.update(extra_config)
         session = HlsSession("testcam", HlsManager(FakeBroker(), config, tmp))
         await session.start()
@@ -172,6 +172,13 @@ async def main():
         "copied segments are cut on the clock",
         "split_by_time" in option(args, "-hls_flags").split("+"),
         "split_by_time is in -hls_flags so segments are 1 s, not one GOP",
+    )
+    keyframed = await record_args({"hls_keyframe_segments": True})
+    check(
+        "hls_keyframe_segments cuts only at keyframes",
+        "split_by_time" not in option(keyframed, "-hls_flags").split("+")
+        and option(keyframed, "-c") == "copy",
+        "split_by_time is dropped and the stream is still copied (Apple 541007, #91)",
     )
     check(
         "no encoder is configured at all",

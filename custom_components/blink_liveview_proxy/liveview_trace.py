@@ -197,6 +197,7 @@ def _status_hint(status: int | None) -> str:
         429: "Blink's live-view cooldown is active; wait and try again",
         502: "the add-on did not answer, or failed",
         503: "the add-on is not ready (signing in to Blink, or reconnecting)",
+        504: "the camera did not start sending video in time; it may be asleep or offline",
     }.get(status or 0, "")
 
 
@@ -207,6 +208,30 @@ def _refused(records: list[dict[str, Any]], what: str) -> str:
     shown = ", ".join(str(s) for s in statuses)
     hint = _status_hint(statuses[-1])
     return f"Home Assistant refused the {what} (HTTP {shown})" + (f": {hint}." if hint else ".")
+
+
+WARM_UP_SUGGESTION = (
+    "On iOS 18 this is fixed by turning on \u201cWarm up camera before starting\u201d "
+    "in Blink Proxy."
+)
+
+
+def suggests_warm_up(server: dict[str, Any] | None, client: dict[str, Any]) -> bool:
+    """Whether this is the #91 shape that "Warm up camera before starting" fixes.
+
+    An HLS live view that read the playlist and then never asked for a
+    segment, started without the page's warm-up. With the warm-up already on,
+    suggesting it again would be no help.
+    """
+    if (client.get("transport") or "") != "hls" or client.get("played") or client.get("queued"):
+        return False
+    requests = (server or {}).get("requests", [])
+    playlists = [r for r in requests if r["kind"] == "playlist"]
+    if any(r.get("name") == "warm-up" for r in playlists):
+        return False
+    served = [r for r in playlists if _ok(r)]
+    segments = [r for r in requests if r["kind"] == "segment"]
+    return bool(served) and not segments and len(served) <= 2
 
 
 def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
@@ -244,11 +269,18 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
                 "Assistant was restarting.")
 
     if transport == "hls":
-        playlists = [r for r in requests if r["kind"] == "playlist"]
+        every_playlist = [r for r in requests if r["kind"] == "playlist"]
+        # The page's own warm-up fetch is not the video player asking (#91).
+        playlists = [r for r in every_playlist if r.get("name") != "warm-up"]
         segments = [r for r in requests if r["kind"] == "segment"]
-        if not playlists:
+        if not every_playlist:
             return ("No playlist request reached Home Assistant. The device could not "
                     "reach it at this address, or the player never asked.")
+        if not any(_ok(r) for r in every_playlist):
+            return _refused(every_playlist, "playlist")
+        if not playlists:
+            return ("The page started the stream, but the device's video player never "
+                    "asked for it.")
         good = [r for r in playlists if _ok(r)]
         if not good:
             return _refused(playlists, "playlist")
@@ -256,9 +288,12 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
             if len(good) > 2:
                 return ("The device kept reloading the playlist but never requested a "
                         "segment. The playlist may not have had enough video to start from.")
-            return ("The device received the playlist and then stopped asking: no segment "
+            text = ("The device received the playlist and then stopped asking: no segment "
                     "request and no playlist reload reached Home Assistant. The cause is on "
                     "the device (see issue #91), not the camera or the proxy.")
+            if suggests_warm_up(server, client):
+                text += f" {WARM_UP_SUGGESTION}"
+            return text
         failed = [r for r in segments if not _ok(r)]
         if failed and len(failed) == len(segments):
             return _refused(failed, "segments")

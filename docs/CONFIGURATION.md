@@ -278,6 +278,26 @@ camera to start counts as active, so the idle timeout can be shorter than
 `hls_start_timeout` (default `30`), the longest the proxy will wait for the
 first segment before failing the request.
 
+`hls_min_segments` (default `0`) holds the first playlist back until it lists
+that many segments. ffmpeg writes the playlist as soon as the first segment
+exists, and the HLS spec has a player start at least three target durations
+from the end, so a strict player may not start from one that young. Each
+segment held back costs about a second of start-up. It was tried for iOS 18
+([#91]) and did not make it play; the player warming the stream first did. If
+the camera has not produced that many by `hls_start_timeout`, the playlist is
+served with what it has rather than failed.
+
+`hls_keyframe_segments` (default `false`) cuts segments only at the camera's
+keyframes instead of every second. Every segment then starts with a keyframe,
+which Apple requires (its `mediastreamvalidator` reports 541007, "video segment
+does not contain an IDR frame", without it), at the cost of segments one
+keyframe interval long and a slower start: about 6 s on a Blink Mini, which
+sends a keyframe every 2 s, and about 12 s on cameras that send one every 4 s.
+On the add-on it is optional and not shown by default; add
+`hls_keyframe_segments: true` in the add-on's Configuration, "Edit in YAML".
+
+[#91]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91
+
 ### `send_liveview_token`
 
 Stock BlinkPy sends 64 null bytes in the auth-token field of the IMMI
