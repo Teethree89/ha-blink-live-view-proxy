@@ -244,11 +244,18 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
                 "Assistant was restarting.")
 
     if transport == "hls":
-        playlists = [r for r in requests if r["kind"] == "playlist"]
+        every_playlist = [r for r in requests if r["kind"] == "playlist"]
+        # The page's own warm-up fetch is not the video player asking (#91).
+        playlists = [r for r in every_playlist if r.get("name") != "warm-up"]
         segments = [r for r in requests if r["kind"] == "segment"]
-        if not playlists:
+        if not every_playlist:
             return ("No playlist request reached Home Assistant. The device could not "
                     "reach it at this address, or the player never asked.")
+        if not any(_ok(r) for r in every_playlist):
+            return _refused(every_playlist, "playlist")
+        if not playlists:
+            return ("The page started the stream, but the device's video player never "
+                    "asked for it.")
         good = [r for r in playlists if _ok(r)]
         if not good:
             return _refused(playlists, "playlist")

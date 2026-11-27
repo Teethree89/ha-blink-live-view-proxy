@@ -1541,6 +1541,9 @@ let tapNeeded = false;
 // Which player this live view runs on: "mse" (mpegts.js) or "hls" (native).
 // The same symptom means different things on the two, so the codes differ.
 let transport = "";
+// Bumped whenever the player is torn down, so a start that was waiting on the
+// network can tell it has been ended or replaced in the meantime.
+let playerGeneration = 0;
 let talkWs = null;
 let talkStream = null;
 let talkContext = null;
@@ -1685,10 +1688,10 @@ function streamUrl() {{
   return new URL(path, window.location.origin).href;
 }}
 
-function hlsUrl() {{
+function hlsUrl(warm = false) {{
   const token = encodeURIComponent(accessToken || "");
   const session = encodeURIComponent(sessionId);
-  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/hls/index.m3u8?token=${{token}}&seconds=${{seconds}}&force=1&session=${{session}}&cache=${{Date.now()}}`;
+  const path = `/api/blink_liveview_proxy/cameras/${{slug}}/hls/index.m3u8?token=${{token}}&seconds=${{seconds}}&force=1&session=${{session}}&cache=${{Date.now()}}${{warm ? "&warm=1" : ""}}`;
   return new URL(path, window.location.origin).href;
 }}
 
@@ -2057,6 +2060,7 @@ function setEnded(message) {{
 }}
 
 function stopPlayer() {{
+  playerGeneration += 1;
   stopTalk();
   // Tearing the player down fires events of its own (emptied, abort) that
   // are not part of what went wrong.
@@ -2142,8 +2146,17 @@ const DIAG_EVENTS = [
   "suspend", "progress", "seeking", "seeked", "ended", "error", "abort",
 ];
 // Fired again and again with nothing new to say; kept only on a change.
-const DIAG_NOISY = new Set(["progress", "suspend", "timeupdate", "state"]);
+//
+// mpegts.js fires durationchange about ten times a second for as long as the
+// stream runs, and a healthy buffer changes depth just as often. Recorded
+// each time, they filled the timeline in 24 seconds and pushed out the
+// failure the report was for. Routine events are now kept only when the
+// player's state changes (network, ready, paused, or whether anything is
+// buffered at all), and past the cap the middle goes, never the end.
+const DIAG_NOISY = new Set(["progress", "suspend", "timeupdate", "state", "durationchange"]);
 const DIAG_MAX_EVENTS = 300;
+// Kept from the start when the timeline overflows; the rest is the latest.
+const DIAG_HEAD = 100;
 let diag = null;
 let diagReport = "";
 // Which live view the page is on, and which one diagnostics were last
@@ -2167,16 +2180,32 @@ function diagState() {{
 }}
 
 function diagNote(name, detail) {{
-  if (!diag || diag.closed || diag.events.length >= DIAG_MAX_EVENTS) return;
+  if (!diag || diag.closed) return;
   const state = diagState();
-  const key = `${{state.ns}}/${{state.rs}}/${{state.buf}}/${{state.paused}}`;
+  const key = `${{state.ns}}/${{state.rs}}/${{state.buf > 0}}/${{state.paused}}`;
   if (DIAG_NOISY.has(name) && key === diag.lastKey) return;
   diag.lastKey = key;
   if (state.buf > 0) diag.buffered = true;
   if (name === "playing") diag.played = true;
   const event = {{ t: Math.round((performance.now() - diag.t0) / 100) / 10, e: name, ...state }};
   if (detail) event.d = String(detail).slice(0, 80);
+  if (diag.events.length >= DIAG_MAX_EVENTS) {{
+    diag.events.splice(DIAG_HEAD, 1);
+    diag.dropped += 1;
+  }}
   diag.events.push(event);
+}}
+
+// The timeline as sent: when the middle had to go, a marker says how much.
+function diagnosticsEvents() {{
+  if (!diag) return [];
+  if (!diag.dropped) return diag.events;
+  const next = diag.events[DIAG_HEAD];
+  return [
+    ...diag.events.slice(0, DIAG_HEAD),
+    {{ t: next ? next.t : 0, e: "...", d: `${{diag.dropped}} events left out` }},
+    ...diag.events.slice(DIAG_HEAD),
+  ];
 }}
 
 function startDiagnostics() {{
@@ -2185,6 +2214,7 @@ function startDiagnostics() {{
     t0: performance.now(),
     wall: Date.now(),
     events: [],
+    dropped: 0,
     lastKey: "",
     buffered: false,
     played: false,
@@ -2241,7 +2271,7 @@ function diagnosticsPayload() {{
     played: !!(diag && diag.played),
     buffered: !!(diag && diag.buffered),
     bytes_arrived: bytesArrived,
-    events: diag ? diag.events : [],
+    events: diagnosticsEvents(),
     // For a report that has to wait: which live view, of which camera, and
     // when it failed rather than when it was finally sent.
     session: sessionId,
@@ -2473,6 +2503,28 @@ function sessionLimitMessage() {{
   return noPictureMessage();
 }}
 
+// Start the stream before the video element sees it (#91).
+//
+// The first playlist request wakes the camera and starts ffmpeg, so it takes
+// seconds and answers with a playlist only a few segments old. iOS 18 reads
+// that playlist and then never asks for a segment: the same page played the
+// same camera on iOS 18 when the stream was already running, and failed every
+// time it was not. So the page fetches the playlist itself first, which
+// blocks until the stream is up, and only then hands the address to the
+// video element, which gets an immediate answer from a running stream.
+// Other browsers pay nothing: the camera takes as long to wake either way.
+async function warmHls() {{
+  const started = performance.now();
+  diagNote("warming stream");
+  try {{
+    const response = await fetch(hlsUrl(true), {{ cache: "no-store", credentials: "same-origin" }});
+    diagNote("stream warm", `HTTP ${{response.status}} after ${{Math.round(performance.now() - started)}} ms`);
+  }} catch (err) {{
+    // The video element will meet the same failure and report it with a code.
+    diagNote("stream warm failed", err && err.name);
+  }}
+}}
+
 async function startPlayer() {{
   stopPlayer();
   bytesArrived = false;
@@ -2493,6 +2545,13 @@ async function startPlayer() {{
     // the proxy already produces an HLS rendition, so use it.
     transport = "hls";
     diagNote("path", "native HLS");
+    // Armed before the warm-up, so the thirty seconds cover waking the camera
+    // too, as they always have.
+    armStartWatchdog();
+    const generation = playerGeneration;
+    await warmHls();
+    // Ended, restarted or timed out while the camera woke: nothing to start.
+    if (generation !== playerGeneration) return;
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
@@ -2515,9 +2574,9 @@ async function startPlayer() {{
     }};
     video.src = hlsUrl();
     video.load();
-    // Before the await, not after: play() does not settle until media is
-    // playing, so on a stream that never starts nothing below it would ever run.
-    armStartWatchdog();
+    // The watchdog was armed before the warm-up, which is before this await:
+    // play() does not settle until media is playing, so on a stream that never
+    // starts nothing below it would ever run.
     await startPlayback();
     // A browser that wants a tap is waiting for the viewer, not stalled.
     if (tapNeeded) disarmStartWatchdog();
@@ -3179,7 +3238,10 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
     async def get(self, request: web.Request, slug: str) -> web.Response:
         """Return the playlist with tokenised segment URIs."""
         _camera(self.hass, slug)
-        with _Traced(self.hass, request, slug, "playlist") as record:
+        # The player's own warm-up fetch (#91) is recorded apart from the video
+        # element's requests, which the verdict reads.
+        name = "warm-up" if request.query.get("warm") == "1" else ""
+        with _Traced(self.hass, request, slug, "playlist", name) as record:
             _authorize_traced(self.hass, request, slug, record)
             session = request.query.get("session", "")
             query = {

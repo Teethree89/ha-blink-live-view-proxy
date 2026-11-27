@@ -202,13 +202,34 @@ def test_start_watchdog() -> None:
     print("start watchdog")
     page = player_page()
     check("const START_TIMEOUT_MS = 30000" in page, "a picture has thirty seconds to appear")
-    arms = [m.start() for m in re.finditer(r"armStartWatchdog\(\);", page)]
+    # Not disarmStartWatchdog(): that is a different call that merely ends alike.
+    arms = [m.start() for m in re.finditer(r"(?<!dis)armStartWatchdog\(\);", page)]
     awaits = [m.start() for m in re.finditer(r"await startPlayback\(\);", page)]
     check(len(awaits) == 2, "both the MSE and the HLS start paths wait for playback")
+    # HLS waits twice - the warm-up fetch, then play() - and one watchdog,
+    # armed before the first, covers both. MPEG-TS arms just before play().
+    warm = page.index("await warmHls();")
+    hls_wait, mse_wait = sorted(awaits)
     check(
-        all(any(0 < wait - arm < 400 for arm in arms) for wait in awaits),
-        "the watchdog is armed before each await, not after it",
+        any(0 < warm - arm < 300 for arm in arms)
+        and warm < hls_wait
+        and not any(warm < arm < hls_wait for arm in arms)
+        and any(0 < mse_wait - arm < 400 for arm in arms),
+        "the watchdog is armed before each path's first await, not after it",
     )
+    # #91: iOS 18 never started a stream it met cold. The page starts it first.
+    hls_branch = page[page.index('transport = "hls";'):hls_wait]
+    check(
+        hls_branch.index("await warmHls();") < hls_branch.index("video.src = hlsUrl();"),
+        "on HLS the stream is warmed before the video element is given it",
+    )
+    check(
+        "if (generation !== playerGeneration) return;" in hls_branch
+        and "playerGeneration += 1;" in page,
+        "a live view ended or restarted during the warm-up does not start anyway",
+    )
+    check('hlsUrl(true)' in page and '"&warm=1"' in page,
+          "the warm-up request is marked, so the trace can tell it apart")
     check(page.count("disarmStartWatchdog();\n      video.classList.add(\"ready\")") == 1
           and page.count("disarmStartWatchdog();\n    video.classList.add(\"ready\")") == 1,
           "a picture appearing disarms it on both paths")
@@ -314,6 +335,16 @@ def test_diagnostics() -> None:
           "tearing the player down is not recorded as part of the failure")
     check("&session=${session}" in page.split("function stopUrl()", 1)[1][:300],
           "the stop request joins the session's trace")
+    # Found on a Mac: mpegts.js fires durationchange ten times a second, the
+    # timeline hit its cap at 24 s, and the failure at 36 s never made it in.
+    check('"durationchange"' in page.split("const DIAG_NOISY", 1)[1].split("\n", 1)[0],
+          "durationchange is routine, kept only when the player's state changes")
+    note = page.split("function diagNote(", 1)[1].split("\nfunction ", 1)[0]
+    check("events.length >= DIAG_MAX_EVENTS) return" not in note
+          and "diag.events.splice(DIAG_HEAD, 1);" in note,
+          "a full timeline drops from the middle, so the end that failed is kept")
+    check("events: diagnosticsEvents()," in page and "events left out" in page,
+          "and the report says how much was left out")
 
     # Unsent reports: saved on the device by the player, sent later by the
     # player or by the dashboard script (which the panel loads too). The panel

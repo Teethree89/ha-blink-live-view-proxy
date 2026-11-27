@@ -21,12 +21,27 @@ trips on is not confirmed yet.
 
 ### Fixed
 
+- **On iOS, the player starts the stream before the video element sees it.**
+  Every failure on iOS 18 was a cold start: the first playlist request woke
+  the camera, took seconds, and answered with a playlist only a few segments
+  old, after which iOS 18 never asked for a segment. The same page played the
+  same camera on iOS 18 whenever the stream was already running. The player
+  now fetches the playlist itself first, which waits out the camera, and only
+  then gives the address to the video element, which gets an immediate answer
+  from a running stream. The start takes no longer. Diagnostics list this
+  request as `playlist warm-up`, apart from the video element's own. Not yet
+  confirmed on an affected device with this change installed.
 - **The live-view video is no longer hidden with `opacity: 0` while it
   loads.** iOS starts a muted video without a tap only while it is visible,
-  and the page made the video visible only once it was playing. The same
-  Blink Mini stream that never started in the player played when opened
-  directly in Safari on iOS 17.5, which points at the page rather than the
-  stream. Suspected cause of #91; not yet confirmed on an affected device.
+  and the page made the video visible only once it was playing. Done as a
+  precaution while looking into #91; the cold start above fits the evidence
+  better.
+- **A long live view's diagnostics kept the beginning and lost the end.**
+  mpegts.js reports a duration change about ten times a second, and each one
+  was recorded, so the timeline reached its 300-event cap within 24 seconds
+  and whatever failed after that was not in it. Routine events are now kept
+  only when the player's state changes, and past the cap the middle is
+  dropped, with a marker saying how much, rather than the end.
 - **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
   the `; charset=utf-8` that aiohttp appended. Apple's validator rejects the
   latter as an illegal MIME type (451001). Integration and add-on both changed.

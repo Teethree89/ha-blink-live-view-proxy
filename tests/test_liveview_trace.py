@@ -414,6 +414,20 @@ def unit_verdicts() -> None:
     check("kept reloading" in verdict(reloads, {"transport": "hls"}),
           "reloads with no segment are told apart from silence")
     check(trace_mod.playlist_segment_count(PLAYLIST) == 1, "segments are counted")
+    # The page's warm-up fetch (#91) is not the video player reloading.
+    warmed = {"requests": [
+        {"kind": "playlist", "status": 200, "at": 0.0, "name": "warm-up"},
+        {"kind": "playlist", "status": 200, "at": 2.5, "name": ""},
+        {"kind": "playlist", "status": 200, "at": 2.6, "name": ""},
+    ]}
+    check("stopped asking" in verdict(warmed, {"transport": "hls", "code": "E-005"}),
+          "a warm-up plus two player fetches still reads as stopped asking, not reloading")
+    only_warm = {"requests": [{"kind": "playlist", "status": 200, "at": 0.0, "name": "warm-up"}]}
+    check("never asked for it" in verdict(only_warm, {"transport": "hls", "code": "E-005"}),
+          "a warm-up with no player request says the video player never asked")
+    refused_warm = {"requests": [{"kind": "playlist", "status": 403, "at": 0.0, "name": "warm-up"}]}
+    check("refused the playlist (HTTP 403)" in verdict(refused_warm, {"transport": "hls"}),
+          "a refused warm-up still names the refusal")
     # Airplane mode switched on while a live view loaded: Home Assistant served
     # the playlist and saw nothing more, the #91 shape, but the report waited
     # on the device. It must not be told it stopped asking.
