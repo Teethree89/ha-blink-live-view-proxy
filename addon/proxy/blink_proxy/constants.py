@@ -76,8 +76,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "hls_idle_timeout": 10,
     "hls_start_timeout": 30,
     # Segments the first playlist must list before it is served; see
-    # HlsSession.wait_ready. 0 serves it as soon as ffmpeg writes it.
-    "hls_min_segments": 3,
+    # HlsSession.wait_ready. 0, the default, serves it as soon as ffmpeg
+    # writes it.
+    "hls_min_segments": 0,
     # Cut HLS segments only at keyframes instead of every second. Slower to
     # start, but every segment decodes on its own; see HlsSession.start.
     "hls_keyframe_segments": False,

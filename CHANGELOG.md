@@ -11,40 +11,36 @@ used.
 
 ## [Unreleased]
 
-Work on [#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)
-(reported by @ussoccer18): on iOS 18 the HLS live view reads the playlist and
-then never requests a segment, ending in `E-005`. Reproduced on iOS 18.3, 18.5,
-18.6 and 18.7.5, in Safari and Chrome, over plain HTTP and Nabu Casa, with a
-Blink Mini that plays on iOS 27. Apple's `mediastreamvalidator` found two
-"must fix" issues in the stream, both addressed below. Which of them iOS 18
-trips on is not confirmed yet.
-
 ### Fixed
 
-- **On iOS, the player starts the stream before the video element sees it.**
-  Every failure on iOS 18 was a cold start: the first playlist request woke
-  the camera, took seconds, and answered with a playlist only a few segments
-  old, after which iOS 18 never asked for a segment. The same page played the
-  same camera on iOS 18 whenever the stream was already running. The player
-  now fetches the playlist itself first, which waits out the camera, and only
-  then gives the address to the video element, which gets an immediate answer
-  from a running stream. The start takes no longer. Diagnostics list this
-  request as `playlist warm-up`, apart from the video element's own. Not yet
-  confirmed on an affected device with this change installed.
-- **The live-view video is no longer hidden with `opacity: 0` while it
-  loads.** iOS starts a muted video without a tap only while it is visible,
-  and the page made the video visible only once it was playing. Done as a
-  precaution while looking into #91; the cold start above fits the evidence
-  better.
+- **Live view never started on iPhones and iPads running iOS 18**
+  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91),
+  reported by @ussoccer18). iOS 18 read the HLS playlist, reloaded it once,
+  and then never asked for a segment or reported an error, until the page gave
+  up with `E-005`. It happened only on a cold start: the first playlist
+  request had to wake the camera, took two to five seconds, and answered with
+  a playlist a few segments old. With the stream already running, the same
+  page played the same camera. On the HLS path the player now fetches the
+  playlist itself first, which waits out the camera, and only then gives the
+  address to the video element, which gets an immediate answer from a running
+  stream. Confirmed from a cold start on iOS 18 on an iPhone and an iPad; the
+  start takes no longer. Diagnostics list the request as `playlist warm-up`.
+  Copy diagnostics, from 1.4.0, is what narrowed this down.
+- **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
+  the `; charset=utf-8` that aiohttp appended. Apple's `mediastreamvalidator`
+  rejects the latter as an illegal MIME type (451001). Not the cause of #91,
+  but a must-fix by Apple's rules. Integration and add-on both changed.
 - **A long live view's diagnostics kept the beginning and lost the end.**
   mpegts.js reports a duration change about ten times a second, and each one
   was recorded, so the timeline reached its 300-event cap within 24 seconds
   and whatever failed after that was not in it. Routine events are now kept
   only when the player's state changes, and past the cap the middle is
   dropped, with a marker saying how much, rather than the end.
-- **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
-  the `; charset=utf-8` that aiohttp appended. Apple's validator rejects the
-  latter as an illegal MIME type (451001). Integration and add-on both changed.
+- **The live-view video is no longer hidden with `opacity: 0` while it
+  loads.** iOS starts a muted video without a tap only while it is visible,
+  and the page made the video visible only once it was playing. A precaution
+  taken while looking into #91, not its cause; a transparent background keeps
+  the snapshot behind it in view.
 
 ### Added
 
@@ -52,13 +48,12 @@ trips on is not confirmed yet.
   segments only at the camera's keyframes, so every segment decodes on its own.
   Off, ffmpeg cuts a segment every second with `split_by_time`, and on a Blink
   Mini half the segments start without a keyframe, which Apple's validator
-  calls a must-fix (541007). On, segments are one keyframe interval long (2 s
-  on a Mini, 4 s on most Blink cameras) and the live view starts later.
-- **`hls_min_segments`** (default `3`). The first playlist is served once it
-  lists this many segments rather than as soon as ffmpeg writes it, meeting the
-  HLS rule that a player starts at least three target durations from the end.
-  Adds about two seconds to the start. On its own this did not make iOS 18
-  play; `0` restores the old behaviour.
+  calls a must-fix (541007). Players including iOS 18 play it regardless; on,
+  segments are one keyframe interval long (2 s on a Mini, 4 s on most Blink
+  cameras) and the live view starts later.
+- **`hls_min_segments`** (default `0`). Holds the first playlist back until it
+  lists that many segments, for players that keep strictly to the HLS rule of
+  starting three target durations from the end. About a second per segment.
 
 ## [1.4.0] — 2026-11-25
 

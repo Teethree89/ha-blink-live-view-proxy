@@ -1,8 +1,8 @@
-"""When the first HLS playlist is served: not until it lists enough segments.
+"""When the first HLS playlist is served, and hls_min_segments.
 
-Issue #91: iPhones on iOS 18 read a one-segment live playlist, reloaded it
-once, and then never asked for a segment. A shell script stands in for ffmpeg
-and writes the playlist the way ffmpeg does, one segment a second.
+By default as soon as ffmpeg writes it. hls_min_segments can hold it back until
+it lists more segments; it was tried for #91 and is off by default. A shell
+script stands in for ffmpeg and writes the playlist the way ffmpeg does.
 
 Run from the repo root: python tests/test_hls_start.py
 """
@@ -132,22 +132,22 @@ async def serve_first_playlist(tmp: Path, stop_at: int, extra: dict) -> tuple[in
 
 async def main() -> int:
     print("first HLS playlist")
-    check(DEFAULT_CONFIG.get("hls_min_segments") == 3,
-          "by default the first playlist waits for three segments")
+    check(DEFAULT_CONFIG.get("hls_min_segments") == 0,
+          "by default the first playlist is served as soon as it exists")
 
     with tempfile.TemporaryDirectory() as raw:
         listed, elapsed, _lines = await serve_first_playlist(Path(raw), 8, {})
-    check(listed >= 3, "it is not served with fewer", f"{listed} listed")
+    check(listed >= 1 and elapsed < 1.2, "so the default adds nothing to the start",
+          f"{listed} listed after {elapsed:.1f}s")
+
+    with tempfile.TemporaryDirectory() as raw:
+        listed, elapsed, _lines = await serve_first_playlist(Path(raw), 8, {"hls_min_segments": 3})
+    check(listed >= 3, "set to 3, it is not served with fewer", f"{listed} listed")
     check(1.3 < elapsed < 3.0, "and is served as soon as the third arrives, not later",
           f"{elapsed:.1f}s")
 
     with tempfile.TemporaryDirectory() as raw:
-        listed, elapsed, _lines = await serve_first_playlist(Path(raw), 8, {"hls_min_segments": 0})
-    check(listed >= 1 and elapsed < 1.2, "0 restores serving it the moment it exists",
-          f"{listed} listed after {elapsed:.1f}s")
-
-    with tempfile.TemporaryDirectory() as raw:
-        listed, elapsed, lines = await serve_first_playlist(Path(raw), 2, {})
+        listed, elapsed, lines = await serve_first_playlist(Path(raw), 2, {"hls_min_segments": 3})
     check(listed == 2 and 3.5 < elapsed < 5.0,
           "a stream that never reaches three is still served at the start timeout, not failed",
           f"{listed} listed after {elapsed:.1f}s")

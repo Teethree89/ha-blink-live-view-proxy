@@ -164,21 +164,20 @@ class HlsSession:
         return sum(1 for line in text.splitlines() if line and not line.startswith("#"))
 
     async def wait_ready(self) -> None:
-        """Wait until the playlist is worth serving.
+        """Wait until the playlist exists, or lists hls_min_segments segments.
 
-        Not merely until it exists. ffmpeg writes the playlist as soon as the
-        first segment is cut, and a live playlist that short is one a player
-        should not start from: the HLS spec has it begin no closer than three
-        target durations to the end. So the first playlist waits for
-        hls_min_segments segments, about two seconds longer. Tried for #91
-        (iOS 18 reads the playlist and never requests a segment); on its own
-        it did not fix that.
+        ffmpeg writes the playlist as soon as the first segment is cut, and the
+        HLS spec has a player start no closer than three target durations to
+        the end, so a playlist that young is one a strict player may not start
+        from. hls_min_segments holds the first one back until it is longer, at
+        about a second per segment. It defaults to 0: tried for #91, it did
+        not make iOS 18 play, and the player's own warm-up did.
 
         If they do not arrive within hls_start_timeout, whatever playlist
         exists is served rather than failing a live view that may yet play.
         """
         timeout = float(self.manager.config.get("hls_start_timeout", 30))
-        wanted = max(0, int(self.manager.config.get("hls_min_segments", 3)))
+        wanted = max(0, int(self.manager.config.get("hls_min_segments", 0)))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             # A client waiting here is active; keep the idle reaper off it.

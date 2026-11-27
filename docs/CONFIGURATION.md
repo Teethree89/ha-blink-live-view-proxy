@@ -278,15 +278,14 @@ camera to start counts as active, so the idle timeout can be shorter than
 `hls_start_timeout` (default `30`), the longest the proxy will wait for the
 first segment before failing the request.
 
-`hls_min_segments` (default `3`) is how many segments the playlist must list
-before it is served the first time. ffmpeg writes the playlist as soon as the
-first segment exists, and a live playlist that short is one the HLS spec says a
-player should not start from: it begins at least three target durations from
-the end. Three segments cost about two seconds of start-up. It was tried for
-iOS 18 ([#91]) and on its own did not make it play. If the camera has not
-produced that many by `hls_start_timeout`, the playlist is served with what it
-has rather than failed. `0` serves it the moment it exists, which is how it
-worked before.
+`hls_min_segments` (default `0`) holds the first playlist back until it lists
+that many segments. ffmpeg writes the playlist as soon as the first segment
+exists, and the HLS spec has a player start at least three target durations
+from the end, so a strict player may not start from one that young. Each
+segment held back costs about a second of start-up. It was tried for iOS 18
+([#91]) and did not make it play; the player warming the stream first did. If
+the camera has not produced that many by `hls_start_timeout`, the playlist is
+served with what it has rather than failed.
 
 `hls_keyframe_segments` (default `false`) cuts segments only at the camera's
 keyframes instead of every second. Every segment then starts with a keyframe,
