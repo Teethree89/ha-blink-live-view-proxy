@@ -9,7 +9,15 @@ for a breaking change, the minor for anything user-visible (new behaviour, a
 changed default), and the patch for fixes that change nothing about how it is
 used.
 
-## [Unreleased]
+## [1.4.1] — 2026-11-26
+
+Live view on iPhones and iPads running iOS 17 and 18 now works, behind a new
+switch: **Blink Proxy → Overview → Live view → Warm up camera before
+starting**, off by default
+([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)).
+Turn it on if a live view on an iPhone or iPad ends in `E-005`. With it off,
+live view behaves exactly as in 1.4.0. The integration and the add-on both
+changed; update both. No Blink reauthentication is needed.
 
 ### Fixed
 
