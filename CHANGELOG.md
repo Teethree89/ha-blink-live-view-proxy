@@ -27,8 +27,9 @@ used.
   Overview → Live view, **off by default**, with an ⓘ that explains it. On, the
   player on iPhone and iPad fetches the playlist itself first, which waits out
   the camera, and only then gives the address to the video element, which gets
-  an immediate answer from a running stream. Confirmed from a cold start on
-  iOS 18 on an iPhone and an iPad; it adds no time to the start. Off, nothing
+  an immediate answer from a running stream. Confirmed from a cold start on an
+  iPhone on iOS 18 and an iPad on iPadOS 18.6, with a Blink Mini and with
+  cameras that send a keyframe every 4 seconds; it adds no time to the start. Off, nothing
   changes from 1.4.0. A switch rather than a guess at the iOS version, because
   Safari on iOS 26 and later reports "OS 18" in its user agent. With it off,
   an `E-005` on iPhone or iPad says where to turn it on, the diagnostics verdict
@@ -64,9 +65,9 @@ used.
   Off, ffmpeg cuts a segment every second with `split_by_time`, and on a Blink
   Mini half the segments start without a keyframe, which Apple's validator
   calls a must-fix (541007). On, segments are one keyframe interval long (2 s
-  on a Mini, 4 s on most Blink cameras) and the live view starts later. Whether
-  iOS 17 and 18 need it for cameras with 4-second keyframes is still being
-  tested.
+  on a Mini, 4 s on most Blink cameras) and the live view starts later. Not
+  needed for iOS 17 or 18: with the warm-up on, a Mini and cameras with 4-second
+  keyframes both stream there without it.
 - **`hls_min_segments`** (default `0`). Holds the first playlist back until it
   lists that many segments, for players that keep strictly to the HLS rule of
   starting three target durations from the end. About a second per segment.
