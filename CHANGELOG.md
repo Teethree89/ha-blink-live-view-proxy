@@ -26,6 +26,17 @@ used.
   stream. Confirmed from a cold start on iOS 18 on an iPhone and an iPad; the
   start takes no longer. Diagnostics list the request as `playlist warm-up`.
   Copy diagnostics, from 1.4.0, is what narrowed this down.
+- **A camera too slow to start is reported as such.** When no playlist
+  appeared within `hls_start_timeout`, the add-on let the error escape and
+  answered a bare `500 Internal Server Error`, which reads as the proxy
+  crashing. It now answers `504` saying the camera did not start sending video
+  in time (and `502` naming ffmpeg if ffmpeg died), the integration passes the
+  504 on, and the diagnostics verdict says the camera may be asleep or offline.
+  Seen on a driveway camera's first live view after the add-on restarted.
+- **On iPhone and iPad, a stream that could not be started says so at once.**
+  When the player's warm-up request is refused, the live view now ends
+  immediately with a new code, `E-011`, and the HTTP status, instead of waiting
+  out the 30-second start limit and showing the vaguer `E-005`.
 - **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
   the `; charset=utf-8` that aiohttp appended. Apple's `mediastreamvalidator`
   rejects the latter as an illegal MIME type (451001). Not the cause of #91,

@@ -904,7 +904,17 @@ async def hls_playlist_handler(request: web.Request) -> web.Response:
         session = await manager.get_or_start(slug)
     except KeyError as exc:
         raise web.HTTPNotFound(text=f"Unknown camera slug: {slug}\n") from exc
-    await session.wait_ready()
+    # wait_ready() raises when the camera never produced a playlist in time, or
+    # ffmpeg died. Left to escape, either came back as a bare 500 ("Server got
+    # itself in trouble"), which reads as the proxy crashing.
+    try:
+        await session.wait_ready()
+    except TimeoutError as exc:
+        raise web.HTTPGatewayTimeout(
+            text=f"The camera did not start sending video in time ({exc})\n"
+        ) from exc
+    except RuntimeError as exc:
+        raise web.HTTPBadGateway(text=f"ffmpeg could not start the stream ({exc})\n") from exc
     if browser_session:
         session.register_liveview_key(liveview_session_key(slug, browser_session))
 

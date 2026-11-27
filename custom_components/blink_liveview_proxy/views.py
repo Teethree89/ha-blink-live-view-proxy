@@ -545,6 +545,14 @@ async def _open_proxy_response(
             text=body or "Requested range not satisfiable\n",
             headers={"Content-Range": content_range} if content_range else None,
         )
+    if response.status == 504:
+        # The camera did not start in time. Not the gateway failing, which is
+        # what a 502 would tell the browser and the diagnostics verdict.
+        body = await response.text()
+        response.close()
+        raise web.HTTPGatewayTimeout(
+            text=body or "The camera did not start sending video in time\n"
+        )
     if response.status == 429:
         retry_after = response.headers.get("Retry-After", "30")
         body = await response.text()
@@ -2117,6 +2125,9 @@ const FAILURES = {{
   // Either path.
   "E-008": "Live view never started because play was not tapped. Restart to try again.",
   "E-009": "Could not save the last live view.",
+  // HLS: the page's warm-up request was refused, so there is no stream to
+  // play. Said at once, with the status, instead of after thirty seconds.
+  "E-011": "The stream could not be started. Restart to try again.",
 }};
 
 // The message for a code, with the code and any detail the player gave after
@@ -2513,15 +2524,18 @@ function sessionLimitMessage() {{
 // blocks until the stream is up, and only then hands the address to the
 // video element, which gets an immediate answer from a running stream.
 // Other browsers pay nothing: the camera takes as long to wake either way.
+// Returns the HTTP status, or 0 when the request never got an answer.
 async function warmHls() {{
   const started = performance.now();
   diagNote("warming stream");
   try {{
     const response = await fetch(hlsUrl(true), {{ cache: "no-store", credentials: "same-origin" }});
     diagNote("stream warm", `HTTP ${{response.status}} after ${{Math.round(performance.now() - started)}} ms`);
+    return response.status;
   }} catch (err) {{
     // The video element will meet the same failure and report it with a code.
     diagNote("stream warm failed", err && err.name);
+    return 0;
   }}
 }}
 
@@ -2549,9 +2563,16 @@ async function startPlayer() {{
     // too, as they always have.
     armStartWatchdog();
     const generation = playerGeneration;
-    await warmHls();
+    const warmStatus = await warmHls();
     // Ended, restarted or timed out while the camera woke: nothing to start.
     if (generation !== playerGeneration) return;
+    // Refused outright (a stale token, Blink's cooldown, a camera that did
+    // not start): handing the video element the same request only fails it
+    // again, more vaguely. With no answer at all, it does try, and reports.
+    if (warmStatus >= 400) {{
+      endSession(failureMessage("E-011", `HTTP ${{warmStatus}}`));
+      return;
+    }}
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");

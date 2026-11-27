@@ -197,6 +197,7 @@ def _status_hint(status: int | None) -> str:
         429: "Blink's live-view cooldown is active; wait and try again",
         502: "the add-on did not answer, or failed",
         503: "the add-on is not ready (signing in to Blink, or reconnecting)",
+        504: "the camera did not start sending video in time; it may be asleep or offline",
     }.get(status or 0, "")
 
 

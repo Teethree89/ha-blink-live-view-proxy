@@ -230,6 +230,9 @@ def test_start_watchdog() -> None:
     )
     check('hlsUrl(true)' in page and '"&warm=1"' in page,
           "the warm-up request is marked, so the trace can tell it apart")
+    check("if (warmStatus >= 400) {" in hls_branch
+          and 'failureMessage("E-011", `HTTP ${warmStatus}`)' in hls_branch,
+          "a refused warm-up ends at once with E-011 and its status, not after 30 s")
     check(page.count("disarmStartWatchdog();\n      video.classList.add(\"ready\")") == 1
           and page.count("disarmStartWatchdog();\n    video.classList.add(\"ready\")") == 1,
           "a picture appearing disarms it on both paths")

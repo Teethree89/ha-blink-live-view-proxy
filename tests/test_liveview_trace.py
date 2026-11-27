@@ -425,6 +425,9 @@ def unit_verdicts() -> None:
     only_warm = {"requests": [{"kind": "playlist", "status": 200, "at": 0.0, "name": "warm-up"}]}
     check("never asked for it" in verdict(only_warm, {"transport": "hls", "code": "E-005"}),
           "a warm-up with no player request says the video player never asked")
+    slow_camera = {"requests": [{"kind": "playlist", "status": 504, "at": 0.0, "name": "warm-up"}]}
+    check("did not start sending video in time" in verdict(slow_camera, {"transport": "hls"}),
+          "a camera too slow to start is named as such, not as the add-on failing")
     refused_warm = {"requests": [{"kind": "playlist", "status": 403, "at": 0.0, "name": "warm-up"}]}
     check("refused the playlist (HTTP 403)" in verdict(refused_warm, {"transport": "hls"}),
           "a refused warm-up still names the refusal")
