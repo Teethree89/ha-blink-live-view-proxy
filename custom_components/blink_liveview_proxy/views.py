@@ -31,6 +31,7 @@ from .liveview_trace import (
     history,
     playlist_segment_count,
     safe_code,
+    suggests_warm_up,
     valid_session,
     verdict,
 )
@@ -82,6 +83,7 @@ def async_register_views(hass: HomeAssistant) -> None:
     hass.http.register_view(BlinkLiveviewProxyStopView(hass))
     hass.http.register_view(BlinkLiveviewProxyDiagnosticsView(hass))
     hass.http.register_view(BlinkLiveviewProxyPanelDiagnosticsView(hass))
+    hass.http.register_view(BlinkLiveviewProxyPanelSettingsView(hass))
     hass.http.register_view(BlinkLiveviewProxyControlsView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewInfoView(hass))
     hass.http.register_view(BlinkLiveviewProxyLastLiveviewDownloadView(hass))
@@ -377,6 +379,34 @@ def _save_report_log(log: ReportLog, store: Any) -> None:
     store.async_delay_save(lambda: {"reports": list(log.reports)}, 5)
 
 
+# Live-view settings the admin panel changes. A store of their own rather than
+# the config entry's options: changing those reloads the whole integration.
+SETTINGS_STORE_KEY = f"{DOMAIN}.liveview_settings"
+SETTINGS_STORE_VERSION = 1
+DEFAULT_LIVEVIEW_SETTINGS: dict[str, Any] = {
+    # Fetch the HLS playlist before handing it to the video element (#91).
+    "hls_warm_up": False,
+}
+
+
+async def _liveview_settings(hass: HomeAssistant) -> tuple[dict[str, Any], Any]:
+    """The live-view settings and the store behind them, loaded on first use."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "_liveview_settings" not in data:
+        from homeassistant.helpers.storage import Store
+
+        store = Store(hass, SETTINGS_STORE_VERSION, SETTINGS_STORE_KEY)
+        stored = await store.async_load()
+        if "_liveview_settings" not in data:
+            settings = dict(DEFAULT_LIVEVIEW_SETTINGS)
+            if isinstance(stored, dict):
+                for key, default in DEFAULT_LIVEVIEW_SETTINGS.items():
+                    if isinstance(stored.get(key), type(default)):
+                        settings[key] = stored[key]
+            data["_liveview_settings"] = (settings, store)
+    return data["_liveview_settings"]
+
+
 async def _integration_version(hass: HomeAssistant) -> str:
     from homeassistant.loader import async_get_integration
 
@@ -635,6 +665,7 @@ def _player_html(
     slug: str,
     camera: dict[str, Any],
     access_token: str,
+    hls_warm_up: bool = False,
 ) -> str:
     """Return the direct live-view player page."""
     safe_slug = quote(slug, safe="")
@@ -643,6 +674,7 @@ def _player_html(
     token_json = json.dumps(access_token)
     stream_seconds = _stream_seconds(hass)
     ptt_supported = json.dumps(bool(camera.get("ptt_supported", True)))
+    warm_up_json = json.dumps(bool(hls_warm_up))
 
     return f"""<!doctype html>
 <html lang="en">
@@ -683,18 +715,6 @@ video {{
 }}
 video.ready {{
   opacity:1;
-}}
-/* iOS 18 and earlier only; see legacyIosHls(). iOS starts a muted video
-   without a tap only while it is visible, so there the video is never
-   opacity:0, and its transparent background keeps the snapshot in view
-   until it plays. Everything else keeps the rules above. */
-video.ios-legacy {{
-  opacity:1;
-  background:transparent;
-  transition:background-color .18s ease, transform .28s cubic-bezier(.2,.8,.2,1);
-}}
-video.ios-legacy.ready {{
-  background:#05070a;
 }}
 .overlay {{
   position:absolute;
@@ -1526,6 +1546,8 @@ const slug = "{safe_slug}";
 const seconds = {stream_seconds};
 const accessToken = {token_json};
 const pttSupported = {ptt_supported};
+// "Warm up camera before starting", from the Blink Proxy panel (#91).
+const warmUp = {warm_up_json};
 const sessionId = window.crypto && crypto.randomUUID
   ? crypto.randomUUID()
   : `${{Date.now()}}-${{Math.random().toString(36).slice(2)}}`;
@@ -2097,10 +2119,6 @@ function stopPlayer() {{
     try {{ player.destroy(); }} catch (err) {{}}
     player = null;
   }}
-  // Back to the element as every other device has it; the iOS 18 mode is
-  // applied afresh by the next start that needs it.
-  video.classList.remove("ios-legacy");
-  video.controls = true;
   video.removeAttribute("src");
   video.load();
 }}
@@ -2507,9 +2525,16 @@ function armStartWatchdog() {{
   }}, START_TIMEOUT_MS);
 }}
 
+// E-005 on iPhone or iPad is what "Warm up camera before starting" fixes on
+// iOS 18 (#91), so with it off the message says where to find it.
+const WARM_UP_SUGGESTION =
+  "If this keeps happening on this device, an admin can turn on \u201cWarm up camera before starting\u201d in Blink Proxy.";
+
 function noPictureMessage() {{
   if (transport === "hls") {{
-    return failureMessage(video.buffered.length > 0 ? "E-006" : "E-005");
+    if (video.buffered.length > 0) return failureMessage("E-006");
+    const message = failureMessage("E-005");
+    return warmUp ? message : `${{message}} ${{WARM_UP_SUGGESTION}}`;
   }}
   return failureMessage(bytesArrived || video.buffered.length > 0 ? "E-003" : "E-002");
 }}
@@ -2524,30 +2549,8 @@ function sessionLimitMessage() {{
   return noPictureMessage();
 }}
 
-// Which iOS this is, for the HLS path. iOS 26 and later put "OS 18_x" in
-// Safari's user agent whatever the real version, so that token cannot tell
-// iOS 18 from 27. These can: the companion app's "iOS 27.2.1", then Safari's
-// own "Version/26.0". 0 when neither is there, as in Chrome on iOS.
-function iosMajorVersion() {{
-  const ua = navigator.userAgent || "";
-  const app = ua.match(/\\biOS (\\d+)\\.\\d/);
-  if (app) return Number(app[1]);
-  if (!/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua)) {{
-    const safari = ua.match(/\\bVersion\\/(\\d+)/);
-    if (safari) return Number(safari[1]);
-  }}
-  return 0;
-}}
-
-// Whether the HLS path needs the iOS 18 handling below (#91). Newer iOS plays
-// the stream as it always did and gets exactly the behaviour it always had.
-// When the version cannot be read, the iOS 18 handling is used: it also plays
-// on newer iOS, while guessing wrong the other way breaks iOS 18.
-function legacyIosHls() {{
-  return !(iosMajorVersion() >= 26);
-}}
-
-// Start the stream before the video element sees it (#91).
+// Start the stream before the video element sees it (#91), when "Warm up
+// camera before starting" is on in the Blink Proxy panel.
 //
 // The first playlist request wakes the camera and starts ffmpeg, so it takes
 // seconds and answers with a playlist only a few segments old. iOS 18 reads
@@ -2556,7 +2559,7 @@ function legacyIosHls() {{
 // time it was not. So the page fetches the playlist itself first, which
 // blocks until the stream is up, and only then hands the address to the
 // video element, which gets an immediate answer from a running stream.
-// Other browsers pay nothing: the camera takes as long to wake either way.
+// Off by default, and only the HLS path (iPhone and iPad) uses it.
 // Returns the HTTP status, or 0 when the request never got an answer.
 async function warmHls() {{
   const started = performance.now();
@@ -2591,14 +2594,11 @@ async function startPlayer() {{
     // MPEG-TS player always dies with E-001b. They do play HLS natively, and
     // the proxy already produces an HLS rendition, so use it.
     transport = "hls";
-    const legacy = legacyIosHls();
-    diagNote("path", legacy ? "native HLS, iOS 18 mode" : "native HLS");
+    diagNote("path", warmUp ? "native HLS, warm-up on" : "native HLS");
     // Armed before any warm-up, so the thirty seconds cover waking the camera
     // too, as they always have.
     armStartWatchdog();
-    if (legacy) {{
-      video.classList.add("ios-legacy");
-      video.controls = false;
+    if (warmUp) {{
       const generation = playerGeneration;
       const warmStatus = await warmHls();
       // Ended, restarted or timed out while the camera woke: nothing to start.
@@ -2614,7 +2614,6 @@ async function startPlayer() {{
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
-      if (legacy) video.controls = true;
       overlay.classList.add("hidden");
       actions.hidden = true;
       liveActions.hidden = false;
@@ -3208,8 +3207,11 @@ class BlinkLiveviewProxyPlayerView(HomeAssistantView):
         access_token = _authorize_browser_request(
             self.hass, request, slug, issue_browser_token=True
         )
+        settings, _store = await _liveview_settings(self.hass)
         return web.Response(
-            text=_player_html(self.hass, slug, camera, access_token),
+            text=_player_html(
+                self.hass, slug, camera, access_token, bool(settings["hls_warm_up"])
+            ),
             content_type="text/html",
             headers={"Cache-Control": "no-store"},
         )
@@ -3559,6 +3561,8 @@ class BlinkLiveviewProxyDiagnosticsView(HomeAssistantView):
             "code": code,
             "verdict": summary,
             "queued": bool(client.get("queued")),
+            # For the panel, which offers to turn the warm-up on (#91).
+            "suggest_warm_up": suggests_warm_up(server, client),
             "report": report,
         })
         _save_report_log(log, store)
@@ -4978,10 +4982,40 @@ class BlinkLiveviewProxyPanelView(HomeAssistantView):
         secure_context = (
             None if reported not in ("0", "1") else reported == "1"
         )
-        return web.json_response(
-            await _panel_payload(self.hass, secure_context),
-            headers=AUTH_VIEW_HEADERS,
-        )
+        payload = await _panel_payload(self.hass, secure_context)
+        settings, _store = await _liveview_settings(self.hass)
+        payload["settings"] = dict(settings)
+        return web.json_response(payload, headers=AUTH_VIEW_HEADERS)
+
+
+class BlinkLiveviewProxyPanelSettingsView(HomeAssistantView):
+    """Change the live-view settings from the admin panel."""
+
+    requires_auth = True
+    url = "/api/blink_liveview_proxy/panel/settings"
+    name = "api:blink_liveview_proxy:panel_settings"
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self.hass = hass
+
+    @require_admin
+    async def post(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except ValueError as err:
+            raise web.HTTPBadRequest(text="Expected a JSON object\n") from err
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="Expected a JSON object\n")
+        settings, store = await _liveview_settings(self.hass)
+        for key, value in body.items():
+            default = DEFAULT_LIVEVIEW_SETTINGS.get(key)
+            if default is None:
+                raise web.HTTPBadRequest(text=f"Unknown setting: {key}\n")
+            if not isinstance(value, type(default)):
+                raise web.HTTPBadRequest(text=f"{key} must be {type(default).__name__}\n")
+            settings[key] = value
+        store.async_delay_save(lambda: dict(settings), 1)
+        return web.json_response({"settings": dict(settings)}, headers=AUTH_VIEW_HEADERS)
 
 
 class BlinkLiveviewProxyInstallationTestView(HomeAssistantView):

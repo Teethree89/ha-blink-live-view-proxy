@@ -14,7 +14,6 @@ quietly pass.
 from __future__ import annotations
 
 import ast
-import json
 import pathlib
 import re
 import shutil
@@ -296,79 +295,48 @@ def test_failure_codes() -> None:
 
 
 
-def test_ios_versions() -> None:
-    """Only iOS 18 and earlier get the #91 handling; everything else is as it was.
+def test_warm_up_switch() -> None:
+    """The #91 warm-up runs only when the panel's switch is on; the look is 1.4.0's.
 
-    On iOS 18 a cold stream never started (#91). The fix - warming the stream,
-    keeping the video visible while it loads, and native controls only once it
-    plays - is applied there only. Newer iOS, desktop and Android keep the 1.4.0
-    behaviour exactly. Safari on iOS 26 and later reports "OS 18_x", so the
-    version comes from tokens that are not frozen, and an unreadable one gets
-    the iOS 18 handling, which also plays on newer iOS.
+    On iOS 18 a live view met cold never started (#91), and warming the stream
+    first fixed it. It is "Warm up camera before starting" in the Blink Proxy
+    panel, off by default, rather than guessed from the iOS version: Safari on
+    iOS 26 and later reports "OS 18" in its user agent. With it off, an E-005
+    on the HLS path says where the switch is.
     """
-    print("iOS versions")
+    print("warm-up switch")
     page = player_page()
     style = "\n".join(re.findall(r"<style>(.*?)</style>", page, re.S))
-    found = re.findall(r"(^|\n)\s*(video(?:\.[\w-]+)*)\s*\{([^}]*)\}", style)
-    rules = {}
-    for _start, selector, body in found:
-        rules.setdefault(selector, body)  # the first, top-level one
-    check("opacity:0" in rules.get("video", "") and "background:#05070a" in rules.get("video", ""),
-          "the base video rule is 1.4.0's: hidden until it plays")
-    check("opacity:1" in rules.get("video.ios-legacy", "")
-          and "background:transparent" in rules.get("video.ios-legacy", ""),
-          "iOS 18 mode keeps the video visible, with the snapshot showing through")
+    first_video_rule = re.search(r"(^|\n)video \{([^}]*)\}", style).group(2)
+    check("opacity:0" in first_video_rule and "background:#05070a" in first_video_rule,
+          "the video rule is 1.4.0's: hidden until it plays")
+    check("ios-legacy" not in page and "iosMajorVersion" not in page,
+          "no visibility change and no iOS version detection")
     tag = re.search(r'<video id="video"[^>]*>', page).group(0)
-    check("controls" in tag, "the video has native controls from the start, as in 1.4.0")
+    check("controls" in tag and "video.controls" not in page,
+          "native controls from the start, as in 1.4.0")
 
+    source = VIEWS.read_text()
+    check("const warmUp = {warm_up_json};" in source and "hls_warm_up: bool = False" in source,
+          "the page is told the switch's state, off unless set")
     hls = page[page.index('transport = "hls";'):page.index("await startPlayback();")]
-    legacy = hls[hls.index("if (legacy) {"):]
-    check('video.classList.add("ios-legacy");' in legacy and "video.controls = false;" in legacy
-          and "await warmHls();" in legacy,
-          "the visible video, hidden controls and warm-up all sit behind the iOS 18 check")
-    check(hls.count("await warmHls();") == 1 and page.count('classList.add("ios-legacy")') == 1,
-          "and nowhere else")
-    check("if (legacy) video.controls = true;" in hls, "the controls come back with the picture there")
-    check('video.classList.remove("ios-legacy");\n  video.controls = true;' in page,
-          "and tearing the player down restores the element as everyone else has it")
-    check('overlay.addEventListener("click"' in page and 'startsWith("Tap play")) video.play()' in page,
-          "a tap on the overlay still starts playback when iOS asks for one")
+    warm = hls[hls.index("if (warmUp) {"):]
+    check("await warmHls();" in warm and page.count("await warmHls();") == 1,
+          "the warm-up runs only behind the switch")
+    check('warmUp ? "native HLS, warm-up on" : "native HLS"' in hls,
+          "and the diagnostics timeline says whether it was on")
+    check("return warmUp ? message : `${message} ${WARM_UP_SUGGESTION}`;" in page
+          and "Warm up camera before starting" in page.split("const WARM_UP_SUGGESTION", 1)[1][:200],
+          "an E-005 with the switch off says where to turn it on")
 
-    node = shutil.which("node")
-    if not node:
-        print("  SKIP  node is not installed, cannot run the version check")
-        return
-    script = player_script(page)
-    functions = "\n".join(
-        script[script.index(f"function {name}()"):].split("\n}\n", 1)[0] + "\n}"
-        for name in ("iosMajorVersion", "legacyIosHls")
-    )
-    cases = {
-        # Reports from this issue.
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1": True,
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.7.5 Mobile/15E148 Safari/604.1": True,
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/157.0.8103.37 Mobile/15E148 Safari/604.1": True,
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Home Assistant/2026.10.3 (io.robbie.HomeAssistant; build:2026.3322; iOS 27.2.1) Mobile/HomeAssistant, like Safari": False,
-        # Safari on iOS 26: the OS token is frozen, the Version token is not.
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1": False,
-        # The companion app on iOS 18.
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Home Assistant/2026.10.3 (io.robbie.HomeAssistant; build:2026.3322; iOS 18.5.0) Mobile/HomeAssistant": True,
-        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1": True,
-    }
-    program = functions + "\nconst out = [];\n" + "".join(
-        # Node has a navigator of its own that plain assignment cannot replace.
-        f"Object.defineProperty(globalThis, 'navigator', {{ value: {{ userAgent: {json.dumps(ua)} }}, configurable: true }});"
-        " out.push(legacyIosHls());\n"
-        for ua in cases
-    ) + "console.log(JSON.stringify(out));\n"
-    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as handle:
-        handle.write(program)
-        path = handle.name
-    result = subprocess.run([node, path], capture_output=True, text=True)
-    got = json.loads(result.stdout or "[]") if result.returncode == 0 else []
-    for (ua, want), have in zip(cases.items(), got or [None] * len(cases)):
-        label = "iOS 18 mode" if want else "unchanged"
-        check(have is want, f"{label}: {ua[13:60]}...{ua[-40:]} (got {have})")
+    panel = (ROOT / "custom_components/blink_liveview_proxy/frontend/blink-proxy-auth-panel.js").read_text()
+    check('id="warm-up" role="switch"' in panel and 'id="warm-up-info"' in panel
+          and 'aria-controls="warm-up-help"' in panel,
+          "the panel has the switch and an (i) that opens its explanation")
+    check('this._panelApi("POST", "/settings", { hls_warm_up: !!on })' in panel,
+          "and saves it through the settings endpoint")
+    check("entry.suggest_warm_up && !this._warmUpOn()" in panel and "data-warm-up-on" in panel,
+          "a Diagnostics entry with the #91 failure offers to turn it on")
 
 
 def test_diagnostics() -> None:
@@ -461,7 +429,7 @@ def main() -> int:
     test_saving_state()
     test_start_watchdog()
     test_failure_codes()
-    test_ios_versions()
+    test_warm_up_switch()
     test_diagnostics()
     print(f"\n{CHECKS - len(FAILURES)}/{CHECKS} checks passed")
     if FAILURES:

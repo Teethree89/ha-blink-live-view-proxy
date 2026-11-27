@@ -210,6 +210,30 @@ def _refused(records: list[dict[str, Any]], what: str) -> str:
     return f"Home Assistant refused the {what} (HTTP {shown})" + (f": {hint}." if hint else ".")
 
 
+WARM_UP_SUGGESTION = (
+    "On iOS 18 this is fixed by turning on \u201cWarm up camera before starting\u201d "
+    "in Blink Proxy."
+)
+
+
+def suggests_warm_up(server: dict[str, Any] | None, client: dict[str, Any]) -> bool:
+    """Whether this is the #91 shape that "Warm up camera before starting" fixes.
+
+    An HLS live view that read the playlist and then never asked for a
+    segment, started without the page's warm-up. With the warm-up already on,
+    suggesting it again would be no help.
+    """
+    if (client.get("transport") or "") != "hls" or client.get("played") or client.get("queued"):
+        return False
+    requests = (server or {}).get("requests", [])
+    playlists = [r for r in requests if r["kind"] == "playlist"]
+    if any(r.get("name") == "warm-up" for r in playlists):
+        return False
+    served = [r for r in playlists if _ok(r)]
+    segments = [r for r in requests if r["kind"] == "segment"]
+    return bool(served) and not segments and len(served) <= 2
+
+
 def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
     """One sentence on where the live view's path stopped."""
     requests = (server or {}).get("requests", [])
@@ -264,9 +288,12 @@ def verdict(server: dict[str, Any] | None, client: dict[str, Any]) -> str:
             if len(good) > 2:
                 return ("The device kept reloading the playlist but never requested a "
                         "segment. The playlist may not have had enough video to start from.")
-            return ("The device received the playlist and then stopped asking: no segment "
+            text = ("The device received the playlist and then stopped asking: no segment "
                     "request and no playlist reload reached Home Assistant. The cause is on "
                     "the device (see issue #91), not the camera or the proxy.")
+            if suggests_warm_up(server, client):
+                text += f" {WARM_UP_SUGGESTION}"
+            return text
         failed = [r for r in segments if not _ok(r)]
         if failed and len(failed) == len(segments):
             return _refused(failed, "segments")

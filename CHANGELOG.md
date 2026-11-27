@@ -20,22 +20,21 @@ used.
   up with `E-005`. It happened only on a cold start: the first playlist
   request had to wake the camera, took two to five seconds, and answered with
   a playlist a few segments old. With the stream already running, the same
-  page played the same camera. On iOS 18 and earlier the player now fetches
-  the playlist itself first, which waits out the camera, and only then gives
-  the address to the video element, which gets an immediate answer from a
-  running stream; it also keeps the video visible while it loads (iOS starts
-  a muted video without a tap only while it is visible) and turns the native
-  controls on with the picture, so no empty player shows through the overlay.
-  Confirmed from a cold start on iOS 18 on an iPhone and an iPad; the start
-  takes no longer. Diagnostics list the request as `playlist warm-up`, and the
-  timeline's `path` line says `native HLS, iOS 18 mode`. Copy diagnostics,
-  from 1.4.0, is what narrowed this down.
+  page played the same camera. Copy diagnostics, from 1.4.0, is what narrowed
+  this down.
 
-  **Newer iOS, desktop browsers and Android are unchanged.** iOS 26 and later
-  report "OS 18" in Safari's user agent, so the version is read from Safari's
-  own `Version/` token or the companion app's `iOS 27.2.1`; when neither is
-  there (Chrome on iOS), the iOS 18 handling is used, which also plays on
-  newer iOS.
+  The fix is a switch, **Warm up camera before starting**, in Blink Proxy →
+  Overview → Live view, **off by default**, with an ⓘ that explains it. On, the
+  player on iPhone and iPad fetches the playlist itself first, which waits out
+  the camera, and only then gives the address to the video element, which gets
+  an immediate answer from a running stream. Confirmed from a cold start on
+  iOS 18 on an iPhone and an iPad; it adds no time to the start. Off, nothing
+  changes from 1.4.0. A switch rather than a guess at the iOS version, because
+  Safari on iOS 26 and later reports "OS 18" in its user agent. With it off,
+  an `E-005` on iPhone or iPad says where to turn it on, the diagnostics verdict
+  for that failure suggests it, and the panel's Diagnostics list offers a
+  **Turn it on** button next to the entry. Diagnostics list the request as
+  `playlist warm-up`.
 - **A camera too slow to start is reported as such.** When no playlist
   appeared within `hls_start_timeout`, the add-on let the error escape and
   answered a bare `500 Internal Server Error`, which reads as the proxy
@@ -43,8 +42,8 @@ used.
   in time (and `502` naming ffmpeg if ffmpeg died), the integration passes the
   504 on, and the diagnostics verdict says the camera may be asleep or offline.
   Seen on a driveway camera's first live view after the add-on restarted.
-- **On iOS 18 and earlier, a stream that could not be started says so at
-  once.** When the player's warm-up request is refused, the live view now ends
+- **With the warm-up on, a stream that could not be started says so at once.**
+  When the player's warm-up request is refused, the live view now ends
   immediately with a new code, `E-011`, and the HTTP status, instead of waiting
   out the 30-second start limit and showing the vaguer `E-005`.
 - **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without

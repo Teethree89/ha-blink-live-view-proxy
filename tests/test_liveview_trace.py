@@ -590,6 +590,54 @@ async def scenario_no_token_cannot_plant() -> None:
           "a session pushed out while its request was being authorised is kept", kept)
 
 
+async def scenario_settings() -> None:
+    print("\nwarm-up setting")
+    sys.modules["homeassistant.helpers.storage"].Store.saved.clear()
+    hass = FakeHass()
+    settings_view = views.BlinkLiveviewProxyPanelSettingsView(hass)
+    app = web.Application()
+    app.router.add_post("/api/blink_liveview_proxy/panel/settings", settings_view.post)
+    async with TestClient(TestServer(app)) as client:
+        url_settings = "/api/blink_liveview_proxy/panel/settings"
+        settings, _store = await views._liveview_settings(hass)
+        check(settings["hls_warm_up"] is False, "off by default")
+        on = await client.post(url_settings, data=json.dumps({"hls_warm_up": True}))
+        check(on.status == 200 and (await on.json())["settings"]["hls_warm_up"] is True,
+              "the panel can turn it on")
+        saved = sys.modules["homeassistant.helpers.storage"].Store.saved.get(views.SETTINGS_STORE_KEY)
+        check(saved == {"hls_warm_up": True}, "and it is stored, so a restart keeps it", saved)
+        wrong = await client.post(url_settings, data=json.dumps({"hls_warm_up": 1}))
+        unknown = await client.post(url_settings, data=json.dumps({"something": True}))
+        check(wrong.status == 400 and unknown.status == 400,
+              "a value that is not true or false, or an unknown setting, is refused")
+    fresh = FakeHass()
+    reloaded, _store = await views._liveview_settings(fresh)
+    check(reloaded["hls_warm_up"] is True, "a reload reads it back")
+
+    real_snapshot_style = views._snapshot_style
+    views._snapshot_style = lambda _hass, _camera: ""  # needs Home Assistant proper
+    try:
+        page_off = views._player_html(hass, SLUG, {"slug": SLUG}, "tok", False)
+        page_on = views._player_html(hass, SLUG, {"slug": SLUG}, "tok", True)
+    finally:
+        views._snapshot_style = real_snapshot_style
+    check("const warmUp = false;" in page_off and "const warmUp = true;" in page_on,
+          "the player page is rendered with the switch's state")
+
+    cold = {"requests": [{"kind": "playlist", "status": 200, "at": 0.0, "name": ""},
+                         {"kind": "playlist", "status": 200, "at": 2.5, "name": ""}]}
+    client_report = {"transport": "hls", "code": "E-005"}
+    check(trace_mod.suggests_warm_up(cold, client_report)
+          and "Warm up camera before starting" in trace_mod.verdict(cold, client_report),
+          "the #91 shape without a warm-up suggests turning it on")
+    warmed = {"requests": [{"kind": "playlist", "status": 200, "at": 0.0, "name": "warm-up"}] + cold["requests"]}
+    check(not trace_mod.suggests_warm_up(warmed, client_report)
+          and "Warm up camera" not in trace_mod.verdict(warmed, client_report),
+          "but not when the warm-up already ran")
+    check(not trace_mod.suggests_warm_up(cold, {"transport": "mse", "code": "E-002"}),
+          "and never on the MPEG-TS path")
+
+
 async def run_all() -> None:
     await scenario_issue_91()
     await scenario_refused_playlist()
@@ -597,6 +645,7 @@ async def run_all() -> None:
     await scenario_mpegts_not_ready()
     await scenario_boundaries()
     await scenario_history()
+    await scenario_settings()
     await scenario_no_token_cannot_plant()
 
 
