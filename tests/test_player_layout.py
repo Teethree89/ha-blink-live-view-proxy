@@ -313,6 +313,16 @@ def test_video_never_invisible() -> None:
           "no video rule makes it fully transparent")
     check(any("background:transparent" in body for body in bases),
           "before it plays, the snapshot behind it stays in view")
+    tag = re.search(r'<video id="video"[^>]*>', page).group(0)
+    check("controls" not in tag,
+          "the live video starts without native controls, so no empty player shows while it loads")
+    check(page.count('video.classList.add("ready");\n      video.controls = true;') == 1
+          and page.count('video.classList.add("ready");\n    video.controls = true;') == 1,
+          "they come on with the picture, on both paths")
+    check("video.controls = false;\n  video.removeAttribute(\"src\");" in page,
+          "and go off again when the player is torn down")
+    check('overlay.addEventListener("click"' in page and 'startsWith("Tap play")) video.play()' in page,
+          "a tap on the overlay still starts playback when iOS asks for one")
 
 
 def test_diagnostics() -> None:

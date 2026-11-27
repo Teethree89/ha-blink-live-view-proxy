@@ -51,7 +51,9 @@ used.
   loads.** iOS starts a muted video without a tap only while it is visible,
   and the page made the video visible only once it was playing. A precaution
   taken while looking into #91, not its cause; a transparent background keeps
-  the snapshot behind it in view.
+  the snapshot behind it in view. The native video controls now come on with
+  the picture, so iOS no longer draws an empty player (play button, icons and a
+  `00:00` bar) through the loading overlay while the camera wakes.
 
 ### Added
 

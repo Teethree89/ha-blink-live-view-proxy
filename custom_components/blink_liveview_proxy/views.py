@@ -1371,7 +1371,7 @@ body.sheet-open video {{
 </head>
 <body>
 <main class="stage">
-  <video id="video" muted playsinline autoplay controls></video>
+  <video id="video" muted playsinline autoplay></video>
   <section id="overlay" class="overlay">
     <div class="panel">
       <div id="spinner" class="spinner"></div>
@@ -2091,6 +2091,12 @@ function stopPlayer() {{
     try {{ player.destroy(); }} catch (err) {{}}
     player = null;
   }}
+  // Native controls only once there is a picture. The video stays visible
+  // while it loads (iOS will not start a muted video it counts as hidden), so
+  // with controls on from the start iOS drew an empty player - a play button,
+  // mute and full-screen icons and a 00:00 bar - through the loading overlay.
+  // A tap on the overlay already starts playback when iOS asks for one.
+  video.controls = false;
   video.removeAttribute("src");
   video.load();
 }}
@@ -2576,6 +2582,7 @@ async function startPlayer() {{
     video.onplaying = () => {{
       disarmStartWatchdog();
       video.classList.add("ready");
+      video.controls = true;
       overlay.classList.add("hidden");
       actions.hidden = true;
       liveActions.hidden = false;
@@ -2647,6 +2654,7 @@ async function startPlayer() {{
   video.onplaying = () => {{
     disarmStartWatchdog();
     video.classList.add("ready");
+    video.controls = true;
     overlay.classList.add("hidden");
     actions.hidden = true;
     liveActions.hidden = false;
