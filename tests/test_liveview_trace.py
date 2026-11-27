@@ -241,6 +241,11 @@ async def scenario_issue_91() -> None:
     async with TestClient(TestServer(build_app(hass))) as client:
         first = await client.get(url("hls/index.m3u8"))
         body = await first.text()
+        check(
+            first.headers.get("Content-Type") == "application/vnd.apple.mpegurl",
+            "the playlist's type has no charset (Apple mediastreamvalidator 451001, #91)",
+            first.headers.get("Content-Type"),
+        )
         await client.get(url("hls/index.m3u8"))
         await client.post(url("stop"))
         check(

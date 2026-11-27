@@ -3196,11 +3196,15 @@ class BlinkLiveviewProxyHlsPlaylistView(HomeAssistantView):
             return web.Response(
                 # The session rides along on each segment URI so those requests
                 # land in the same trace as the playlist that listed them.
-                text=tokenise_playlist(
+                #
+                # Bytes, not text: given text, aiohttp sends the type as
+                # "application/vnd.apple.mpegurl; charset=utf-8", which Apple's
+                # mediastreamvalidator rejects as an illegal MIME type (451001).
+                body=tokenise_playlist(
                     text,
                     request.query.get("token", ""),
                     session=session if valid_session(session) else "",
-                ),
+                ).encode("utf-8"),
                 content_type="application/vnd.apple.mpegurl",
                 headers={"Cache-Control": "no-store"},
             )

@@ -44,5 +44,9 @@ for key in (
     if value:
         config[key] = value
 
+# Only when it was set, so the proxy's own default applies otherwise.
+if isinstance(options.get("hls_keyframe_segments"), bool):
+    config["hls_keyframe_segments"] = options["hls_keyframe_segments"]
+
 json.dump(config, sys.stdout, indent=2)
 print()

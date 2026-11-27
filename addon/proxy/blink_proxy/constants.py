@@ -78,6 +78,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Segments the first playlist must list before it is served; see
     # HlsSession.wait_ready. 0 serves it as soon as ffmpeg writes it.
     "hls_min_segments": 3,
+    # Cut HLS segments only at keyframes instead of every second. Slower to
+    # start, but every segment decodes on its own; see HlsSession.start.
+    "hls_keyframe_segments": False,
     "liveview_cache_dir": ".runtime/blink-liveview-proxy/liveviews",
     # Local clips are fetched from Blink once and kept here, with the first
     # frame of each cut as a thumbnail. Oldest files go first past the cap.

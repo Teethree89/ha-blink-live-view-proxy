@@ -173,6 +173,13 @@ async def main():
         "split_by_time" in option(args, "-hls_flags").split("+"),
         "split_by_time is in -hls_flags so segments are 1 s, not one GOP",
     )
+    keyframed = await record_args({"hls_keyframe_segments": True})
+    check(
+        "hls_keyframe_segments cuts only at keyframes",
+        "split_by_time" not in option(keyframed, "-hls_flags").split("+")
+        and option(keyframed, "-c") == "copy",
+        "split_by_time is dropped and the stream is still copied (Apple 541007, #91)",
+    )
     check(
         "no encoder is configured at all",
         not any(a.startswith("-c:v") or a == "libx264" for a in args),

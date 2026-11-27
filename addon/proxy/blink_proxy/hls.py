@@ -85,7 +85,16 @@ class HlsSession:
         # playlist can declare a 1 s target and iOS starts after ~3 s instead of
         # ~12. Only every fourth segment opens on a keyframe; a player that lands
         # mid-group waits for the next one, so the window keeps 8 s available.
+        #
+        # Apple's mediastreamvalidator calls that a MUST-fix (541007: video
+        # segment does not contain an IDR frame), and iOS 18 never starts the
+        # stream (#91). hls_keyframe_segments cuts only at keyframes instead:
+        # every segment decodes on its own, at the cost of segments one
+        # keyframe interval long (2-4 s on Blink) and a slower start.
         codec_args = ["-c", "copy"]
+        hls_flags = ["delete_segments", "omit_endlist", "program_date_time"]
+        if not bool(self.manager.config.get("hls_keyframe_segments", False)):
+            hls_flags.append("split_by_time")
 
         log_handle = open(self.log_path, "wb")
         try:
@@ -118,7 +127,7 @@ class HlsSession:
                 "-hls_list_size",
                 "8",
                 "-hls_flags",
-                "delete_segments+omit_endlist+program_date_time+split_by_time",
+                "+".join(hls_flags),
                 "-hls_segment_filename",
                 str(segment_pattern),
                 str(self.playlist),
@@ -158,14 +167,12 @@ class HlsSession:
         """Wait until the playlist is worth serving.
 
         Not merely until it exists. ffmpeg writes the playlist as soon as the
-        first one-second segment is cut, and a live playlist that short is one
-        a player may not start from: the HLS spec has it begin no closer than
-        three target durations to the end. iOS 27 starts anyway.
-        iOS 18 reads that playlist, reloads it once, and then waits for ever
-        without asking for a segment or reporting an error - issue #91, seen on
-        two iPhones on iOS 18.5 and 18.7.5 and reproduced on a rented iOS 18
-        device against a Blink Mini that plays on iOS 27. So the first playlist
-        waits for hls_min_segments segments, about two seconds longer.
+        first segment is cut, and a live playlist that short is one a player
+        should not start from: the HLS spec has it begin no closer than three
+        target durations to the end. So the first playlist waits for
+        hls_min_segments segments, about two seconds longer. Tried for #91
+        (iOS 18 reads the playlist and never requests a segment); on its own
+        it did not fix that.
 
         If they do not arrive within hls_start_timeout, whatever playlist
         exists is served rather than failing a live view that may yet play.

@@ -280,13 +280,22 @@ first segment before failing the request.
 
 `hls_min_segments` (default `3`) is how many segments the playlist must list
 before it is served the first time. ffmpeg writes the playlist as soon as the
-first one-second segment exists, and iOS 18 will not start from a live playlist
-that short: it reads it, reloads once, and waits without ever asking for a
-segment or reporting an error ([#91]). Three segments cost about two seconds of
-start-up and satisfy the HLS rule that a player begins at least three target
-durations from the end. If the camera has not produced that many by
-`hls_start_timeout`, the playlist is served with what it has rather than failed.
-`0` serves it the moment it exists, which is how it worked before.
+first segment exists, and a live playlist that short is one the HLS spec says a
+player should not start from: it begins at least three target durations from
+the end. Three segments cost about two seconds of start-up. It was tried for
+iOS 18 ([#91]) and on its own did not make it play. If the camera has not
+produced that many by `hls_start_timeout`, the playlist is served with what it
+has rather than failed. `0` serves it the moment it exists, which is how it
+worked before.
+
+`hls_keyframe_segments` (default `false`) cuts segments only at the camera's
+keyframes instead of every second. Every segment then starts with a keyframe,
+which Apple requires (its `mediastreamvalidator` reports 541007, "video segment
+does not contain an IDR frame", without it), at the cost of segments one
+keyframe interval long and a slower start: about 6 s on a Blink Mini, which
+sends a keyframe every 2 s, and about 12 s on cameras that send one every 4 s.
+On the add-on it is optional and not shown by default; add
+`hls_keyframe_segments: true` in the add-on's Configuration, "Edit in YAML".
 
 [#91]: https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91
 

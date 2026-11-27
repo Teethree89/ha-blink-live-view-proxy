@@ -912,7 +912,9 @@ async def hls_playlist_handler(request: web.Request) -> web.Response:
     token = request.query.get("token") if request.app.get("proxy_token") else None
     text = rewrite_playlist_for_token(text, token)
     return web.Response(
-        text=text,
+        # Bytes, not text: given text, aiohttp appends "; charset=utf-8" to the
+        # type, which Apple's mediastreamvalidator rejects (451001).
+        body=text.encode("utf-8"),
         content_type="application/vnd.apple.mpegurl",
         headers={"Cache-Control": "no-store"},
     )

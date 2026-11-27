@@ -56,6 +56,10 @@ schema:
   # out. (0.8.1 is deliberately not that release: it shipped days after 0.8.0,
   # so nothing had aged out yet.)
   low_latency: bool?
+  # Cut HLS segments only at keyframes (issue #91: iOS 18 will not start the
+  # stream otherwise). Optional and absent from `options:`, so it is only
+  # written by someone who adds it in the add-on's YAML editor.
+  hls_keyframe_segments: bool?
 ports:
   8088/tcp: null
 ports_description:

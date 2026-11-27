@@ -11,18 +11,33 @@ used.
 
 ## [Unreleased]
 
+Work on [#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91)
+(reported by @ussoccer18): on iOS 18 the HLS live view reads the playlist and
+then never requests a segment, ending in `E-005`. Reproduced on iOS 18.3, 18.5,
+18.6 and 18.7.5, in Safari and Chrome, over plain HTTP and Nabu Casa, with a
+Blink Mini that plays on iOS 27. Apple's `mediastreamvalidator` found two
+"must fix" issues in the stream, both addressed below. Which of them iOS 18
+trips on is not confirmed yet.
+
 ### Fixed
 
-- **Live view never started on iPhones running iOS 18**
-  ([#91](https://github.com/Teethree89/ha-blink-live-view-proxy/issues/91),
-  reported by @ussoccer18). The add-on served the first HLS playlist as soon as
-  ffmpeg had cut one one-second segment. iOS 27 starts from that;
-  iOS 18 reads it, reloads it once, and then waits without asking for a segment
-  or raising an error, until the page gives up with `E-005`. Seen on iOS 18.3,
-  18.5 and 18.7.5, in Safari and Chrome, over plain HTTP and Nabu Casa, with a
-  Blink Mini that plays on iOS 27. The first playlist now waits for three
-  segments (`hls_min_segments`), which adds about two seconds to the start on
-  every device. Only the add-on changed.
+- **The HLS playlist is served as `application/vnd.apple.mpegurl`**, without
+  the `; charset=utf-8` that aiohttp appended. Apple's validator rejects the
+  latter as an illegal MIME type (451001). Integration and add-on both changed.
+
+### Added
+
+- **`hls_keyframe_segments`** (default off; add-on option, optional). Cuts HLS
+  segments only at the camera's keyframes, so every segment decodes on its own.
+  Off, ffmpeg cuts a segment every second with `split_by_time`, and on a Blink
+  Mini half the segments start without a keyframe, which Apple's validator
+  calls a must-fix (541007). On, segments are one keyframe interval long (2 s
+  on a Mini, 4 s on most Blink cameras) and the live view starts later.
+- **`hls_min_segments`** (default `3`). The first playlist is served once it
+  lists this many segments rather than as soon as ffmpeg writes it, meeting the
+  HLS rule that a player starts at least three target durations from the end.
+  Adds about two seconds to the start. On its own this did not make iOS 18
+  play; `0` restores the old behaviour.
 
 ## [1.4.0] — 2026-11-25
 
